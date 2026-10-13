@@ -1,12 +1,13 @@
 // Thin wrapper around the server API. Every function returns parsed JSON or
 // throws an Error whose message is safe to show to the user.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 const UNREACHABLE = 'Cannot reach the server. Check that the API is running on port 4000.';
 
 async function request(path, options) {
   let res;
   try {
-    res = await fetch(`/api${path}`, options);
+     res = await fetch(`${API_BASE_URL}/api${path}`, options);
   } catch {
     throw new Error(UNREACHABLE);
   }
