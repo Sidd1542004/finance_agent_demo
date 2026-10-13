@@ -1,3 +1,4 @@
+import cors from 'cors';
 import dns from 'node:dns';
 import express from 'express';
 import mongoose from 'mongoose';
@@ -34,10 +35,20 @@ process.on('uncaughtException', (err) => {
 });
 
 const app = express();
+
 app.disable('x-powered-by');
+
+const allowedOrigins = [
+  'https://finance-agent-demo-re1g.vercel.app',
+  'http://localhost:5173',
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+}));
+
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', api);
-
 // After `npm run build`, the server also serves the dashboard, so one port is enough.
 const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
 if (fs.existsSync(path.join(clientDist, 'index.html'))) {
