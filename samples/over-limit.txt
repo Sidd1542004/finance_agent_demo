@@ -1,0 +1,22 @@
+Bluegum IT Services Pty Ltd
+ABN 36 600 733 916
+Level 3, 210 George Street, Brisbane QLD 4000
+billing@bluegumit.example
+
+TAX INVOICE
+
+Invoice number: BG-2026-0914
+Invoice date: 25 Sep 2026
+Due date: 25 Oct 2026
+Purchase order: PO-2043
+Bill to: Meridian Logistics Pty Ltd
+
+Item          Description                             Qty    Unit price        Amount
+LAP-14-I5     14-inch laptop, i5, 16GB                 10     $1,450.00    $14,500.00
+DOCK-USBC     USB-C docking station                    10       $189.00     $1,890.00
+
+Subtotal (ex GST): $16,390.00
+GST (10%): $1,639.00
+Total (inc GST): $18,029.00
+
+Payment terms: 30 days from invoice date

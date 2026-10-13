@@ -1,0 +1,27 @@
+TAX INVOICE
+
+Shree Ganesh Traders
+Plot 12, MIDC Industrial Area, Pune, Maharashtra 411019
+GSTIN: 27AAPFU0939F1ZV
+
+Bill To:
+Meridian Logistics India Pvt Ltd
+Office 4, Baner Road, Pune, Maharashtra 411045
+GSTIN: 27AABCM1234F1Z5
+
+Invoice No: SGT/2026/0417
+Invoice Date: 05/10/2026
+Due Date: 04/11/2026
+Place of Supply: Maharashtra (27)
+Currency: INR
+
+Item Code  Description               HSN   Qty  Rate      Amount
+CTN-5PLY   Corrugated carton 5-ply   4819  200  45.00     9,000.00
+TAPE-48    Packing tape 48mm         3919  50   60.00     3,000.00
+
+Subtotal: 12,000.00
+CGST @ 9%: 1,080.00
+SGST @ 9%: 1,080.00
+Total: 14,160.00
+
+Amount in words: Rupees Fourteen Thousand One Hundred Sixty Only

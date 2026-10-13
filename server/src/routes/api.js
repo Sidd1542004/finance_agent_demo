@@ -1,0 +1,159 @@
+import { Router } from 'express';
+import mongoose from 'mongoose';
+import multer from 'multer';
+import { extractText, getDocumentProxy } from 'unpdf';
+
+import { config } from '../config.js';
+import { Invoice, Vendor, PurchaseOrder, GoodsReceipt } from '../models/index.js';
+import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../seed/data.js';
+import { resetEverything } from '../seed/seed.js';
+import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup } from '../services/invoices.js';
+import { HttpError } from '../services/runs.js';
+import { registerFinanceRoutes } from './finance.js';
+
+const MAX_TEXT = 200_000;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+
+// Express 4 does not catch errors from async handlers on its own.
+const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+
+const requireId = (req) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'That invoice no longer exists.');
+  return req.params.id;
+};
+
+async function textFromUpload(file) {
+  const name = file.originalname || 'upload';
+  const isPdf = file.mimetype === 'application/pdf' || /\.pdf$/i.test(name);
+  const isText = file.mimetype?.startsWith('text/') || /\.(txt|text|csv|md)$/i.test(name);
+  if (isPdf) {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(file.buffer));
+      const { text } = await extractText(pdf, { mergePages: true });
+      return text || '';
+    } catch (err) {
+      console.error(`PDF could not be read (${name}):`, err?.message || err);
+      throw new HttpError(400, `"${name}" could not be opened as a PDF. It may be damaged or password protected.`);
+    }
+  }
+  if (isText) return file.buffer.toString('utf8');
+  throw new HttpError(400, 'Upload a PDF or a plain text file.');
+}
+
+export const api = Router();
+
+api.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    reader: { mode: extractor.mode, model: extractor.model },
+    policy: config.policy,
+    abr: Boolean(abrLookup),
+    roles: { reviewers: config.roles.reviewers.length > 0, approvers: config.roles.approvers.length > 0, payers: config.roles.payers.length > 0 },
+    demoMode: config.demoMode,
+  });
+});
+
+api.get('/samples', (req, res) => {
+  res.json(
+    sampleInvoices.map((s) => ({ id: s.id, title: s.title, hint: s.hint, vendorName: s.vendor.name, total: sampleTotals(s).total })),
+  );
+});
+
+// Suppliers, purchase orders and deliveries the agent checks against.
+api.get('/reference', wrap(async (req, res) => {
+  const [vendors, purchaseOrders, goodsReceipts] = await Promise.all([
+    Vendor.find().sort({ name: 1 }).lean(),
+    PurchaseOrder.find().sort({ poNumber: 1 }).lean(),
+    GoodsReceipt.find().sort({ poNumber: 1 }).lean(),
+  ]);
+  res.json({ vendors, purchaseOrders, goodsReceipts });
+}));
+
+api.get('/invoices', wrap(async (req, res) => {
+  const invoices = await Invoice.find()
+    .select('status source createdAt extracted.vendorName extracted.invoiceNumber extracted.total extracted.currency decision checks.id checks.status approval.decision due match.score.total recovery.status')
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .lean();
+  res.json(invoices);
+}));
+
+api.get('/invoices/:id', wrap(async (req, res) => {
+  res.json(await getInvoiceDetail(requireId(req)));
+}));
+
+// Add an invoice (sample, pasted text or uploaded file) and run the agent on it.
+api.post('/invoices', upload.single('file'), wrap(async (req, res) => {
+  let source;
+  let rawText;
+
+  if (req.file) {
+    source = { kind: 'upload', filename: req.file.originalname };
+    rawText = await textFromUpload(req.file);
+  } else if (req.body?.sampleId) {
+    const sample = findSample(req.body.sampleId);
+    if (!sample) throw new HttpError(400, 'That sample does not exist.');
+    source = { kind: 'sample', sampleId: sample.id, filename: `${sample.invoiceNumber}.txt` };
+    rawText = renderInvoiceText(sample);
+  } else if (typeof req.body?.text === 'string') {
+    source = { kind: 'paste' };
+    rawText = req.body.text;
+  } else {
+    throw new HttpError(400, 'Send a file, some invoice text or a sample to process.');
+  }
+
+  rawText = rawText.replace(/\u0000/g, '').trim();
+  if (!rawText) {
+    throw new HttpError(400, req.file ? 'No text could be read from that file. If it is a scan or a photo, it needs OCR, which this prototype does not include.' : 'The invoice text is empty.');
+  }
+  if (rawText.length > MAX_TEXT) throw new HttpError(400, 'That is too much text for one invoice.');
+
+  const invoice = await Invoice.create({ source, rawText });
+  await processInvoice(invoice);
+  res.status(201).json(await getInvoiceDetail(invoice._id));
+}));
+
+// Run the agent again, for example after fixing the Groq key or receiving the missing goods.
+api.post('/invoices/:id/rerun', wrap(async (req, res) => {
+  res.json(await performInvoiceAction(requireId(req), 'rerun', { decidedBy: 'Reviewer', ...(req.body || {}) }));
+}));
+
+// Every person's action on an invoice. The backend checks the status, the
+// person's role and the required note; see agent/finance/lifecycle.js.
+api.post('/invoices/:id/actions/:action', wrap(async (req, res) => {
+  res.json(await performInvoiceAction(requireId(req), req.params.action, req.body || {}));
+}));
+
+// Earlier API: { decision: approve | approve_received | reject, decidedBy, note }.
+api.post('/invoices/:id/approval', wrap(async (req, res) => {
+  res.json(await applyHumanDecision(requireId(req), req.body || {}));
+}));
+
+// Overdue and due-soon invoices, and the cash needed.
+api.get('/payables', wrap(async (req, res) => {
+  res.json(await getPayables());
+}));
+
+api.post('/reset', wrap(async (req, res) => {
+  if (!config.demoMode) throw new HttpError(403, 'Reset is only available in demo mode.');
+  await resetEverything();
+  res.json({ ok: true });
+}));
+
+registerFinanceRoutes(api, { upload });
+
+api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
+
+// eslint-disable-next-line no-unused-vars
+api.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'That file is larger than 5 MB.' : 'The upload could not be read.';
+    return res.status(400).json({ error: message });
+  }
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+  if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'That is too much text.' });
+  if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'The request was not valid JSON.' });
+  console.error(err);
+  res.status(500).json({ error: 'Something went wrong on the server. Check the server log.' });
+});

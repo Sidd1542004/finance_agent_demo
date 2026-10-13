@@ -1,0 +1,23 @@
+Harbour Office Supplies Pty Ltd
+ABN 57 600 410 275
+14 Wharf Street, Fremantle WA 6160
+accounts@harbouroffice.example
+
+TAX INVOICE
+
+Invoice number: HOS-10482
+Invoice date: 14 Sep 2026
+Due date: 14 Oct 2026
+Purchase order: PO-2041
+Bill to: Meridian Logistics Pty Ltd
+
+Item          Description                             Qty    Unit price        Amount
+PAP-A4-80     A4 copy paper 80gsm, carton              20        $42.00       $840.00
+TON-HP-58A    Toner cartridge HP 58A                    5        $79.00       $395.00
+PEN-BLK-50    Ballpoint pens black, box of 50           4        $10.00        $40.00
+
+Subtotal (ex GST): $1,275.00
+GST (10%): $127.50
+Total (inc GST): $1,402.50
+
+Payment terms: 30 days from invoice date

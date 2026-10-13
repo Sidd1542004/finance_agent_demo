@@ -1,0 +1,36 @@
+// Loads the sample suppliers, purchase orders and goods receipts.
+// Run with `npm run seed` (wipes everything), or let the server do it on first start.
+
+import mongoose from 'mongoose';
+import { pathToFileURL } from 'node:url';
+import { config } from '../config.js';
+import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report } from '../models/index.js';
+import { vendors, purchaseOrders, goodsReceipts } from './data.js';
+
+export async function seedReferenceData() {
+  await Promise.all([Vendor.deleteMany({}), PurchaseOrder.deleteMany({}), GoodsReceipt.deleteMany({})]);
+  await Vendor.insertMany(vendors);
+  await PurchaseOrder.insertMany(purchaseOrders);
+  await GoodsReceipt.insertMany(goodsReceipts);
+}
+
+export async function seedIfEmpty() {
+  if ((await Vendor.countDocuments()) === 0) {
+    await seedReferenceData();
+    return true;
+  }
+  return false;
+}
+
+export async function resetEverything() {
+  await Promise.all([Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report].map((m) => m.deleteMany({})));
+  await seedReferenceData();
+}
+
+// Run directly: node src/seed/seed.js
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await mongoose.connect(config.mongoUri);
+  await resetEverything();
+  console.log(`Sample data loaded: ${vendors.length} suppliers, ${purchaseOrders.length} purchase orders, ${goodsReceipts.length} goods receipts. Invoices, supplier emails, bank statements and reports cleared.`);
+  await mongoose.disconnect();
+}

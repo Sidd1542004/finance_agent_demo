@@ -1,0 +1,21 @@
+Coastal Print & Sign Pty Ltd
+ABN 11 111 111 111
+5 Marina Parade, Wollongong NSW 2500
+hello@coastalprint.example
+
+TAX INVOICE
+
+Invoice number: CPS-0388
+Invoice date: 29 Sep 2026
+Due date: 13 Oct 2026
+Purchase order: PO-2099
+Bill to: Meridian Logistics Pty Ltd
+
+Item          Description                             Qty    Unit price        Amount
+BAN-PVC-3M    PVC banner 3m, printed                    4       $185.00       $740.00
+
+Subtotal (ex GST): $740.00
+GST (10%): $74.00
+Total (inc GST): $814.00
+
+Payment terms: 30 days from invoice date

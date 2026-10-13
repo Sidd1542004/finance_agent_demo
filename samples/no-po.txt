@@ -1,0 +1,20 @@
+Bluegum IT Services Pty Ltd
+ABN 36 600 733 916
+Level 3, 210 George Street, Brisbane QLD 4000
+billing@bluegumit.example
+
+TAX INVOICE
+
+Invoice number: BG-2026-0951
+Invoice date: 2 Oct 2026
+Due date: 1 Nov 2026
+Bill to: Meridian Logistics Pty Ltd
+
+Item          Description                             Qty    Unit price        Amount
+SUP-HR-02     On-site support, per hour                 6       $140.00       $840.00
+
+Subtotal (ex GST): $840.00
+GST (10%): $84.00
+Total (inc GST): $924.00
+
+Payment terms: 30 days from invoice date

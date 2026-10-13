@@ -1,0 +1,22 @@
+Harbour Office Supplies Pty Ltd
+ABN 57 600 410 275
+14 Wharf Street, Fremantle WA 6160
+accounts@harbouroffice.example
+
+TAX INVOICE
+
+Invoice number: HOS-10517
+Invoice date: 26 Sep 2026
+Due date: 26 Oct 2026
+Purchase order: PO-2044
+Bill to: Meridian Logistics Pty Ltd
+
+Item          Description                             Qty    Unit price        Amount
+CHR-ERG-01    Ergonomic task chair                      6       $264.60     $1,587.60
+DSK-SIT-16    Sit-stand desk 1600mm                     2       $520.00     $1,040.00
+
+Subtotal (ex GST): $2,627.60
+GST (10%): $262.76
+Total (inc GST): $2,890.36
+
+Payment terms: 30 days from invoice date

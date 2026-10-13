@@ -1,0 +1,22 @@
+Southern Cross Pallets Pty Ltd
+ABN 37 600 518 342
+88 Depot Road, Dandenong South VIC 3175
+ar@southerncrosspallets.example
+
+TAX INVOICE
+
+Invoice number: SCP-7731
+Invoice date: 18 Sep 2026
+Due date: 18 Oct 2026
+Purchase order: PO-2042
+Bill to: Meridian Logistics Pty Ltd
+
+Item          Description                             Qty    Unit price        Amount
+PAL-STD-1200  Standard timber pallet 1200 x 1000       12        $38.50       $462.00
+WRAP-500      Stretch wrap 500mm roll                  30         $9.20       $276.00
+
+Subtotal (ex GST): $738.00
+GST (10%): $73.80
+Total (inc GST): $811.80
+
+Payment terms: 30 days from invoice date
