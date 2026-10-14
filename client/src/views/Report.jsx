@@ -127,9 +127,39 @@ function ReportDetail({ data, fresh }) {
         <section className="panel">
           <div className="panel-head">
             <h2>Summary</h2>
-            <a className="btn btn-outline" href={`/api/reports/${report._id}/csv`} download>
-              Download figures (CSV)
-            </a>
+            
+<button
+  className="btn btn-outline"
+  type="button"
+  onClick={async () => {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/api/reports/${report._id}/csv`
+      );
+
+      if (!response.ok) {
+        throw new Error(`CSV download failed: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+
+      link.href = url;
+      link.download = 'month-end-report.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('CSV download error:', error);
+      alert('CSV download failed. Please check the browser console.');
+    }
+  }}
+>
+  Download figures (CSV)
+</button>
+
           </div>
           <p className="commentary">{c.text}</p>
           <p className="hint">
