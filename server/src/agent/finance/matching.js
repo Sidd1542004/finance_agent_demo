@@ -24,11 +24,38 @@
 // approves anything. Must-pass checks (duplicate, arithmetic, quantity beyond
 // what was received, ...) are separate and are not averaged away by the score.
 
-import { cents, isNum, normaliseAbn, namesMatch } from './rules.js';
+import { cents, isNum, normaliseAbn, namesEqual } from './rules.js';
 import { fmtMoney } from './validation.js';
 
 export const WEIGHTS = { supplier: 20, items: 20, quantity: 20, price: 20, amounts: 10, tax: 10 };
 const LABELS = { supplier: 'Supplier', items: 'Items', quantity: 'Quantity', price: 'Unit price', amounts: 'Amounts', tax: 'Tax' };
+
+// A PO reference without case, punctuation, spaces or a leading "PO":
+// "PO-0011", "PO - 0011", "p.o. 0011" and "0011" all become "0011".
+// Leading zeros are kept, so "PO-11" is not "0011". Null when there is no digit.
+export function poKey(reference) {
+  const k = String(reference ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^PO(?=\d)/, '');
+  return /\d/.test(k) ? k : null;
+}
+
+/**
+ * Which purchase order does the reference printed on the invoice mean?
+ * An exact match first; otherwise the one PO whose normalised number is the
+ * same. Never more than one: if the normalised reference fits several POs it is
+ * ambiguous and none is chosen. Only the number is compared, never an amount,
+ * and the PO's supplier is still checked afterwards like any other PO.
+ * @returns { po, how: 'exact' | 'normalised' | 'ambiguous' | null, candidates }
+ */
+export function resolvePurchaseOrder(reference, purchaseOrders) {
+  const ref = String(reference ?? '').trim().toUpperCase();
+  if (!ref) return { po: null, how: null, candidates: [] };
+  const exact = (purchaseOrders || []).filter((p) => String(p.poNumber).toUpperCase() === ref);
+  if (exact.length === 1) return { po: exact[0], how: 'exact', candidates: exact };
+  const key = poKey(ref);
+  const hits = key ? (purchaseOrders || []).filter((p) => poKey(p.poNumber) === key) : [];
+  if (hits.length === 1) return { po: hits[0], how: 'normalised', candidates: hits };
+  return { po: null, how: hits.length > 1 ? 'ambiguous' : null, candidates: hits };
+}
 export const DESCRIPTION_MATCH = 0.6;
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -86,7 +113,7 @@ function supplierScore(extracted, vendor, po) {
   if (extracted.abn && normaliseAbn(po.vendorAbn) === extracted.abn) return { value: 1, detail: `ABN matches ${po.vendorName}.` };
   if (extracted.abn) return { value: 0, detail: `The invoice ABN is not ${po.vendorName}'s ABN.` };
   if (vendor && normaliseAbn(vendor.abn) === normaliseAbn(po.vendorAbn)) return { value: 0.75, detail: `Matched to ${po.vendorName} through the supplier record (no ABN on the invoice).` };
-  if (namesMatch(po.vendorName, extracted.vendorName)) return { value: 0.5, detail: `Name matches ${po.vendorName}, but there is no ABN to confirm it.` };
+  if (namesEqual(po.vendorName, extracted.vendorName)) return { value: 0.5, detail: `Name matches ${po.vendorName}, but there is no ABN to confirm it.` };
   return { value: 0, detail: `The invoice supplier does not match ${po.vendorName}.` };
 }
 
@@ -100,8 +127,10 @@ function supplierScore(extracted, vendor, po) {
  * @param invoicedBefore  { SKU: qty } already billed against this PO by earlier invoices
  * @param taxStatus       status of the tax_charged check: 'pass' | 'unverified' | 'fail'
  * @param arithmeticOk    whether the invoice's own sums add up
+ * @param arithmeticStatus status of the arithmetic check: 'pass' | 'unverified' | 'fail'
+ *                        (defaults from arithmeticOk)
  */
-export function matchToPo({ extracted: e, vendor, po, received = null, invoicedBefore = {}, taxStatus, arithmeticOk, policy }) {
+export function matchToPo({ extracted: e, vendor, po, received = null, invoicedBefore = {}, taxStatus, arithmeticOk, arithmeticStatus = arithmeticOk ? 'pass' : 'fail', policy }) {
   const cur = e.currency || 'AUD';
   const m = (n) => fmtMoney(n, cur);
   const tolPct = policy.priceTolerancePct;
@@ -171,7 +200,7 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
     price: { value: po ? share((l) => l.onPo && l.priceOk) : 0, detail: po ? `${lineMatches.filter((l) => l.priceOk).length} of ${lineMatches.length} line(s) are within ${tolPct}% of the PO price.` : 'No purchase order to compare with.' },
     amounts: {
       value: (arithmeticOk ? 0.5 : 0) + (subtotalAgrees ? 0.5 : 0),
-      detail: `${arithmeticOk ? 'The invoice sums add up' : "The invoice sums don't add up"}; ${po ? (subtotalAgrees ? `the subtotal agrees with the PO prices (${m(atPoPrices)})` : `at PO prices the lines come to ${m(atPoPrices)}, against a subtotal of ${m(e.subtotal)}`) : 'no PO to compare the subtotal with'}.`,
+      detail: `${arithmeticOk ? 'The invoice sums add up' : arithmeticStatus === 'unverified' ? 'The invoice sums could not be fully checked' : "The invoice sums don't add up"}; ${po ? (subtotalAgrees ? `the subtotal agrees with the PO prices (${m(atPoPrices)})` : `at PO prices the lines come to ${m(atPoPrices)}, against a subtotal of ${m(e.subtotal)}`) : 'no PO to compare the subtotal with'}.`,
     },
     tax: { value: taxStatus === 'pass' ? 1 : taxStatus === 'unverified' ? 0.5 : 0, detail: taxStatus === 'pass' ? 'Tax charged is correct.' : taxStatus === 'unverified' ? 'Tax could not be fully verified.' : 'Tax charged is wrong or missing.' },
   };
@@ -219,7 +248,8 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
   const rows = [];
   const row = (field, invoice, poValue, difference, result) => rows.push({ field, invoice, po: poValue, difference, result });
   row('Supplier', [e.vendorName, e.abn ? `ABN ${e.abn}` : e.gstin ? `GSTIN ${e.gstin}` : 'no ABN'].filter(Boolean).join(', '), po ? `${po.vendorName}, ABN ${po.vendorAbn}` : '—', '', po ? (sup.value >= 0.75 ? 'match' : sup.value > 0 ? 'check' : 'mismatch') : 'missing');
-  row('PO number', e.poNumber || 'not quoted', po?.poNumber || '—', '', po ? (e.poNumber && skuKey(e.poNumber) === skuKey(po.poNumber) ? 'match' : e.poNumber ? 'mismatch' : 'linked') : 'missing');
+  const samePo = po && e.poNumber && poKey(e.poNumber) === poKey(po.poNumber);
+  row('PO number', e.poNumber || 'not quoted', po?.poNumber || '—', samePo && skuKey(e.poNumber) !== skuKey(po.poNumber) ? 'same number, written differently' : '', po ? (samePo ? 'match' : e.poNumber ? 'mismatch' : 'linked') : 'missing');
   for (const l of lineMatches) {
     const name = l.description || l.sku || 'Item';
     row(`Item: ${name}`, [l.sku, l.description].filter(Boolean).join(' '), l.onPo ? [l.sku, l.poDescription].filter(Boolean).join(' ') : 'not on PO', l.matchedBy ? `matched by ${l.matchedBy}` : '', l.onPo ? 'match' : po ? 'mismatch' : 'missing');
@@ -237,7 +267,7 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
     row('PO value remaining', m(round2(atPoPrices)), `${m(round2(poValue - before))} of ${m(round2(poValue))}`, m(round2(poValue - before - atPoPrices)), poValue - before - atPoPrices >= -policy.roundingTolerance ? 'match' : 'mismatch');
   }
   row('Tax', m(e.gst), '—', '', taxStatus === 'pass' ? 'match' : taxStatus === 'unverified' ? 'check' : 'mismatch');
-  row('Total', m(e.total), '—', '', arithmeticOk ? 'match' : 'mismatch');
+  row('Total', m(e.total), '—', '', arithmeticOk ? 'match' : arithmeticStatus === 'unverified' ? 'check' : 'mismatch');
 
   return {
     lineMatches: lineMatches.map(({ _value, ...rest }) => rest),
@@ -253,21 +283,40 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
  * POs. Only POs that share at least one item are suggested, never on amount
  * alone. A person must confirm a suggestion; nothing is linked automatically.
  */
-export function suggestPurchaseOrders({ extracted: e, vendor, purchaseOrders, policy, limit = 3 }) {
+//
+// Every suggestion is { status: 'suggested', confirmed: false } and carries
+// `supplierOwnership`, whether the PO is known to belong to the invoice's supplier:
+//   'confirmed_by_abn'  the supplier was identified by ABN and the PO is theirs
+//   'name_only'         the supplier was identified by name only (no ABN to confirm it)
+//   'unverified'        the supplier is unknown, so the PO may be someone else's
+export function suggestPurchaseOrders({ extracted: e, vendor, vendorBy = vendor ? 'abn' : null, purchaseOrders, policy, limit = 3 }) {
   const pool = vendor ? purchaseOrders.filter((p) => normaliseAbn(p.vendorAbn) === normaliseAbn(vendor.abn)) : purchaseOrders;
+  const ownership = !vendor ? 'unverified' : vendorBy === 'abn' ? 'confirmed_by_abn' : 'name_only';
+  const who = e.vendorName ? `"${e.vendorName}"` : 'the supplier on the invoice';
   const out = [];
   for (const po of pool) {
     const r = matchToPo({ extracted: e, vendor, po, received: null, invoicedBefore: {}, taxStatus: 'unverified', arithmeticOk: true, policy });
+    // Items must match: a PO is never suggested on the amount alone.
     const items = r.score.components.find((c) => c.id === 'items');
     if (items.value === 0) continue;
     if (r.score.total < 50) continue;
     const matched = r.lineMatches.filter((l) => l.onPo);
     const how = [...new Set(matched.map((l) => l.matchedBy))].join(' and ');
+    const supplierNote =
+      ownership === 'confirmed_by_abn'
+        ? `${po.poNumber} was raised with ${po.vendorName}, the supplier identified by the invoice's ABN.`
+        : ownership === 'name_only'
+          ? `${po.poNumber} was raised with ${po.vendorName}; the invoice matches that supplier by name only, with no ABN to confirm it. Verify the supplier before linking.`
+          : `${po.poNumber} was raised with ${po.vendorName}, but ${who} is not an approved supplier, so it is not known whether this PO is theirs. Verify supplier ownership before linking it; an invoice linked to another supplier's PO cannot be approved.`;
     out.push({
       poNumber: po.poNumber,
       vendorName: po.vendorName,
+      vendorAbn: po.vendorAbn,
       score: r.score.total,
-      explanation: `${matched.length} of ${r.lineMatches.length} invoice line(s) match ${po.poNumber} by ${how}; ${r.lineMatches.filter((l) => l.priceOk).length} at the PO price; ${r.lineMatches.filter((l) => l.qtyOk).length} within the ordered quantity. Provisional score ${r.score.total}% (before checking goods received).`,
+      status: 'suggested',
+      confirmed: false,
+      supplierOwnership: ownership,
+      explanation: `Suggested, not a confirmed match. ${matched.length} of ${r.lineMatches.length} invoice line(s) match ${po.poNumber} by ${how} (never on the amount alone); ${r.lineMatches.filter((l) => l.priceOk).length} at the PO price; ${r.lineMatches.filter((l) => l.qtyOk).length} within the ordered quantity. Provisional score ${r.score.total}% (before checking goods received). ${supplierNote}`,
     });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit);

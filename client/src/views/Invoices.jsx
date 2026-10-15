@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { money, abn, day, when, STATUS, AWAITING_DECISION, TO_PAY } from '../format.js';
+import { money, abn, acn, day, when, STATUS, AWAITING_DECISION, TO_PAY } from '../format.js';
 import { Rail, CheckIcon, AuditTrail } from '../shared.jsx';
 
 // The reviewer's name is remembered on this computer so it does not have to be
@@ -502,14 +502,15 @@ function Detail({ data, fresh, busy, onAct }) {
           {invoice.match?.suggestions?.length > 0 && !invoice.matchedPo && (
             <section className="panel">
               <h2>Possible purchase orders</h2>
-              <p className="hint">The invoice quotes no purchase order the agent could use. These are suggestions only: a reviewer must link one.</p>
+              <p className="hint">The invoice quotes no purchase order the agent could use. These are suggestions, not confirmed matches: a reviewer must check and link one. Nothing is linked or approved on the amount alone.</p>
               <ul className="suggestions">
                 {invoice.match.suggestions.map((s) => (
                   <li key={s.poNumber}>
                     <strong>
                       {s.poNumber} · {s.vendorName}
                     </strong>{' '}
-                    <span className="tag">{s.score}%</span>
+                    <span className="tag">Suggested · {s.score}%</span>{' '}
+                    {s.supplierOwnership && s.supplierOwnership !== 'confirmed_by_abn' && <span className="sev sev-review">Supplier not verified</span>}
                     <p className="check-detail">{s.explanation}</p>
                   </li>
                 ))}
@@ -522,6 +523,11 @@ function Detail({ data, fresh, busy, onAct }) {
             <dl className="fields">
               <Field label="Supplier" value={e.vendorName} />
               {e.gstin ? <Field label="GSTIN" value={e.gstin} /> : <Field label="ABN" value={e.abn ? abn(e.abn) : null} />}
+              {e.acn && <Field label="ACN" value={acn(e.acn)} />}
+              {e.vatNumber && <Field label="VAT number (not an ABN)" value={e.vatNumber} />}
+              <Field label="Customer / Bill to" value={e.customerName} />
+              {e.customerAbn && <Field label="Customer ABN" value={abn(e.customerAbn)} />}
+              {e.customerAcn && <Field label="Customer ACN" value={acn(e.customerAcn)} />}
               <Field label="Invoice number" value={e.invoiceNumber} />
               <Field label="Purchase order" value={e.poNumber} />
               <Field label="Invoice date" value={e.invoiceDate ? day(e.invoiceDate) : null} />
@@ -642,33 +648,74 @@ function Detail({ data, fresh, busy, onAct }) {
   );
 }
 
+// Found and validated / found but not verified / missing / ambiguous - for a
+// tax identifier that has already been checked for a valid format (ABN, ACN).
+const fmtId = (type, value) => (type === 'ABN' ? abn(value) : type === 'ACN' ? acn(value) : value);
+const idState = (id) =>
+  !id || id.format === 'missing'
+    ? `Missing: no ${id?.type || 'tax number'} on the invoice`
+    : !id.value || id.format === 'unknown'
+      ? 'Not checked: the tax rules were not identified'
+      : id.format === 'invalid'
+        ? `Found but invalid: ${fmtId(id.type, id.value)} fails the checksum`
+        : id.verification === 'verified'
+          ? `Found and validated: ${fmtId(id.type, id.value)}, verified with the register`
+          : id.verification === 'failed'
+            ? `Found but invalid: ${fmtId(id.type, id.value)}, not active on the register`
+            : id.verification === 'not_checked'
+              ? `Found, not checked: ${fmtId(id.type, id.value)} (the tax rules were not identified, so it was not validated)`
+              : `Found, not verified: ${fmtId(id.type, id.value)} (valid format; identity not verified against the register)`;
+
+// What the agent could tell you about the purchase order match, as one of
+// the five states a reviewer needs to see at a glance.
+function poMatchStatus(invoice) {
+  if (invoice.matchedPo) {
+    const poCheck = (invoice.checks || []).find((c) => c.id === 'po_found');
+    return poCheck?.status === 'pass' ? 'Matched' : 'Needs review';
+  }
+  const resolution = invoice.match?.poResolution;
+  if (resolution?.how === 'ambiguous') return `Ambiguous: "${resolution.reference}" fits ${resolution.candidates.join(', ')}`;
+  const n = invoice.match?.suggestions?.length || 0;
+  const suggested = n === 0 ? '' : n === 1 ? 'suggested match (not confirmed)' : `${n} possible matches (not confirmed)`;
+  if (resolution?.reference) return `Not found: "${resolution.reference}" is not a known purchase order${suggested ? `; ${suggested}` : ''}`;
+  return n === 0 ? 'No match' : suggested.charAt(0).toUpperCase() + suggested.slice(1);
+}
+
 // Supplier, tax, PO and due date at a glance.
 function Summary({ invoice, exceptions }) {
   const v = invoice.validation || {};
   const id = v.identifier;
+  const acnCheck = (invoice.checks || []).find((c) => c.id === 'supplier_acn');
   const juris = { AU: 'Australia (ABN and 10% GST)', IN: 'India (GSTIN and CGST/SGST/IGST)', unknown: 'Not identified' }[v.jurisdiction?.code] || '—';
-  const verification = !id
-    ? '—'
-    : id.format === 'missing'
-      ? `No ${id.type} on the invoice`
-      : id.format === 'invalid'
-        ? `${id.type} ${id.value} is not valid`
-        : id.verification === 'verified'
-          ? `${id.type} ${id.value}, verified with the register`
-          : id.verification === 'failed'
-            ? `${id.type} ${id.value}, not active on the register`
-            : `${id.type} ${id.value}, valid format, unverified`;
   const due = invoice.due;
   const days = due?.date ? daysFromToday(due.date) : null;
   const closed = ['payment_completed', 'rejected', 'cancelled'].includes(invoice.status);
+  const e = invoice.extracted || {};
+  const supplierValue = invoice.supplier?.name
+    ? `${invoice.supplier.name} (matched by ${invoice.supplier.by === 'abn' ? 'ABN' : 'name only'})`
+    : invoice.supplier?.conflict
+      ? e.abn
+        ? `Ambiguous: the name matches ${invoice.supplier.conflict.name}, but the ABN does not`
+        : `Ambiguous: the name is similar to ${invoice.supplier.conflict.name}, with no ABN to confirm it`
+      : null;
+  const poStatus = poMatchStatus(invoice);
   return (
     <section className="panel summary">
       <h2>Summary</h2>
       <dl className="fields">
         <Field label="Tax rules" value={juris} />
-        <Field label="Supplier tax number" value={verification} />
-        <Field label="Approved supplier" value={invoice.supplier ? `${invoice.supplier.name} (matched by ${invoice.supplier.by === 'abn' ? 'ABN' : 'name only'})` : null} missing="Not on the approved list" />
-        <Field label="Purchase order" value={invoice.matchedPo ? `${invoice.matchedPo}${invoice.match?.linkedBy ? `, linked by ${invoice.match.linkedBy.decidedBy}` : ''}` : null} missing="None identified" />
+        <Field label="Supplier tax number" value={idState(id)} />
+        {acnCheck && <Field label="Supplier ACN" value={acnCheck.status === 'fail' ? `Found but invalid: ${acn(e.acn)}` : `Found, not verified: ${acn(e.acn)}`} flag={acnCheck.status === 'fail'} />}
+        <Field label="Customer / Bill to" value={e.customerName} missing="Missing" />
+        <Field label="Customer ABN" value={e.customerAbn ? abn(e.customerAbn) : null} missing="Not shown on the invoice" />
+        <Field
+          label="Approved supplier"
+          value={supplierValue}
+          missing="Supplier not matched"
+          flag={Boolean(invoice.supplier?.conflict)}
+        />
+        <Field label="Purchase order match" value={`${poStatus}${invoice.matchedPo ? `: ${invoice.matchedPo}` : ''}`} flag={poStatus !== 'Matched'} />
+        {invoice.match?.linkedBy && <Field label="Linked by" value={`${invoice.match.linkedBy.decidedBy}${invoice.match.linkedBy.note ? `: ${invoice.match.linkedBy.note}` : ''}`} />}
         <Field
           label="Due"
           value={due?.date ? `${day(due.date)}${due.source === 'terms' ? ` (from terms: ${due.terms})` : ''}${closed ? '' : days < 0 ? `, ${-days} days overdue` : days === 0 ? ', due today' : `, in ${days} days`}` : null}
@@ -863,15 +910,31 @@ function Outcome({ invoice, payment }) {
         </section>
       );
     case 'needs_review':
-    case 'on_hold':
+    case 'on_hold': {
+      // Only treat this as "just reopened" while that is still the last thing
+      // that happened to it - once a person decides it again, the reopen is
+      // just a line in the history below, not the headline.
+      const justReopened = invoice.reopened && invoice.events?.at(-1)?.action === 'reopen';
       return (
         <section className="outcome outcome-wait">
-          <h2>{invoice.status === 'on_hold' ? 'On hold: the agent stopped here' : 'Needs review: the agent stopped here'}</h2>
-          {reasons.length > 0 && list(reasons)}
+          <h2>{justReopened ? 'Reopened for review' : invoice.status === 'on_hold' ? 'On hold: the agent stopped here' : 'Needs review: the agent stopped here'}</h2>
+          {justReopened ? (
+            <p>
+              {invoice.reopened.decidedBy} reopened this invoice{invoice.reopened.from ? ` from ${STATUS[invoice.reopened.from]?.label || invoice.reopened.from}` : ''}: {invoice.reopened.note}
+            </p>
+          ) : (
+            reasons.length > 0 && list(reasons)
+          )}
+          {justReopened && invoice.reopened.priorDecision && (
+            <p className="outcome-note">
+              The earlier {invoice.reopened.priorDecision.type} by {invoice.reopened.priorDecision.decidedBy} is kept in the status history below, not deleted.
+            </p>
+          )}
           {invoice.hold && <p className="outcome-note">Placed on hold by {invoice.hold.decidedBy}: {invoice.hold.note}</p>}
           {invoice.correction && <p className="outcome-note">Corrected invoice requested by {invoice.correction.decidedBy}: {invoice.correction.note}</p>}
         </section>
       );
+    }
     case 'approved':
       return (
         <section className="outcome outcome-ok">
@@ -1044,6 +1107,8 @@ function Actions({ data, busy, onAct }) {
         return `Reverse the approval${payment?.status === 'queued' ? ' and cancel the scheduled payment' : ''}? The original approval is kept in the history.`;
       case 'cancel':
         return `Cancel invoice ${e.invoiceNumber || ''}${payment?.status === 'queued' ? ' and its scheduled payment' : ''}?`;
+      case 'reopen':
+        return `Reopen this invoice for review?${payment?.status === 'queued' ? ' The scheduled payment will be cancelled first; it never moved any money.' : ''} The earlier decision is kept in the history, not deleted.`;
       case 'start_recovery':
         return 'This invoice has already been paid. Open a recovery to get the money back? The payment record is kept.';
       case 'link_po':
@@ -1054,7 +1119,7 @@ function Actions({ data, busy, onAct }) {
   };
   const set = (k) => (ev) => setFields((f) => ({ ...f, [k]: ev.target.value }));
   const poChoices = [
-    ...(invoice.match?.suggestions || []).map((s) => ({ poNumber: s.poNumber, label: `${s.poNumber} · ${s.vendorName} (suggested, ${s.score}%)` })),
+    ...(invoice.match?.suggestions || []).map((s) => ({ poNumber: s.poNumber, label: `${s.poNumber} · ${s.vendorName} (suggested, not confirmed, ${s.score}%${s.supplierOwnership && s.supplierOwnership !== 'confirmed_by_abn' ? ', supplier not verified' : ''})` })),
     ...linkablePos.filter((p) => !(invoice.match?.suggestions || []).some((s) => s.poNumber === p.poNumber)).map((p) => ({ poNumber: p.poNumber, label: `${p.poNumber} · ${p.vendorName}` })),
   ];
   const fieldsOk =
