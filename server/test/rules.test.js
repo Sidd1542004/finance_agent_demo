@@ -3,9 +3,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidAbn, formatAbn, namesMatch } from '../src/agent/finance/rules.js';
+import { isValidAbn, formatAbn, isValidAcn, formatAcn, namesMatch } from '../src/agent/finance/rules.js';
 import { validateInvoice, identifyVendor } from '../src/agent/finance/validation.js';
-import { matchToPo, WEIGHTS } from '../src/agent/finance/matching.js';
+import { matchToPo, suggestPurchaseOrders, WEIGHTS } from '../src/agent/finance/matching.js';
 import { duplicateCheck } from '../src/agent/finance/duplicates.js';
 import { statusFromChecks } from '../src/agent/finance/lifecycle.js';
 import { vendors, purchaseOrders } from '../src/seed/data.js';
@@ -21,6 +21,20 @@ test('ABN checksum', () => {
   assert.equal(isValidAbn(null), false);
   for (const v of vendors) assert.equal(isValidAbn(v.abn), true, `${v.name} sample ABN`);
   assert.equal(formatAbn('51824753556'), '51 824 753 556');
+});
+
+test('4. ABN checksum: an invalid ABN fails even though it is 11 digits', () => {
+  assert.equal(isValidAbn('57 600 410 276'), false, 'one digit changed from a real, valid ABN');
+  assert.equal(isValidAbn('57600410275'), true, 'the unmodified ABN it was changed from');
+});
+
+test('ACN checksum', () => {
+  assert.equal(isValidAcn('004 085 616'), true, 'a published ASIC worked example');
+  assert.equal(isValidAcn('004085616'), true);
+  assert.equal(isValidAcn('004 085 617'), false, 'one digit changed');
+  assert.equal(isValidAcn('1234'), false, 'wrong length');
+  assert.equal(isValidAcn(null), false);
+  assert.equal(formatAcn('004085616'), '004 085 616');
 });
 
 test('supplier names match despite Pty Ltd, case and punctuation', () => {
@@ -195,6 +209,104 @@ test('supplier problems', () => {
   const ids = failedIds(badAbn);
   assert.ok(ids.includes('supplier_tax_id'), 'checksum fails');
   assert.equal(runChecks(badAbn).checks.find((c) => c.id === 'supplier_tax_id').severity, 'review');
+});
+
+test('6. a supplier name with punctuation and legal-suffix differences still matches, when there is no ABN to go by', () => {
+  const { vendor, by } = identifyVendor({ vendorName: 'HARBOUR OFFICE SUPPLIES, Pty. Ltd.', abn: null }, vendors);
+  assert.equal(vendor?.name, 'Harbour Office Supplies Pty Ltd');
+  assert.equal(by, 'name');
+});
+
+// Regression: with no ABN, a merely similar name used to be accepted as the
+// approved supplier ("Harbour Pty Ltd" was matched to Harbour Office Supplies).
+test('6b. a similar but different supplier name, with no ABN, is flagged for a person, never matched', () => {
+  for (const name of ['Harbour Pty Ltd', 'Harbour Office Supplies North Pty Ltd']) {
+    const extracted = { ...base().extracted, vendorName: name, abn: null };
+    const { vendor, by, conflict } = identifyVendor(extracted, vendors);
+    assert.equal(vendor, null, name);
+    assert.equal(by, null, name);
+    assert.equal(conflict?.name, 'Harbour Office Supplies Pty Ltd', name);
+    const known = validateInvoice({ extracted, extraction: base().extraction, text: '', vendor, vendorBy: by, vendorConflict: conflict, abr: null, policy }).checks.find((c) => c.id === 'supplier_known');
+    assert.equal(known.status, 'fail', name);
+    assert.match(known.detail, /similar to the approved supplier Harbour Office Supplies Pty Ltd, but it is not the same name/, name);
+    assert.doesNotMatch(known.detail, /ABN on the invoice/, 'no ABN was printed, so none is quoted');
+
+    // Quoting Harbour's PO does not make it Harbour's invoice either.
+    const r = matchToPo({ extracted, vendor: null, po: purchaseOrders[0], received: null, invoicedBefore: {}, taxStatus: 'pass', arithmeticOk: true, policy });
+    assert.equal(r.checks.find((c) => c.id === 'po_found').status, 'fail', name);
+  }
+});
+
+// Regression: with no subtotal and no line items there was nothing to compare,
+// yet the check passed as "Line amounts, subtotal, tax and total are consistent."
+test('arithmetic is never "consistent" when the subtotal, line items or tax are missing: it is unable to verify, and says why', () => {
+  const arithmetic = (patch) => {
+    const input = base();
+    Object.assign(input.extracted, patch);
+    return runChecks(input).checks.find((c) => c.id === 'arithmetic');
+  };
+  assert.equal(arithmetic({}).status, 'pass', 'a complete invoice still passes');
+
+  const none = arithmetic({ subtotal: null, lines: [] });
+  assert.equal(none.status, 'unverified');
+  assert.match(none.detail, /^Unable to verify the amounts: the invoice as read shows no line items and subtotal\./);
+  assert.doesNotMatch(none.detail, /consistent/);
+
+  assert.match(arithmetic({ subtotal: null }).detail, /shows no subtotal\./, 'lines + tax = total is checked, but the subtotal is still missing');
+  assert.match(arithmetic({ lines: [] }).detail, /shows no line items\./);
+  assert.match(arithmetic({ gst: null }).detail, /shows no tax amount\./);
+  assert.equal(arithmetic({ gst: null, total: 1235 }).status, 'pass', 'no tax figure is fine when the total equals the subtotal');
+
+  const wrong = arithmetic({ subtotal: null, total: 9999 });
+  assert.equal(wrong.status, 'fail', 'a sum that disagrees is still a failure, not merely unverified');
+
+  // The match score does not give the "sums add up" half-mark for an unverified result.
+  const r = matchToPo({ extracted: { ...base().extracted, subtotal: null }, vendor: vendors[0], po: purchaseOrders[0], received: null, invoicedBefore: {}, taxStatus: 'pass', arithmeticOk: false, arithmeticStatus: 'unverified', policy });
+  assert.match(r.score.components.find((c) => c.id === 'amounts').detail, /could not be fully checked/);
+  assert.equal(r.comparison.find((row) => row.field === 'Total').result, 'check');
+});
+
+test('PO suggestions say they are not confirmed, and whether the supplier is known to own the PO', () => {
+  const lines = [{ sku: null, description: 'Standard timber pallet 1200 x 1000', qty: 20, unitPrice: 38.5, amount: 770 }];
+  const e = { vendorName: 'Australia org', abn: null, poNumber: null, lines, subtotal: 770, gst: 77, total: 847 };
+
+  const [unknown] = suggestPurchaseOrders({ extracted: e, vendor: null, vendorBy: null, purchaseOrders, policy });
+  assert.equal(unknown.poNumber, 'PO-2045');
+  assert.deepEqual([unknown.status, unknown.confirmed, unknown.supplierOwnership], ['suggested', false, 'unverified']);
+  assert.match(unknown.explanation, /^Suggested, not a confirmed match\./);
+  assert.match(unknown.explanation, /never on the amount alone/);
+  assert.match(unknown.explanation, /raised with Southern Cross Pallets Pty Ltd, but "Australia org" is not an approved supplier.*Verify supplier ownership before linking/);
+
+  const pallets = vendors.find((v) => v.name.startsWith('Southern Cross'));
+  const [byAbn] = suggestPurchaseOrders({ extracted: { ...e, vendorName: pallets.name, abn: pallets.abn }, vendor: pallets, vendorBy: 'abn', purchaseOrders, policy });
+  assert.equal(byAbn.supplierOwnership, 'confirmed_by_abn');
+  assert.equal(byAbn.confirmed, false, 'still only a suggestion');
+  const [byName] = suggestPurchaseOrders({ extracted: { ...e, vendorName: pallets.name }, vendor: pallets, vendorBy: 'name', purchaseOrders, policy });
+  assert.equal(byName.supplierOwnership, 'name_only');
+  assert.match(byName.explanation, /by name only/);
+
+  // Same amount as PO-2045, nothing in common: no suggestion at all.
+  const amountOnly = { ...e, lines: [{ sku: null, description: 'Normal pipe', qty: 7, unitPrice: 110, amount: 770 }] };
+  assert.deepEqual(suggestPurchaseOrders({ extracted: amountOnly, vendor: null, purchaseOrders, policy }), []);
+});
+
+test('7. a supplier name and ABN that conflict are never resolved by guessing: a person must decide', () => {
+  // The name matches an approved supplier, but the ABN printed on the
+  // invoice does not belong to anyone on the approved list.
+  const input = base();
+  input.extracted.vendorName = 'Southern Cross Pallets Pty Ltd';
+  input.extracted.abn = '11111111112'; // not Southern Cross Pallets' real ABN, and not checksum-valid either, but that is a separate check
+  input.vendors = vendors;
+  const { vendor, by, conflict } = identifyVendor(input.extracted, input.vendors);
+  assert.equal(vendor, null, 'never silently matched by name when the ABN disagrees');
+  assert.equal(by, null);
+  assert.equal(conflict?.name, 'Southern Cross Pallets Pty Ltd');
+
+  const v = validateInvoice({ extracted: input.extracted, extraction: input.extraction, text: '', vendor, vendorBy: by, vendorConflict: conflict, abr: null, policy });
+  const known = v.checks.find((c) => c.id === 'supplier_known');
+  assert.equal(known.status, 'fail');
+  assert.match(known.detail, /do not agree/);
+  assert.match(known.detail, /Southern Cross Pallets/);
 });
 
 test('PO from another supplier is a supplier mismatch, and the score drops', () => {

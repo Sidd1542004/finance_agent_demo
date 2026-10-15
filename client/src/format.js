@@ -18,6 +18,11 @@ export const abn = (value) => {
   return d.length === 11 ? `${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : value || '—';
 };
 
+export const acn = (value) => {
+  const d = String(value ?? '').replace(/\D/g, '');
+  return d.length === 9 ? `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}` : value || '—';
+};
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // "2026-10-14" -> "14 Oct 2026". Anything else is shown as it was read.

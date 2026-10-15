@@ -70,6 +70,7 @@ const invoiceSchema = new Schema(
     rejection: { type: Mixed, default: null }, // { decidedBy, note, decidedAt }
     hold: { type: Mixed, default: null }, // placed on hold by a person: { decidedBy, note, decidedAt }
     cancellation: { type: Mixed, default: null }, // { decidedBy, note, at, from }
+    reopened: { type: Mixed, default: null }, // accidental decision undone: { decidedBy, note, at, from, priorDecision }
     recovery: { type: Mixed, default: null }, // money already paid being recovered: { status, opened, closed }
     events: { type: [Mixed], default: [] }, // status history: { at, actor, action, from, to, reason }. Append only.
   },
