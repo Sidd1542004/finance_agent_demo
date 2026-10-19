@@ -38,6 +38,22 @@ export const config = {
   // Demo mode enables the "Load demo month" and "Reset" buttons. Only when DEMO_MODE=true.
   demoMode: String(process.env.DEMO_MODE || '').trim().toLowerCase() === 'true',
 
+  // Optional daily summary email (GET /api/cron/daily-summary, called by a Vercel cron job).
+  alerts: {
+    recipients: list(process.env.ALERT_EMAILS),
+    from: process.env.ALERT_FROM || 'Finance Operations Agent <onboarding@resend.dev>',
+    appUrl: (process.env.APP_URL || '').trim(),
+    cronSecret: process.env.CRON_SECRET || '',
+    resendApiKey: (process.env.RESEND_API_KEY || '').trim(),
+    smtp: {
+      host: (process.env.SMTP_HOST || '').trim(),
+      port: num(process.env.SMTP_PORT, 587),
+      secure: process.env.SMTP_SECURE === 'true',
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+    },
+  },
+
   // Optional shared password for the whole site (HTTP Basic auth, any user name).
   accessPassword: process.env.ACCESS_PASSWORD || '',
 

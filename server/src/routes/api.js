@@ -8,6 +8,8 @@ import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../
 import { resetEverything } from '../seed/seed.js';
 import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup, visionReader } from '../services/invoices.js';
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
+import { createDailySummaryHandler } from '../services/dailySummary.js';
+import { createMailer } from '../services/mailer.js';
 import { HttpError } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
 import { createWorkLimiter } from '../rateLimit.js';
@@ -134,6 +136,21 @@ api.post('/reset', wrap(async (req, res) => {
 }));
 
 registerFinanceRoutes(api, { upload, work });
+
+// The daily summary email, called once a day by a Vercel cron job with
+// Authorization: Bearer CRON_SECRET. ?preview=1 returns the email without sending it.
+api.get(
+  '/cron/daily-summary',
+  wrap(
+    createDailySummaryHandler({
+      secret: config.alerts.cronSecret,
+      recipients: config.alerts.recipients,
+      appUrl: config.alerts.appUrl,
+      companyName: config.companyName,
+      mailer: createMailer(config.alerts),
+    }),
+  ),
+);
 
 api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

@@ -71,6 +71,7 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    | `ACCESS_PASSWORD` | Recommended for a public demo. Every page and API call asks for it (any user name). |
    | `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` | Optional. Default: 30 requests that run the agent per 10 minutes per IP address. |
    | `COMPANY_NAME`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`, policy values | Optional, as in `server/.env.example`. |
+   | `ALERT_EMAILS`, `APP_URL`, `CRON_SECRET`, `RESEND_API_KEY` or `SMTP_*`, `ALERT_FROM` | Optional: the daily summary email (below). |
    | `CORS_ORIGINS` | Leave unset: the dashboard and API are on the same site. |
 
    Do **not** set `PORT` (Vercel chooses it) or `DNS_SERVERS` (a Windows-only workaround).
@@ -96,6 +97,24 @@ Protecting a public demo:
   by default (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MINUTES`). The count is kept in memory,
   so **on Vercel each function instance counts separately**: treat it as a brake on runaway
   use, not an exact quota. Reading the dashboard is not limited.
+
+Daily summary email (optional):
+
+- Once a day the agent can email what needs a person: overdue invoices and those due in
+  the next 7 days, new exceptions from the last 24 hours (Needs Review, On Hold, Payment
+  Failed, could not process), supplier emails waiting for a reply, and bank lines needing a
+  decision, each with a link to the dashboard (`APP_URL`). It names invoices, suppliers,
+  amounts and dates only: never a key, a bank account number or a bank line's description.
+- Set `ALERT_EMAILS` (comma-separated), `APP_URL`, `CRON_SECRET` (a long random string),
+  and either `RESEND_API_KEY` (with `ALERT_FROM` on a domain verified in Resend) or
+  `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`. Without an email
+  service or recipients, nothing is sent.
+- `vercel.json` schedules `GET /api/cron/daily-summary` at 03:00 UTC every day (1 or 2 pm
+  in Sydney). Vercel sends `Authorization: Bearer <CRON_SECRET>` itself; any other caller
+  without it gets 401. **The Vercel Hobby plan allows daily cron jobs only** (and may run
+  them at any time within the hour).
+- To check the email without sending it:
+  `curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-project>.vercel.app/api/cron/daily-summary?preview=1"`.
 
 Limits to know:
 
