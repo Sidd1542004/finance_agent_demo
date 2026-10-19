@@ -327,17 +327,20 @@ test('the demo month report: figures, open items and commentary', async () => {
   const f = report.figures;
 
   assert.equal(result.outcome, 'open_items');
-  assert.deepEqual(f.invoices, { received: 8, valueReceived: 27114.16, clearedByAgent: 2, approvedByPerson: 2, waiting: 5, rejected: 1, cancelled: 0, failed: 0, inProgress: 0, clearedPct: 25 });
+  // The clean invoice was sent twice: the copy is counted once, with the original, and listed on its own.
+  assert.deepEqual(f.invoices, { received: 7, valueReceived: 25711.66, clearedByAgent: 2, approvedByPerson: 2, waiting: 4, rejected: 1, cancelled: 0, failed: 0, inProgress: 0, clearedPct: 29, duplicateCopies: 1, duplicateCopiesWaiting: 1 });
   assert.deepEqual(f.payments, { approvedCount: 2, approvedValue: 2129.6, scheduledValue: 0, paidCount: 2, paidValue: 2129.6, outstandingCount: 0, outstandingValue: 0 });
   assert.deepEqual(f.queries, { received: 2, answeredByAgent: 1, answeredByPerson: 0, closedWithoutReply: 0, waiting: 1 });
-  assert.deepEqual(f.bank, { statements: 1, linesMatched: 2, valueMatched: 2129.6, linesOpen: 3, linesDismissed: 0 });
+  assert.deepEqual(f.bank, { statements: 1, linesMatched: 2, valueMatched: 2129.6, linesOpen: 3, linesDismissed: 0, linesRepeated: 0 });
   assert.deepEqual(f.heldReasons[0], { id: 'po_found', label: 'No matching purchase order', count: 2 });
   assert.ok(!f.heldReasons.some((r) => r.id === 'match_score'), 'a low score caused by another failure is not counted as its own reason');
-  assert.equal(f.openItems.length, 7, 'five invoices, the supplier emails and the bank lines');
+  assert.equal(f.openItems.length, 7, 'four invoices, the duplicate copy, the supplier emails and the bank lines');
+  assert.ok(f.openItems.includes('A second copy of invoice HOS-10482 from Harbour Office Supplies Pty Ltd ($1,402.50), received 1 Oct 2026, is a possible duplicate of an invoice that is payment completed. It needs review before it can be approved or paid.'));
   assert.deepEqual(checkFigures(f), []);
   assert.equal(report.commentary.method, 'standard');
   assert.deepEqual(ungroundedNumbers(report.commentary.text, f), []);
-  assert.match(report.commentary.text, /^In October 2026, 8 invoices were received, worth \$27,114\.16 in total\./);
+  assert.match(report.commentary.text, /^In October 2026, 7 invoices were received, worth \$25,711\.66 in total\./);
+  assert.match(report.commentary.text, /1 possible duplicate copy of invoices already counted was received and not counted again\./);
 
   const csv = figuresToCsv(f);
   assert.ok(csv.startsWith('Section,Item,Value\r\nReport,Month,October 2026\r\n'));
@@ -367,13 +370,13 @@ test('an empty month is ready to close; a future month is refused', async () => 
 
 test('AI commentary is kept when every number is in the figures, replaced when one is not', async () => {
   const setup = await demoMonth();
-  const good = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => 'In October 2026, 8 invoices were received worth $27,114.16. 5 are still waiting for a decision.' } });
+  const good = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received worth $25,711.66. 4 are still waiting for a decision.' } });
   assert.equal(good.report.commentary.method, 'groq');
 
-  const bad = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => 'In October 2026, 8 invoices were received, about $27,000 in total, up 12% on last month.' } });
+  const bad = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received, about $27,000 in total, up 12% on last month.' } });
   assert.equal(bad.report.commentary.method, 'standard');
   assert.match(bad.report.commentary.note, /not in the figures \(27000, 12\)/);
-  assert.match(bad.report.commentary.text, /^In October 2026, 8 invoices/);
+  assert.match(bad.report.commentary.text, /^In October 2026, 7 invoices/);
 
   const down = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => { throw new Error('Groq rate limit reached.'); } } });
   assert.equal(down.report.commentary.method, 'standard');
@@ -442,8 +445,8 @@ test('an empty previous month adds no comparison sentence; a fall is written wit
   assert.equal(report.figures.comparison.hasData, false);
   assert.doesNotMatch(report.commentary.text, /Compared with/);
   const down = compareMonths(buildFigures({ month: '2026-11', invoices: [], payments: [], queries: [], statements: [] }), report.figures);
-  assert.equal(down.rows[0].change, -8);
-  assert.deepEqual(ungroundedNumbers('Invoices received fell by 8.', { comparison: down }), []);
+  assert.equal(down.rows[0].change, -7);
+  assert.deepEqual(ungroundedNumbers('Invoices received fell by 7.', { comparison: down }), []);
 });
 
 // ---------- Regression: decided bank lines are not open items ----------
@@ -489,14 +492,22 @@ test('report counts only undecided bank lines, and updates as a person decides t
   assert.deepEqual(done.report.figures.openItems, []);
 });
 
-test('the same statement reconciled twice: the copy still open is named', async () => {
+test('the same statement reconciled twice: each bank line is counted once, and a decision on either run settles it', async () => {
   const setup = await demoMonth();
   const first = (await runStatement(setup, sampleStatement.csv)).statement;
   const second = (await runStatement(setup, sampleStatement.csv)).statement;
   first.source.filename = second.source.filename = 'bank-statement-october.csv';
-  for (const l of second.lines.filter((x) => ['suggested', 'exception', 'unmatched'].includes(x.status))) decideLine(second, l.n);
 
-  const { report } = await runReport(setup, '2026-10');
-  assert.equal(report.figures.bank.linesOpen, 3, 'the first copy was never decided');
-  assert.deepEqual(bankItems(report), ['3 bank lines on bank-statement-october.csv need a decision (lines 2, 3 and 4). This file was reconciled 2 times this month, and this copy is still open.']);
+  let { report } = await runReport(setup, '2026-10');
+  assert.equal(report.figures.bank.linesOpen, 3, 'lines 2, 3 and 4, not the 3 + 5 open entries across both runs');
+  assert.equal(report.figures.bank.linesMatched, 2);
+  assert.deepEqual(bankItems(report), ['3 bank lines on bank-statement-october.csv need a decision (lines 2, 3 and 4). The same statement lines were reconciled 2 times this month; each bank line is counted once.']);
+
+  // A person decides every open line on the second run. The first run is left as it was, for the audit trail.
+  for (const l of second.lines.filter((x) => ['suggested', 'exception', 'unmatched'].includes(x.status))) decideLine(second, l.n);
+  ({ report } = await runReport(setup, '2026-10'));
+  assert.equal(report.figures.bank.linesOpen, 0, 'the same bank lines were decided on the later run');
+  assert.equal(report.figures.bank.linesMatched, 2, 'lines matched on the first run stay matched');
+  assert.deepEqual(bankItems(report), []);
+  assert.equal(first.lines.filter((x) => ['suggested', 'exception', 'unmatched'].includes(x.status)).length, 3, 'the first run is not rewritten');
 });

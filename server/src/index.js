@@ -39,12 +39,22 @@ const app = express();
 app.disable('x-powered-by');
 
 const allowedOrigins = [
-  'https://finance-agent-demo-re1g.vercel.app',
-  'http://localhost:5173',
+'https://finance-agent-demo-re1g.vercel.app',
+'http://localhost:5173',
 ];
 
 app.use(cors({
-  origin: allowedOrigins,
+origin(origin, callback) {
+if (
+!origin ||
+allowedOrigins.includes(origin) ||
+ /^https:\/\/finance-agent-demo-re1g(?:-git-[a-z0-9-]+)?-sid15424\.vercel\.app$/.test(origin)
+) {
+callback(null, true);
+} else {
+callback(new Error(`CORS blocked origin: ${origin}`));
+}
+},
 }));
 
 app.use(express.json({ limit: '1mb' }));

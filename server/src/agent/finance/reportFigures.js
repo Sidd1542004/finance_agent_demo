@@ -4,7 +4,8 @@
 // put the figures into a short paragraph, and that paragraph is checked against
 // the figures before it is kept.
 
-import { cents, money, isNum } from './rules.js';
+import { cents, money, isNum, day } from './rules.js';
+import { STATUS_LABEL } from './lifecycle.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -44,25 +45,97 @@ const HELD_REASON = {
 const total = (list, pick) => list.reduce((sum, item) => sum + cents(pick(item) || 0), 0) / 100;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-// One open item per statement that still has undecided lines, naming the file
-// and the lines, so a person can find them. Dismissed, confirmed, matched and
-// skipped lines are decided and never counted here.
+// ---------- Bank lines: the current state, each real line counted once ----------
+//
+// Every reconciliation run is kept as its own statement record (the history).
+// When the same statement is reconciled again, its lines appear in each run,
+// and a re-run sees the lines the first run matched as "already paid". The
+// report counts each bank line once: a line is identified by its date,
+// description and amount (and, for identical lines on one statement, which of
+// them it is), and its state is the most settled one any run reached (matched
+// or confirmed, then dismissed by a person, then skipped as money in, then
+// still open). Runs that failed are left out: whatever they matched was undone.
 const OPEN_LINE = ['suggested', 'exception', 'unmatched'];
+const LINE_RANK = { matched: 4, confirmed: 4, dismissed: 3, skipped: 2, suggested: 1, exception: 1, unmatched: 1 };
 const listNumbers = (ns) => (ns.length === 1 ? String(ns[0]) : `${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`);
+const lineKey = (l) => `${l.date ?? ''}|${String(l.description ?? '').toUpperCase().replace(/\s+/g, ' ').trim()}|${cents(l.amount || 0)}`;
 
-function openBankItems(statements) {
-  const items = [];
-  for (const s of statements) {
-    const open = (s.lines || []).filter((l) => OPEN_LINE.includes(l.status));
-    if (!open.length) continue;
-    const name = s.filename || 'a pasted statement';
-    const copies = s.filename ? statements.filter((x) => x.filename === s.filename).length : 1;
-    items.push(
-      `${plural(open.length, 'bank line')} on ${name} ${open.length === 1 ? 'needs' : 'need'} a decision (line${open.length === 1 ? '' : 's'} ${listNumbers(open.map((l) => l.n))}).` +
-        (copies > 1 ? ` This file was reconciled ${copies} times this month, and this copy is still open.` : ''),
-    );
+export function currentBankLines(statements) {
+  const byKey = new Map();
+  let repeated = 0;
+  const runs = statements.filter((s) => s.status !== 'failed').sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  for (const statement of runs) {
+    const nth = new Map();
+    for (const line of statement.lines || []) {
+      const base = lineKey(line);
+      nth.set(base, (nth.get(base) || 0) + 1);
+      const key = `${base}|${nth.get(base)}`;
+      const seen = byKey.get(key);
+      if (!seen) {
+        byKey.set(key, { line, statement, runs: 1 });
+        continue;
+      }
+      repeated += 1;
+      seen.runs += 1;
+      // Ties go to the later run, which is the one a person works on.
+      if ((LINE_RANK[line.status] || 0) >= (LINE_RANK[seen.line.status] || 0)) Object.assign(seen, { line, statement });
+    }
   }
-  return items;
+  return { entries: [...byKey.values()], repeated };
+}
+
+// One open item per statement holding bank lines that are still undecided,
+// naming the file and the lines, so a person can find them.
+function openBankItems(entries) {
+  const groups = new Map();
+  for (const e of entries.filter((x) => OPEN_LINE.includes(x.line.status))) {
+    if (!groups.has(e.statement)) groups.set(e.statement, []);
+    groups.get(e.statement).push(e);
+  }
+  return [...groups].map(([s, open]) => {
+    const name = s.filename || 'a pasted statement';
+    const runs = Math.max(...open.map((e) => e.runs));
+    const ns = open.map((e) => e.line.n).sort((a, b) => a - b);
+    return (
+      `${plural(open.length, 'bank line')} on ${name} ${open.length === 1 ? 'needs' : 'need'} a decision (line${open.length === 1 ? '' : 's'} ${listNumbers(ns)}).` +
+      (runs > 1 ? ` The same statement lines were reconciled ${runs} times this month; each bank line is counted once.` : '')
+    );
+  });
+}
+
+// ---------- Invoices: a later copy of the same invoice is not a second invoice ----------
+//
+// Every submission is kept as its own invoice record, and a later copy fails
+// the duplicate check, which blocks its approval and payment until a person
+// clears it. In the report, a copy whose earlier invoice is in the same month
+// and still live is counted once, with that invoice, and listed as a copy that
+// needs review. A copy stops being one when a person clears it as not a
+// duplicate, or the earlier invoice is rejected or cancelled. An invoice that
+// has been approved or paid is never set aside, so no money is left out.
+const INACTIVE = ['rejected', 'cancelled', 'failed'];
+const WAITING = ['under_review', 'needs_review', 'on_hold'];
+const COPY_STATUSES = [...WAITING, 'rejected', 'cancelled'];
+const localIso = (d) => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
+
+export function splitDuplicateCopies(invoices) {
+  const distinct = new Map();
+  const copies = [];
+  for (const invoice of [...invoices].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))) {
+    const of = COPY_STATUSES.includes(invoice.status) ? (invoice.duplicateOf || []).map((id) => distinct.get(id)).find((o) => o && !INACTIVE.includes(o.status)) : null;
+    if (of) copies.push({ invoice, of });
+    else distinct.set(invoice.id, invoice);
+  }
+  return { distinct: invoices.filter((i) => distinct.has(i.id)), copies };
+}
+
+function copyClause(waitingCopies) {
+  const dates = waitingCopies.map((c) => day(localIso(c.invoice.createdAt)));
+  return waitingCopies.length === 1
+    ? `A second copy received ${dates[0]} is a possible duplicate and needs review before it can be approved or paid.`
+    : `${waitingCopies.length} more copies received ${listNumbers(dates)} are possible duplicates and need review before they can be approved or paid.`;
 }
 
 /**
@@ -71,9 +144,12 @@ function openBankItems(statements) {
  * @param queries    supplier emails received in the month
  * @param statements bank statements received in the month
  */
-export function buildFigures({ month, invoices, payments, queries, statements }) {
+export function buildFigures({ month, invoices: received, payments, queries, statements }) {
   const { label } = monthRange(month);
-  const ids = new Set(invoices.map((i) => i.id));
+  const ids = new Set(received.map((i) => i.id));
+  // Everything below counts distinct invoices; later copies are reported on their own.
+  const { distinct: invoices, copies } = splitDuplicateCopies(received);
+  const waitingCopies = copies.filter((c) => WAITING.includes(c.invoice.status));
   const pay = payments.filter((p) => ids.has(p.invoiceId));
   const withStatus = (s) => invoices.filter((i) => i.status === s);
 
@@ -107,6 +183,12 @@ export function buildFigures({ month, invoices, payments, queries, statements })
       reasons.set(check.id, entry);
     }
   }
+  // A copy needed a person because it may be a duplicate, and for nothing else.
+  if (copies.length) {
+    const entry = reasons.get('duplicate') || { id: 'duplicate', label: HELD_REASON.duplicate, count: 0 };
+    entry.count += copies.length;
+    reasons.set('duplicate', entry);
+  }
 
   const suppliers = new Map();
   for (const i of unpaid) {
@@ -118,19 +200,30 @@ export function buildFigures({ month, invoices, payments, queries, statements })
     suppliers.set(name, entry);
   }
 
-  const lines = statements.flatMap((s) => s.lines || []);
+  const bankLines = currentBankLines(statements);
+  const lines = bankLines.entries.map((e) => e.line);
   const matched = lines.filter((l) => l.status === 'matched' || l.status === 'confirmed');
   const openLines = lines.filter((l) => OPEN_LINE.includes(l.status));
   const queriesWaiting = queries.filter((q) => q.status === 'needs_person' || q.status === 'failed').length;
   const statementsFailed = statements.filter((s) => s.status === 'failed').length;
 
+  // Copies still waiting for a person, by the invoice they may duplicate. They
+  // are named on that invoice's own line, or on a line of their own.
+  const copiesOf = new Map();
+  for (const c of waitingCopies) copiesOf.set(c.of.id, [...(copiesOf.get(c.of.id) || []), c]);
+  const withCopies = (i, text) => (copiesOf.has(i.id) ? `${text} ${copyClause(copiesOf.get(i.id))}` : text);
+  const listed = new Set([...waiting, ...inStatus(['approved', 'payment_failed'])].map((i) => i.id));
+  const copyItem = (c, of, many) =>
+    `A ${many ? 'further' : 'second'} copy of invoice ${c.invoice.invoiceNumber || '(no number)'} from ${c.invoice.vendorName || 'an unknown supplier'} (${money(c.invoice.total)}), received ${day(localIso(c.invoice.createdAt))}, is a possible duplicate of an invoice that is ${(STATUS_LABEL[of.status] || of.status).toLowerCase()}. It needs review before it can be approved or paid.`;
+
   const openItems = [
-    ...waiting.map((i) => `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} (${money(i.total)}) ${i.status === 'under_review' ? 'is waiting for approval' : i.status === 'on_hold' ? 'is on hold' : 'needs review'}.`),
-    ...inStatus(['approved']).map((i) => `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} is approved but its payment is not scheduled.`),
-    ...inStatus(['payment_failed']).map((i) => `The payment for invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} failed.`),
+    ...waiting.map((i) => withCopies(i, `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} (${money(i.total)}) ${i.status === 'under_review' ? 'is waiting for approval' : i.status === 'on_hold' ? 'is on hold' : 'needs review'}.`)),
+    ...inStatus(['approved']).map((i) => withCopies(i, `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} is approved but its payment is not scheduled.`)),
+    ...inStatus(['payment_failed']).map((i) => withCopies(i, `The payment for invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} failed.`)),
+    ...invoices.filter((i) => copiesOf.has(i.id) && !listed.has(i.id)).flatMap((i) => copiesOf.get(i.id).map((c, _n, all) => copyItem(c, i, all.length > 1))),
     ...(failed.length ? [`${plural(failed.length, 'invoice')} could not be processed.`] : []),
     ...(queriesWaiting ? [`${plural(queriesWaiting, 'supplier email')} ${queriesWaiting === 1 ? 'is' : 'are'} waiting for a reply.`] : []),
-    ...openBankItems(statements),
+    ...openBankItems(bankLines.entries),
     ...(statementsFailed ? [`${plural(statementsFailed, 'bank statement')} could not be reconciled.`] : []),
   ];
 
@@ -149,6 +242,9 @@ export function buildFigures({ month, invoices, payments, queries, statements })
       inProgress,
       // Share of readable invoices the agent cleared for approval review with no exceptions.
       clearedPct: readable > 0 ? Math.round((cleared.length / readable) * 100) : null,
+      // Later copies of an invoice already counted above (all, and those still waiting for a person).
+      duplicateCopies: copies.length,
+      duplicateCopiesWaiting: waitingCopies.length,
     },
     payments: {
       approvedCount: approved.length,
@@ -176,6 +272,8 @@ export function buildFigures({ month, invoices, payments, queries, statements })
       valueMatched: total(matched, (l) => Math.abs(l.amount)),
       linesOpen: openLines.length,
       linesDismissed: lines.filter((l) => l.status === 'dismissed').length,
+      // Line entries from repeat runs of the same statement, not counted again.
+      linesRepeated: bankLines.repeated,
     },
     openItems,
     // For the consistency check only.
@@ -232,6 +330,7 @@ export function templateCommentary(f) {
   );
   out.push(`${money(p.approvedValue)} has been approved: ${money(p.paidValue)} is paid and ${money(p.outstandingValue)} is still to pay.`);
   if (f.heldReasons.length) out.push(`The most common reason an invoice needed a person was "${f.heldReasons[0].label}" (${f.heldReasons[0].count}).`);
+  if (i.duplicateCopies) out.push(`${plural(i.duplicateCopies, 'possible duplicate copy', 'possible duplicate copies')} of invoices already counted ${i.duplicateCopies === 1 ? 'was' : 'were'} received and not counted again.`);
   if (f.queries.received) out.push(`${plural(f.queries.received, 'supplier email was', 'supplier emails were')} received and the agent answered ${f.queries.answeredByAgent} without a person.`);
   const c = f.comparison;
   if (c?.hasData) {
@@ -277,6 +376,7 @@ export function figuresToCsv(f) {
   add('Invoices', 'Cancelled', f.invoices.cancelled);
   add('Invoices', 'Could not be processed', f.invoices.failed);
   add('Invoices', 'Cleared by the agent (% of readable)', f.invoices.clearedPct);
+  add('Invoices', 'Possible duplicate copies (not counted again)', f.invoices.duplicateCopies ?? 0);
   add('Payments', 'Approved (count)', f.payments.approvedCount);
   add('Payments', 'Approved (AUD)', f.payments.approvedValue.toFixed(2));
   add('Payments', 'Scheduled, not yet paid (AUD)', f.payments.scheduledValue.toFixed(2));
@@ -293,6 +393,7 @@ export function figuresToCsv(f) {
   add('Bank', 'Lines matched', f.bank.linesMatched);
   add('Bank', 'Value matched (AUD)', f.bank.valueMatched.toFixed(2));
   add('Bank', 'Lines needing a decision', f.bank.linesOpen);
+  add('Bank', 'Repeated lines from re-run statements (not counted again)', f.bank.linesRepeated ?? 0);
   if (f.comparison) {
     for (const r of f.comparison.rows) {
       const v = (x) => (r.money ? x.toFixed(2) : x);

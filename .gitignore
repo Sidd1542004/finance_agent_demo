@@ -1,4 +1,9 @@
 node_modules/
 dist/
-.env
 *.log
+
+# Secrets and local deployment state: never commit these.
+.env
+.env.*
+!.env.example
+.vercel

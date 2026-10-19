@@ -184,6 +184,7 @@ function ReportDetail({ data, fresh }) {
               ['Rejected', f.invoices.rejected],
               ['Cancelled', f.invoices.cancelled ?? 0],
               ['Could not be processed', f.invoices.failed],
+              ['Possible duplicate copies (not counted again)', f.invoices.duplicateCopies ?? 0],
               ['Cleared with no exceptions, of those it could read', f.invoices.clearedPct === null || f.invoices.clearedPct === undefined ? '—' : `${f.invoices.clearedPct}%`],
             ]}
           />
@@ -213,6 +214,7 @@ function ReportDetail({ data, fresh }) {
               ['Lines matched to invoices', `${f.bank.linesMatched} (${money(f.bank.valueMatched)})`],
               ['Lines dismissed by a person', f.bank.linesDismissed],
               ['Lines needing a decision', f.bank.linesOpen],
+              ['Repeated lines from re-run statements (counted once)', f.bank.linesRepeated ?? 0],
             ]}
           />
           <Figures title="Still to pay, by supplier" empty="Nothing is waiting to be paid." rows={f.outstandingBySupplier.map((s) => [`${s.vendorName}${s.earliestDue ? `, due ${day(s.earliestDue)}` : ''}`, money(s.value)])} />

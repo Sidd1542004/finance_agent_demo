@@ -36,7 +36,7 @@ npm run dev
 Open http://localhost:5173. The sample suppliers, purchase orders and deliveries load
 themselves the first time the server starts.
 
-Other commands: `npm test` (106 tests, no database or network needed), `npm run seed`
+Other commands: `npm test` (154 tests, no database or network needed), `npm run seed`
 (wipe and reload the sample data), `npm run build` then `npm start` (serve the dashboard
 and the API together on port 4000).
 

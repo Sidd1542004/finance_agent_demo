@@ -23,6 +23,8 @@ const invoiceSummary = (d) => ({
   agentOutcome: d.decision?.outcome ?? null,
   currency: d.extracted?.currency || 'AUD',
   failedChecks: (d.checks || []).filter((c) => c.status === 'fail').map((c) => ({ id: c.id, label: c.label })),
+  // Earlier, live invoices this one may be a copy of, while its duplicate check is failing.
+  duplicateOf: (d.checks || []).some((c) => c.id === 'duplicate' && c.status === 'fail') ? (d.match?.duplicates || []).map((c) => String(c.id)) : [],
 });
 
 const INACTIVE = ['rejected', 'cancelled', 'failed'];
