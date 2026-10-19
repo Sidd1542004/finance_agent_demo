@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import { pathToFileURL } from 'node:url';
 import { config } from '../config.js';
 import { safeUri, redactSecrets } from '../safeUri.js';
-import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report } from '../models/index.js';
+import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report, SupplierHint } from '../models/index.js';
 import { vendors, purchaseOrders, goodsReceipts } from './data.js';
 
 export async function seedReferenceData() {
@@ -24,7 +24,7 @@ export async function seedIfEmpty() {
 }
 
 export async function resetEverything() {
-  await Promise.all([Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report].map((m) => m.deleteMany({})));
+  await Promise.all([Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report, SupplierHint].map((m) => m.deleteMany({})));
   await seedReferenceData();
 }
 

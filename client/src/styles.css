@@ -1732,6 +1732,38 @@ a.btn {
   font: inherit;
 }
 
+.confirm .edit-lines {
+  margin-top: 12px;
+  background: #fff;
+}
+
+.edit-lines td {
+  padding: 4px;
+}
+
+.edit-lines input[type='text'],
+.edit-lines input[type='number'] {
+  min-height: 34px;
+  padding: 5px 7px;
+  min-width: 70px;
+}
+
+.edit-lines .btn {
+  min-height: 34px;
+  padding: 4px 10px;
+}
+
+.corrections {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ecdca5;
+  background: var(--gold-wash);
+  border-radius: var(--r);
+  font-size: 13px;
+}
+
 .suggestions {
   display: grid;
   gap: 10px;

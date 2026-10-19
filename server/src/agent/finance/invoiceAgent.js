@@ -19,6 +19,7 @@ import { matchToPo, suggestPurchaseOrders, resolvePurchaseOrder } from './matchi
 import { fingerprints, duplicateCheck } from './duplicates.js';
 import { statusFromChecks, STATUS_LABEL } from './lifecycle.js';
 import { dueInfo } from './due.js';
+import { applyCorrections } from './extract.js';
 
 const SOURCE = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' };
 
@@ -58,10 +59,13 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         return { summary: `Invoice received ${SOURCE[invoice.source?.kind] || ''}${file}: ${text.length.toLocaleString('en-AU')} characters of text.` };
       },
 
-      // 2. Understand: read the fields.
+      // 2. Understand: read the fields. Reviewers' hints for this supplier help
+      // the reader find them; reviewers' corrections are laid over the result.
       async understand(state) {
         const { invoice } = state.input;
-        const { extracted, extraction } = await extract(invoice.rawText);
+        const hints = ledger.supplierHintsFor ? await ledger.supplierHintsFor(invoice.rawText) : [];
+        const reading = await extract(invoice.rawText, { hints });
+        const { extracted, extraction } = applyCorrections(reading, invoice.corrections, invoice.rawText);
         invoice.extracted = extracted;
         invoice.extraction = extraction;
         invoice.fingerprints = fingerprints(extracted, invoice.rawText);
@@ -69,8 +73,10 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         invoice.due = dueInfo(extracted, today?.());
         await save(invoice);
         const reader = extraction.method === 'groq' ? `AI reader (${extraction.model})` : 'basic pattern reader';
+        const helped = extraction.hints?.count ? ` Given ${extraction.hints.count} reviewer hint${extraction.hints.count === 1 ? '' : 's'} for ${extraction.hints.supplier || 'this supplier'}; every value was still checked against the invoice text.` : '';
+        const corrected = extraction.corrected?.length ? ` ${extraction.corrected.length} field${extraction.corrected.length === 1 ? '' : 's'} corrected by a reviewer.` : '';
         return {
-          summary: `Read invoice ${extracted.invoiceNumber || '(no number)'} from ${extracted.vendorName || 'an unknown supplier'}: ${extracted.lines.length} line item(s), total ${fmtMoney(extracted.total, extracted.currency || 'AUD')}. Read by the ${reader}.`,
+          summary: `Read invoice ${extracted.invoiceNumber || '(no number)'} from ${extracted.vendorName || 'an unknown supplier'}: ${(extracted.lines || []).length} line item(s), total ${fmtMoney(extracted.total, extracted.currency || 'AUD')}. Read by the ${reader}.${helped}${corrected}`,
           detail: { confidence: extraction.confidence, notes: extraction.notes },
         };
       },

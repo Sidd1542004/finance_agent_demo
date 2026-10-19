@@ -112,6 +112,9 @@ export const ACTIONS = {
   link_po: { label: 'Link purchase order', from: AWAITING_DECISION, to: null, note: 'optional', role: 'reviewer' },
   clear_duplicate: { label: 'Not a duplicate', from: AWAITING_DECISION, to: null, note: 'required', role: 'approver', confirm: true },
   rerun: { label: 'Process again', from: [...AWAITING_DECISION, 'failed'], to: null, note: 'optional', role: 'reviewer' },
+  // Correct fields the reader got wrong. The agent then checks the invoice
+  // again on the corrected values; nothing is approved by correcting it.
+  edit_fields: { label: 'Edit fields', from: [...AWAITING_DECISION, 'failed'], to: null, note: 'required', role: 'reviewer' },
   schedule_payment: { label: 'Schedule payment', from: ['approved', 'payment_failed'], to: 'payment_pending', note: 'optional', role: 'payer', confirm: true },
   record_payment: { label: 'Record payment', from: ['payment_pending'], to: 'payment_completed', note: 'optional', role: 'payer', confirm: true },
   payment_failed: { label: 'Mark payment failed', from: ['payment_pending'], to: 'payment_failed', note: 'required', role: 'payer' },

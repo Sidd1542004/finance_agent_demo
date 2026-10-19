@@ -12,6 +12,8 @@
 
 import { groqJson } from '../../llm/groq.js';
 import { normaliseAbn, normaliseAcn } from './rules.js';
+import { latestCorrections, EDITABLE_FIELDS } from './corrections.js';
+import { hintsPrompt } from './supplierHints.js';
 
 const MAX_CHARS = 20000;
 
@@ -178,11 +180,11 @@ export function abnLabel(digits, text) {
 // with another label (most often "VAT"), or no label, is not used as one just
 // because its digits happen to pass the ABN checksum: the ABN is left missing
 // and a person confirms it. A VAT-labelled number is kept as vatNumber.
-function guardAbns(extracted, text) {
+function guardAbns(extracted, text, corrected = new Map()) {
   const notes = [];
   for (const [field, who] of [['abn', "supplier's"], ['customerAbn', "customer's"]]) {
     const value = extracted[field];
-    if (!value) continue;
+    if (!value || corrected.has(field)) continue;
     const label = abnLabel(value, text);
     if (label === 'abn') continue;
     extracted[field] = null;
@@ -193,13 +195,20 @@ function guardAbns(extracted, text) {
   return notes;
 }
 
-function finish(extracted, text, meta) {
+// Which grounding label belongs to which field (see ungroundedFields).
+const GROUNDING_LABEL = { invoiceNumber: 'invoice number', abn: 'ABN', gstin: 'GSTIN', poNumber: 'purchase order number', total: 'total' };
+
+// `corrected`: Map field -> a reviewer's correction (see corrections.js). A
+// corrected value was confirmed by a person against the invoice, so it counts
+// as grounded and is not second-guessed by the ABN label guard.
+function finish(extracted, text, meta, corrected = new Map()) {
   const raw = Math.max(0, Math.min(1, Number(meta.confidence) || 0));
   let confidence = raw;
   const notes = [];
   if (meta.notes) notes.push(String(meta.notes).trim());
-  notes.push(...guardAbns(extracted, text));
-  const ungrounded = ungroundedFields(extracted, text);
+  notes.push(...guardAbns(extracted, text, corrected));
+  const exempt = new Set([...corrected.keys()].map((f) => GROUNDING_LABEL[f]).filter(Boolean));
+  const ungrounded = ungroundedFields(extracted, text).filter((label) => !exempt.has(label));
   if (ungrounded.length) {
     confidence = Math.min(confidence, 0.5);
     notes.push(`These values do not appear in the invoice text as read: ${ungrounded.join(', ')}.`);
@@ -210,17 +219,44 @@ function finish(extracted, text, meta) {
     confidence = Math.min(confidence, 0.5);
     notes.push("The supplier's name was not found on the invoice, so the supplier is not identified.");
   }
+  const corrections = [...corrected.values()].map((c) => ({ field: c.field, by: c.by, at: c.at ?? null }));
+  if (corrections.length) {
+    const byPerson = new Map();
+    for (const c of corrections) byPerson.set(c.by, [...(byPerson.get(c.by) || []), EDITABLE_FIELDS[c.field]?.label.toLowerCase() || c.field]);
+    notes.push([...byPerson].map(([by, fields]) => `Corrected by ${by}: ${fields.join(', ')}.`).join(' '));
+  }
   return {
     extracted,
     extraction: {
       method: meta.method,
       model: meta.model || null,
+      ...(meta.input ? { input: meta.input } : {}),
       confidence: Math.round(confidence * 100) / 100,
       // What the reader itself reported, kept when the effective confidence was capped.
       ...(confidence < raw ? { rawConfidence: Math.round(raw * 100) / 100 } : {}),
       notes: notes.filter(Boolean).join(' ') || null,
+      // The reader's own confidence and notes, so corrections can be laid over the reading again.
+      reader: { confidence: raw, notes: meta.notes ? String(meta.notes).trim() || null : null },
+      ...(meta.hints ? { hints: meta.hints } : {}),
+      ...(corrections.length ? { corrected: corrections } : {}),
     },
   };
+}
+
+/**
+ * Lay a reviewer's corrections over a reading. The corrected fields replace
+ * what the reader found and count as grounded; everything else is checked
+ * against the text exactly as before. Without corrections the reading is unchanged.
+ */
+export function applyCorrections(reading, corrections, text) {
+  const latest = latestCorrections(corrections);
+  if (!latest.size) return reading;
+  const extracted = { ...reading.extracted };
+  for (const [field, c] of latest) extracted[field] = field === 'lines' ? (c.to || []).map((l) => ({ ...l })) : c.to;
+  for (const field of ['abn', 'customerAbn']) if (latest.has(field)) extracted.rejectedIds = (extracted.rejectedIds || []).filter((r) => r.field !== field);
+  if (extracted.rejectedIds && !extracted.rejectedIds.length) delete extracted.rejectedIds;
+  const x = reading.extraction || {};
+  return finish(extracted, text, { method: x.method, model: x.model, input: x.input, hints: x.hints, confidence: x.reader?.confidence ?? x.rawConfidence ?? x.confidence, notes: x.reader?.notes ?? null }, latest);
 }
 
 // ---------- Basic pattern reader (no AI) ----------
@@ -401,13 +437,13 @@ Rules:
 - Dates on Australian invoices are day first.
 - Lower the confidence if the text is garbled, truncated or ambiguous.`;
 
-export async function extractWithGroq(text, { apiKey, model, fetchImpl } = {}) {
+export async function extractWithGroq(text, { apiKey, model, fetchImpl, hints = [] } = {}) {
   const raw = await groqJson({
     apiKey,
     model,
     fetchImpl,
     system: SYSTEM_PROMPT,
-    user: `Invoice text:\n"""\n${text.slice(0, MAX_CHARS)}\n"""`,
+    user: `Invoice text:\n"""\n${text.slice(0, MAX_CHARS)}\n"""${hintsPrompt(hints)}`,
   });
   const truncated = text.length > MAX_CHARS;
   return finish(normalise(raw), text, {
@@ -415,6 +451,7 @@ export async function extractWithGroq(text, { apiKey, model, fetchImpl } = {}) {
     model,
     confidence: truncated ? Math.min(Number(raw.confidence) || 0, 0.5) : raw.confidence,
     notes: [str(raw.notes), truncated ? 'The invoice was too long and was cut off before reading.' : null].filter(Boolean).join(' '),
+    hints: hints.length ? { count: hints.length, supplier: hints.find((h) => h.vendorName)?.vendorName || null } : null,
   });
 }
 
@@ -424,7 +461,7 @@ export function createExtractor({ groqApiKey, groqModel }) {
     return {
       mode: 'groq',
       model: groqModel,
-      extract: (text) => extractWithGroq(text, { apiKey: groqApiKey, model: groqModel }),
+      extract: (text, { hints } = {}) => extractWithGroq(text, { apiKey: groqApiKey, model: groqModel, hints }),
     };
   }
   return { mode: 'rules', model: null, extract: async (text) => extractWithRules(text) };

@@ -276,6 +276,22 @@ date, optional reference), record payment (reference required; a part payment ke
 Payment Pending), mark payment failed, reverse approval (cancels a scheduled payment; the
 original approval is kept), cancel, start and close a recovery for a paid invoice.
 
+**Edit fields** (reviewer, note required; from Under Review, Needs Review, On Hold or Could
+not process) corrects what the reader got wrong: supplier, ABN, GSTIN, invoice number,
+dates, PO number, currency, subtotal, GST, total and the line items. Values are checked
+(ISO dates, finite numbers, an 11-digit ABN) before anything changes. Each correction is
+kept on the invoice (`corrections`: field, from, to, by, note, time) and laid over whatever
+the reader reads every time the agent runs, so it survives processing again. A corrected
+field counts as confirmed by a person, so the reading-confidence check says "corrected by
+..." instead of failing on it; every other check (ABN checksum, sums, PO matching,
+duplicates, approval blockers) runs on the corrected values. Correcting a field never
+approves anything.
+
+When the supplier is identified, the agent also keeps a short **hint** per supplier and
+field (the label printed next to the value, and an example of the right format, never the
+invoice itself) and gives it to the AI reader for that supplier's later invoices. A hint
+never stands in for the invoice: every value must still appear in the invoice's text.
+
 Every status change is written to the invoice's history with who, from, to, reason and
 time. Changes are compare-and-set on the status, and the payment collection has one
 payment per invoice (unique index), so two people clicking at once cannot both succeed.

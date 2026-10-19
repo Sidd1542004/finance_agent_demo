@@ -101,7 +101,7 @@ test('AI reader: sends a JSON-mode request and returns the fields', async () => 
 
   assert.equal(extracted.invoiceNumber, 'HOS-10482');
   assert.equal(extracted.total, 1402.5);
-  assert.deepEqual(extraction, { method: 'groq', model: 'some-model', confidence: 0.97, notes: null });
+  assert.deepEqual(extraction, { method: 'groq', model: 'some-model', confidence: 0.97, notes: null, reader: { confidence: 0.97, notes: null } });
 });
 
 test('AI reader: values that are not in the invoice text cut the confidence', async () => {

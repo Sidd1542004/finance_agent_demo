@@ -40,6 +40,8 @@ export const fmtMoney = (n, currency = 'AUD') => {
   }
 };
 
+const CORRECTED_LABEL = { vendorName: 'supplier', abn: 'ABN', gstin: 'GSTIN', invoiceNumber: 'invoice number', invoiceDate: 'invoice date', dueDate: 'due date', poNumber: 'purchase order', currency: 'currency', subtotal: 'subtotal', gst: 'GST', total: 'total', lines: 'line items' };
+
 const near = (a, b, tol) => Math.abs(cents(a) - cents(b)) <= cents(tol);
 
 // ---------- Indian GSTIN ----------
@@ -352,11 +354,18 @@ export function validateInvoice({ extracted: e, extraction, text, vendor, vendor
   add('required_fields', 'Invoice has the required details', missing.length ? 'fail' : 'pass', missing.length ? `Could not find: ${missing.join(', ')}.` : 'Supplier, invoice number, date, line items and total are present.');
 
   const confidence = isNum(extraction?.confidence) ? extraction.confidence : 0;
+  // Fields a reviewer corrected are not held against the reading: they were
+  // confirmed by a person (see extract.js applyCorrections).
+  const byPerson = new Map();
+  for (const c of extraction?.corrected || []) byPerson.set(c.by, [...(byPerson.get(c.by) || []), c.field]);
+  const corrected = byPerson.size ? ` ${[...byPerson].map(([by, fields]) => `${listOf(fields.map((f) => CORRECTED_LABEL[f] || f))} corrected by ${by}`).join('; ')}.` : '';
   add(
     'reader_confidence',
     'Invoice was read with enough confidence',
     confidence >= policy.minConfidence ? 'pass' : 'fail',
-    confidence >= policy.minConfidence ? `Reader confidence ${pct(confidence)} (minimum ${pct(policy.minConfidence)}).` : `Reader confidence ${pct(confidence)} is below the ${pct(policy.minConfidence)} minimum.${extraction?.notes ? ` ${extraction.notes}` : ''}`,
+    confidence >= policy.minConfidence
+      ? `Reader confidence ${pct(confidence)} (minimum ${pct(policy.minConfidence)}).${corrected}`
+      : `Reader confidence ${pct(confidence)} is below the ${pct(policy.minConfidence)} minimum.${extraction?.notes ? ` ${extraction.notes}` : ''}`,
   );
 
   const sums = checkArithmetic(e, { tolerance: policy.roundingTolerance });

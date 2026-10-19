@@ -12,6 +12,8 @@ import { assertAction, ActionError, failedChecks, STATUS_LABEL } from '../agent/
 import { receivedOnly, cents, isNum } from '../agent/finance/rules.js';
 import { fmtMoney } from '../agent/finance/validation.js';
 import { todayIso } from '../agent/finance/due.js';
+import { correctionChanges, describeChange } from '../agent/finance/corrections.js';
+import { buildHints } from '../agent/finance/supplierHints.js';
 
 export const PAYMENT_METHODS = ['EFT', 'BPAY', 'Card', 'Cheque', 'Other'];
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -77,6 +79,22 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
         await claim('processing', {}, { detail: 'Sent back to the agent.' });
         await rerun(invoice.id);
         return { summary: `Processed again at ${who}'s request.` };
+
+      case 'edit_fields': {
+        // Checked before anything changes: types, formats, and that something actually changes.
+        const changes = correctionChanges(invoice.extracted, input.fields);
+        const made = changes.map((c) => ({ ...c, by: who, note, at }));
+        const described = changes.map(describeChange).join('; ');
+        await claim('processing', { corrections: [...(invoice.corrections || []), ...made] }, { detail: `Corrected ${described}. Re-checked by the agent.`, changes });
+        await rerun(invoice.id);
+        // What the agent learns: where this supplier prints these fields, for its later invoices.
+        const after = await store.getInvoice(invoice.id);
+        if (store.saveSupplierHints && after?.supplier?.abn) {
+          const hints = buildHints({ supplier: after.supplier, corrections: made, text: invoice.rawText, by: who, at });
+          if (hints.length) await store.saveSupplierHints(hints);
+        }
+        return { summary: `Fields corrected by ${who}: ${described}. Note: ${note}. The agent re-checked the invoice on the corrected values.` };
+      }
 
       case 'schedule_payment': {
         const method = PAYMENT_METHODS.includes(input.method) ? input.method : 'EFT';

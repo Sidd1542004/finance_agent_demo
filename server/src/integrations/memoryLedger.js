@@ -7,6 +7,7 @@
 
 import { skuKey } from '../agent/finance/matching.js';
 import { sharedSignals } from '../agent/finance/duplicates.js';
+import { hintsForText } from '../agent/finance/supplierHints.js';
 
 const INACTIVE = ['rejected', 'cancelled', 'failed'];
 
@@ -34,6 +35,7 @@ const event = (e) => ({ at: new Date().toISOString(), ...e });
 export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsReceipts = [], invoices = [], queries = [], statements = [] } = {}) {
   const payments = [];
   const messages = [];
+  const hints = [];
   let nextId = 1;
   const inv = (id) => invoices.find((i) => i.id === id) || null;
   const moveInvoice = (invoiceId, from, to, e) => {
@@ -47,6 +49,7 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     payments,
     invoices,
     messages,
+    hints,
 
     // ----- suppliers, purchase orders, deliveries -----
     async listVendors() {
@@ -146,6 +149,18 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       const blocking = invoice.duplicateCleared ? ['same supplier and invoice number', 'identical document'] : ['same supplier and invoice number', 'same supplier, total and invoice date', 'identical document'];
       const others = invoices.filter((i) => i.id !== invoice.id && sharedSignals(invoice.fingerprints, i.fingerprints).some((s) => blocking.includes(s)));
       return payments.filter((p) => others.some((o) => o.id === p.invoiceId) && ['queued', 'paid'].includes(p.status));
+    },
+
+    // ----- supplier hints (see agent/finance/supplierHints.js) -----
+    async saveSupplierHints(list) {
+      for (const h of list) {
+        const i = hints.findIndex((x) => x.vendorAbn === h.vendorAbn && x.field === h.field);
+        if (i >= 0) hints[i] = { ...h };
+        else hints.push({ ...h });
+      }
+    },
+    async supplierHintsFor(text) {
+      return hintsForText(hints, text);
     },
 
     // ----- payment queue (used by tests and the bank reconciliation agent) -----

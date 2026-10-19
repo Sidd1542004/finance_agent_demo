@@ -72,11 +72,31 @@ const invoiceSchema = new Schema(
     cancellation: { type: Mixed, default: null }, // { decidedBy, note, at, from }
     reopened: { type: Mixed, default: null }, // accidental decision undone: { decidedBy, note, at, from, priorDecision }
     recovery: { type: Mixed, default: null }, // money already paid being recovered: { status, opened, closed }
+    corrections: { type: [Mixed], default: [] }, // fields a reviewer corrected: { field, from, to, by, note, at }. Append only.
     events: { type: [Mixed], default: [] }, // status history: { at, actor, action, from, to, reason }. Append only.
   },
   { timestamps: true, minimize: false },
 );
 export const Invoice = model('Invoice', invoiceSchema);
+
+// What reviewers' corrections taught the reader about one supplier's invoices:
+// per field, the label printed near the value and an example of the format.
+// Never a whole invoice. See agent/finance/supplierHints.js.
+export const SupplierHint = model(
+  'SupplierHint',
+  new Schema(
+    {
+      vendorAbn: { type: String, required: true },
+      vendorName: String,
+      field: { type: String, required: true },
+      label: { type: String, default: null },
+      example: { type: String, required: true },
+      updatedBy: String,
+      updatedAt: String,
+    },
+    { timestamps: false },
+  ).index({ vendorAbn: 1, field: 1 }, { unique: true }),
+);
 
 // One record per agent run: the audit trail of the six stages.
 export const AgentRun = model(

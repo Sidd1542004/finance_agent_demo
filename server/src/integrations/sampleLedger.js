@@ -5,7 +5,8 @@
 // another file that exports the same functions and pass it to the agents
 // instead. Nothing in the agents or the rules needs to change.
 
-import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, Payment, OutboxMessage, VendorQuery, BankStatement } from '../models/index.js';
+import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, Payment, OutboxMessage, VendorQuery, BankStatement, SupplierHint } from '../models/index.js';
+import { hintsForText } from '../agent/finance/supplierHints.js';
 import { skuKey } from '../agent/finance/matching.js';
 import { sharedSignals } from '../agent/finance/duplicates.js';
 
@@ -181,6 +182,19 @@ export const sampleLedger = {
     const others = await Invoice.find({ $or: or, _id: { $ne: invoice.id } }).select('_id').lean();
     if (!others.length) return [];
     return Payment.find({ invoiceId: { $in: others.map((o) => o._id) }, status: { $in: ['queued', 'paid'] } }).lean();
+  },
+
+  // ----- what reviewers' corrections taught the reader, per supplier -----
+
+  // One hint per supplier and field; a newer correction replaces the older hint.
+  async saveSupplierHints(hints) {
+    for (const h of hints) {
+      await SupplierHint.updateOne({ vendorAbn: h.vendorAbn, field: h.field }, { $set: h }, { upsert: true });
+    }
+  },
+
+  async supplierHintsFor(text) {
+    return hintsForText(await SupplierHint.find().select('-_id -__v').lean(), text);
   },
 
   // ----- payment queue -----

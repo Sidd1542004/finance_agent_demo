@@ -623,6 +623,17 @@ function Detail({ data, fresh, busy, onAct }) {
               </div>
             )}
 
+            {invoice.corrections?.length > 0 && (
+              <ul className="corrections">
+                {invoice.corrections.map((c, i) => (
+                  <li key={i}>
+                    <strong>Corrected by {c.by}</strong>: {correctionText(c, cur)} <span className="history-when">{when(c.at)}</span>
+                    {c.note && <p className="check-detail">Note: {c.note}</p>}
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {invoice.extraction && (
               <p className="hint">
                 Read by the {invoice.extraction.method === 'groq' ? `AI reader (${invoice.extraction.model})` : 'basic pattern reader'},{' '}
@@ -636,7 +647,7 @@ function Detail({ data, fresh, busy, onAct }) {
 
       {payment && <PaymentPanel payment={payment} currency={cur} />}
 
-      <StatusHistory events={invoice.events || []} />
+      <StatusHistory events={invoice.events || []} currency={cur} />
 
       <AuditTrail steps={steps} />
 
@@ -834,7 +845,7 @@ function PaymentPanel({ payment, currency }) {
   );
 }
 
-function StatusHistory({ events }) {
+function StatusHistory({ events, currency }) {
   if (!events.length) return null;
   return (
     <section className="panel history">
@@ -846,7 +857,13 @@ function StatusHistory({ events }) {
               <strong>{ev.actor}</strong> · {STATUS[ev.from]?.label || ev.from || '—'} → {STATUS[ev.to]?.label || ev.to}
               <span className="history-when">{when(ev.at)}</span>
             </p>
-            {ev.detail && <p className="check-detail">{ev.detail}</p>}
+            {ev.changes?.length > 0
+              ? ev.changes.map((c) => (
+                  <p className="check-detail" key={c.field}>
+                    Corrected by {ev.actor}: {correctionText(c, currency)}
+                  </p>
+                ))
+              : ev.detail && <p className="check-detail">{ev.detail}</p>}
             {ev.reason && <p className="check-detail">Reason: {ev.reason}</p>}
           </li>
         ))}
@@ -1041,7 +1058,46 @@ function ApprovalNote({ approval }) {
 
 const PRIMARY = ['approve', 'approve_received', 'schedule_payment', 'record_payment'];
 const DANGER = ['reject', 'reverse_approval', 'cancel', 'payment_failed', 'start_recovery'];
-const WITH_FIELDS = ['link_po', 'schedule_payment', 'record_payment'];
+const WITH_FIELDS = ['link_po', 'schedule_payment', 'record_payment', 'edit_fields'];
+
+// Fields a reviewer can correct (the server checks them again: see corrections.js).
+const EDIT_FIELDS = [
+  ['vendorName', 'Supplier', 'text'],
+  ['abn', 'ABN', 'text'],
+  ['gstin', 'GSTIN', 'text'],
+  ['invoiceNumber', 'Invoice number', 'text'],
+  ['invoiceDate', 'Invoice date', 'date'],
+  ['dueDate', 'Due date', 'date'],
+  ['poNumber', 'Purchase order', 'text'],
+  ['currency', 'Currency', 'text'],
+  ['subtotal', 'Subtotal', 'number'],
+  ['gst', 'GST', 'number'],
+  ['total', 'Total', 'number'],
+];
+const FIELD_LABEL = { ...Object.fromEntries(EDIT_FIELDS.map(([k, label]) => [k, label])), lines: 'Line items' };
+const LINE_COLUMNS = [
+  ['sku', 'Item code', 'text'],
+  ['description', 'Description', 'text'],
+  ['qty', 'Qty', 'number'],
+  ['unitPrice', 'Unit price', 'number'],
+  ['amount', 'Amount', 'number'],
+];
+const asInput = (v) => (v === null || v === undefined ? '' : String(v));
+const editableFrom = (e) => ({
+  ...Object.fromEntries(EDIT_FIELDS.map(([k]) => [k, asInput(e[k])])),
+  lines: (e.lines || []).map((l) => ({ ...Object.fromEntries(LINE_COLUMNS.map(([k]) => [k, asInput(l[k])])), unit: l.unit ?? null })),
+});
+
+// A corrected value as a person reads it: "blank", an ABN in groups, money, a date, or the line items in brief.
+function shownValue(field, value, cur) {
+  if (value === null || value === undefined || value === '') return 'blank';
+  if (field === 'abn') return abn(value);
+  if (['subtotal', 'gst', 'total'].includes(field)) return money(value, cur);
+  if (field === 'invoiceDate' || field === 'dueDate') return day(value);
+  if (field === 'lines') return value.length ? `${value.length} line${value.length === 1 ? '' : 's'} (${value.map((l) => `${l.sku || l.description}: ${l.qty ?? '?'} × ${money(l.unitPrice, cur)}`).join('; ')})` : 'no line items';
+  return String(value);
+}
+const correctionText = (c, cur) => `${FIELD_LABEL[c.field] || c.field}: ${shownValue(c.field, c.from, cur)} → ${shownValue(c.field, c.to, cur)}`;
 const todayIso = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1078,6 +1134,7 @@ function Actions({ data, busy, onAct }) {
     if (a.noteRequired && !note.trim()) return setHint(`Add a note with the reason to ${a.label.toLowerCase()}.`);
     if (a.id === 'link_po') setFields({ poNumber: invoice.match?.suggestions?.[0]?.poNumber || linkablePos[0]?.poNumber || '' });
     if (a.id === 'schedule_payment') setFields({ method: payment?.method || 'EFT', scheduledFor: invoice.due?.date && invoice.due.date >= todayIso() ? invoice.due.date : todayIso(), reference: '' });
+    if (a.id === 'edit_fields') setFields(editableFrom(e));
     if (a.id === 'record_payment') setFields({ amount: remaining ?? '', paidOn: todayIso(), method: payment?.method || 'EFT', reference: '' });
     if (a.confirm || WITH_FIELDS.includes(a.id)) return setPending(a);
     submit(a, {});
@@ -1113,6 +1170,8 @@ function Actions({ data, busy, onAct }) {
         return 'This invoice has already been paid. Open a recovery to get the money back? The payment record is kept.';
       case 'link_po':
         return 'Link a purchase order. The agent will match the invoice against it again.';
+      case 'edit_fields':
+        return 'Correct what the reader got wrong. The agent checks the invoice again on the corrected values; every other check still applies, and nothing is approved. Your note is kept with the correction.';
       default:
         return `${a.label}?`;
     }
@@ -1192,6 +1251,7 @@ function Actions({ data, busy, onAct }) {
               </div>
             </div>
           )}
+          {pending.id === 'edit_fields' && <EditFields fields={fields} setFields={setFields} />}
           {(pending.id === 'schedule_payment' || pending.id === 'record_payment') && (
             <div className="decision-fields">
               {pending.id === 'record_payment' && (
@@ -1230,7 +1290,7 @@ function Actions({ data, busy, onAct }) {
             <p className="form-hint">This is a part payment. {money(remaining - Number(fields.amount), cur)} will still be due and the invoice stays Payment Pending.</p>
           )}
           <div className="decision-actions">
-            <button className={`btn ${DANGER.includes(pending.id) ? 'btn-danger' : 'btn-primary'}`} disabled={working || !fieldsOk} onClick={() => submit(pending, pending.id === 'record_payment' ? { ...fields, amount: Number(fields.amount) } : fields)}>
+            <button className={`btn ${DANGER.includes(pending.id) ? 'btn-danger' : 'btn-primary'}`} disabled={working || !fieldsOk} onClick={() => submit(pending, pending.id === 'record_payment' ? { ...fields, amount: Number(fields.amount) } : pending.id === 'edit_fields' ? { fields } : fields)}>
               {busy === pending.id ? 'Working…' : `Confirm: ${pending.label}`}
             </button>
             <button className="btn btn-outline" disabled={working} onClick={() => setPending(null)}>
@@ -1260,5 +1320,63 @@ function Actions({ data, busy, onAct }) {
         </div>
       )}
     </section>
+  );
+}
+
+// The reviewer's corrections form: every editable field, prefilled with what
+// the agent read, and the line items. Empty means "not on the invoice".
+function EditFields({ fields, setFields }) {
+  const set = (k) => (ev) => setFields((f) => ({ ...f, [k]: ev.target.value }));
+  const setLine = (i, k) => (ev) => setFields((f) => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, [k]: ev.target.value } : l)) }));
+  const addLine = () => setFields((f) => ({ ...f, lines: [...(f.lines || []), { sku: '', description: '', qty: '', unitPrice: '', amount: '', unit: null }] }));
+  const removeLine = (i) => setFields((f) => ({ ...f, lines: f.lines.filter((_, j) => j !== i) }));
+  return (
+    <>
+      <div className="decision-fields">
+        {EDIT_FIELDS.map(([k, label, type]) => (
+          <div key={k}>
+            <label className="field-label" htmlFor={`edit-${k}`}>
+              {label}
+            </label>
+            <input id={`edit-${k}`} type={type} step={type === 'number' ? '0.01' : undefined} value={fields[k] ?? ''} onChange={set(k)} />
+          </div>
+        ))}
+      </div>
+      <div className="table-scroll">
+        <table className="lines edit-lines">
+          <thead>
+            <tr>
+              {LINE_COLUMNS.map(([k, label, type]) => (
+                <th key={k} scope="col" className={type === 'number' ? 'num' : undefined}>
+                  {label}
+                </th>
+              ))}
+              <th scope="col">Remove</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(fields.lines || []).map((l, i) => (
+              <tr key={i}>
+                {LINE_COLUMNS.map(([k, label, type]) => (
+                  <td key={k} className={type === 'number' ? 'num' : undefined}>
+                    <input aria-label={`Line ${i + 1} ${label.toLowerCase()}`} type={type} step={type === 'number' ? 'any' : undefined} value={l[k] ?? ''} onChange={setLine(i, k)} />
+                  </td>
+                ))}
+                <td>
+                  <button type="button" className="btn btn-outline" onClick={() => removeLine(i)} aria-label={`Remove line ${i + 1}`}>
+                    ×
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="decision-actions">
+        <button type="button" className="btn btn-outline" onClick={addLine}>
+          Add line
+        </button>
+      </div>
+    </>
   );
 }
