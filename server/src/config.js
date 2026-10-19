@@ -20,6 +20,8 @@ export const config = {
   // Leave GROQ_API_KEY empty to use the basic pattern reader instead of AI.
   groqApiKey: (process.env.GROQ_API_KEY || '').trim(),
   groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  // A Groq model that accepts images, for scanned and photographed invoices.
+  groqVisionModel: process.env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b',
 
   // Optional override for Node's DNS resolver (see server/.env.example). Empty by default.
   dnsServers: (process.env.DNS_SERVERS || '')

@@ -64,7 +64,9 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
       async understand(state) {
         const { invoice } = state.input;
         const hints = ledger.supplierHintsFor ? await ledger.supplierHintsFor(invoice.rawText) : [];
-        const reading = await extract(invoice.rawText, { hints });
+        // A scan or photo arrives already read by the vision reader; processing it
+        // again reads its transcription (the invoice text) with the text reader.
+        const reading = state.input.reading || (await extract(invoice.rawText, { hints }));
         const { extracted, extraction } = applyCorrections(reading, invoice.corrections, invoice.rawText);
         invoice.extracted = extracted;
         invoice.extraction = extraction;
@@ -72,7 +74,7 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         invoice.dupKey = invoice.fingerprints.numberKey;
         invoice.due = dueInfo(extracted, today?.());
         await save(invoice);
-        const reader = extraction.method === 'groq' ? `AI reader (${extraction.model})` : 'basic pattern reader';
+        const reader = extraction.method === 'groq-vision' ? `AI vision reader (${extraction.model}), from an image` : extraction.method === 'groq' ? `AI reader (${extraction.model})` : 'basic pattern reader';
         const helped = extraction.hints?.count ? ` Given ${extraction.hints.count} reviewer hint${extraction.hints.count === 1 ? '' : 's'} for ${extraction.hints.supplier || 'this supplier'}; every value was still checked against the invoice text.` : '';
         const corrected = extraction.corrected?.length ? ` ${extraction.corrected.length} field${extraction.corrected.length === 1 ? '' : 's'} corrected by a reviewer.` : '';
         return {
@@ -131,6 +133,18 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         if (invoice.poOverride) match.linkedBy = invoice.poOverride;
 
         const checks = [...validation.checks, dup, ...match.checks];
+        // Read from a scan or photo: the same model wrote the text and read the
+        // fields from it, so a person always confirms them. Never straight to Under Review.
+        const scan = invoice.source?.scan;
+        if (scan) {
+          checks.unshift({
+            id: 'read_from_image',
+            label: 'Read from an image: confirm the key fields',
+            status: 'fail',
+            severity: 'review',
+            detail: `This invoice was read from ${scan.from === 'pdf' ? `a scanned PDF (${scan.pages} page${scan.pages === 1 ? '' : 's'})` : 'an image'} by the AI vision reader${scan.model ? ` (${scan.model})` : ''}. Its text was transcribed by the same model that read the fields, so the check that values appear in the text is weaker than for a PDF with a text layer. Compare the supplier, ABN, invoice number, dates and amounts with the original file, and correct any that are wrong with Edit fields.`,
+          });
+        }
         invoice.validation = { jurisdiction: validation.jurisdiction, identifier: validation.identifier, registration: validation.registration };
         invoice.match = {
           score: match.score,

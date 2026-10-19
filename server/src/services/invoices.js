@@ -4,7 +4,7 @@
 
 import { runAgent } from '../agent/core/loop.js';
 import { createInvoiceAgent } from '../agent/finance/invoiceAgent.js';
-import { createExtractor } from '../agent/finance/extract.js';
+import { createExtractor, createVisionReader } from '../agent/finance/extract.js';
 import { createAbrLookup } from '../agent/finance/abr.js';
 import { receivedOnly, normaliseAbn } from '../agent/finance/rules.js';
 import { allowedActions, ActionError, AWAITING_DECISION } from '../agent/finance/lifecycle.js';
@@ -16,6 +16,7 @@ import { HttpError } from './runs.js';
 import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 
 export const extractor = createExtractor(config);
+export const visionReader = createVisionReader(config);
 export const abrLookup = createAbrLookup(config);
 
 const agent = createInvoiceAgent({
@@ -27,10 +28,11 @@ const agent = createInvoiceAgent({
   today: () => todayIso(),
 });
 
-export async function processInvoice(invoice) {
+// `reading`: a scan or photo the vision reader has already read (see uploads.js).
+export async function processInvoice(invoice, { reading = null } = {}) {
   const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [] });
 
-  const result = await runAgent(agent, { invoice }, {
+  const result = await runAgent(agent, { invoice, reading }, {
     onStep: async (_step, steps) => {
       run.steps = [...steps];
       await run.save();

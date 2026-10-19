@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import multer from 'multer';
-import { extractText, getDocumentProxy } from 'unpdf';
 
 import { config } from '../config.js';
 import { Invoice, Vendor, PurchaseOrder, GoodsReceipt } from '../models/index.js';
 import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../seed/data.js';
 import { resetEverything } from '../seed/seed.js';
-import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup } from '../services/invoices.js';
+import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup, visionReader } from '../services/invoices.js';
+import { readUpload, NEEDS_OCR } from '../services/uploads.js';
 import { HttpError } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
 import { createWorkLimiter } from '../rateLimit.js';
@@ -31,31 +31,13 @@ const requireId = (req) => {
   return req.params.id;
 };
 
-async function textFromUpload(file) {
-  const name = file.originalname || 'upload';
-  const isPdf = file.mimetype === 'application/pdf' || /\.pdf$/i.test(name);
-  const isText = file.mimetype?.startsWith('text/') || /\.(txt|text|csv|md)$/i.test(name);
-  if (isPdf) {
-    try {
-      const pdf = await getDocumentProxy(new Uint8Array(file.buffer));
-      const { text } = await extractText(pdf, { mergePages: true });
-      return text || '';
-    } catch (err) {
-      console.error(`PDF could not be read (${name}):`, err?.message || err);
-      throw new HttpError(400, `"${name}" could not be opened as a PDF. It may be damaged or password protected.`);
-    }
-  }
-  if (isText) return file.buffer.toString('utf8');
-  throw new HttpError(400, 'Upload a PDF or a plain text file.');
-}
-
 export const api = Router();
 
 api.get('/health', (req, res) => {
   res.json({
     ok: true,
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    reader: { mode: extractor.mode, model: extractor.model },
+    reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null },
     policy: config.policy,
     abr: Boolean(abrLookup),
     roles: { reviewers: config.roles.reviewers.length > 0, approvers: config.roles.approvers.length > 0, payers: config.roles.payers.length > 0 },
@@ -97,10 +79,10 @@ api.get('/invoices/:id', wrap(async (req, res) => {
 api.post('/invoices', work, upload.single('file'), wrap(async (req, res) => {
   let source;
   let rawText;
+  let reading = null; // a scan or photo already read by the vision reader
 
   if (req.file) {
-    source = { kind: 'upload', filename: req.file.originalname };
-    rawText = await textFromUpload(req.file);
+    ({ source, rawText, reading = null } = await readUpload(req.file, { vision: visionReader }));
   } else if (req.body?.sampleId) {
     const sample = findSample(req.body.sampleId);
     if (!sample) throw new HttpError(400, 'That sample does not exist.');
@@ -115,12 +97,12 @@ api.post('/invoices', work, upload.single('file'), wrap(async (req, res) => {
 
   rawText = rawText.replace(/\u0000/g, '').trim();
   if (!rawText) {
-    throw new HttpError(400, req.file ? 'No text could be read from that file. If it is a scan or a photo, it needs OCR, which this prototype does not include.' : 'The invoice text is empty.');
+    throw new HttpError(400, req.file ? NEEDS_OCR : 'The invoice text is empty.');
   }
   if (rawText.length > MAX_TEXT) throw new HttpError(400, 'That is too much text for one invoice.');
 
   const invoice = await Invoice.create({ source, rawText });
-  await processInvoice(invoice);
+  await processInvoice(invoice, { reading });
   res.status(201).json(await getInvoiceDetail(invoice._id));
 }));
 

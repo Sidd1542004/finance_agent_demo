@@ -42,8 +42,9 @@ export const INVOICE_STATUSES = ['received', 'processing', 'under_review', 'need
 
 const invoiceSchema = new Schema(
   {
-    source: { kind: { type: String, enum: ['sample', 'upload', 'paste'], required: true }, filename: String, sampleId: String },
-    rawText: { type: String, required: true },
+    // scan: { from: 'image' | 'pdf', pages, model } when read from a scan or photo by the vision reader.
+    source: { kind: { type: String, enum: ['sample', 'upload', 'paste'], required: true }, filename: String, sampleId: String, scan: { type: Mixed, default: undefined } },
+    rawText: { type: String, required: true }, // for a scan or photo: the vision reader's transcription
     status: { type: String, enum: INVOICE_STATUSES, default: 'received', index: true },
     extracted: { type: Mixed, default: null }, // fields read from the invoice
     extraction: { type: Mixed, default: null }, // which reader, confidence, notes

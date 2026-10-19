@@ -65,6 +65,7 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    | `MONGODB_URI` | Required. The Atlas connection string, including the database name. |
    | `GROQ_API_KEY` | Optional. Without it the app uses the basic readers. |
    | `GROQ_MODEL` | Optional. Defaults to `llama-3.3-70b-versatile`. |
+   | `GROQ_VISION_MODEL` | Optional. Defaults to `qwen/qwen3.8-27b`. Reads scans and photos. |
    | `TIME_ZONE` | Optional. Defaults to `Australia/Sydney`. Report months, "today", due dates and overdue follow it (Vercel's clock is UTC). |
    | `DEMO_MODE` | `true` shows Load demo month and Reset (they wipe the data). Unset or anything else: off. |
    | `ACCESS_PASSWORD` | Recommended for a public demo. Every page and API call asks for it (any user name). |
@@ -337,13 +338,20 @@ To connect real systems, write a file with the same functions as
 - **No mailbox.** Emails are pasted in. A real connection must also check that the sender
   address was not forged (SPF, DKIM), which this prototype cannot do.
 - **No bank feed.** Statements are CSV files with date, description and amount columns.
-- **No scanned invoices.** PDFs must contain text. Scans and photos need OCR.
+- **Scans and photos need the Groq key.** With `GROQ_API_KEY` set, a JPG or PNG (up to
+  4 MB), or a PDF with no text layer (its first 2 pages, rendered with unpdf and
+  `@napi-rs/canvas`), is read by a Groq vision model (`GROQ_VISION_MODEL`). The model
+  returns a transcription and the fields; the fields are checked against that
+  transcription, which is kept as the invoice text. Because the same model wrote both,
+  every invoice read from an image gets the check "Read from an image: confirm the key
+  fields" and always goes to Needs Review. Without a key, scans and photos are refused
+  with a clear message, as before.
 - **No follow-up for the unpaid remainder.** After a received-quantity-only approval, the
   rest of the invoice is not tracked or paid later. One bank line pays one invoice. Two
   invoices that each bill half an order are not added together.
 - **Supplier payments only.** Money in, payroll, tax and fees are not reconciled.
 - **The report is an accounts payable summary,** not a month-end close. There is no general
-  ledger, accruals or journals behind it. Months follow the server's time zone.
+  ledger, accruals or journals behind it. Months follow `TIME_ZONE` (Australia/Sydney by default).
 - **Policy values are placeholders.** The 85% threshold, score weights, 2% price tolerance
   and 80% confidence floor are sample numbers; agree them with the finance team.
 - **Payments are simulated.** Scheduling and recording a payment only writes records. No

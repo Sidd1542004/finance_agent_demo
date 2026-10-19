@@ -123,6 +123,7 @@ export default function InvoicesView({ health, onError }) {
         <aside className="side">
           <AddInvoice
             samples={samples}
+            vision={Boolean(health?.reader?.vision)}
             busy={busy === 'process'}
             disabled={Boolean(busy) || !health}
             onSample={(id) => processWith(() => api.processSample(id))}
@@ -219,7 +220,7 @@ export default function InvoicesView({ health, onError }) {
   );
 }
 
-function AddInvoice({ samples, busy, disabled, onSample, onFile, onText }) {
+function AddInvoice({ samples, vision, busy, disabled, onSample, onFile, onText }) {
   const [sampleId, setSampleId] = useState('');
   const [pasting, setPasting] = useState(false);
   const [text, setText] = useState('');
@@ -254,7 +255,7 @@ function AddInvoice({ samples, busy, disabled, onSample, onFile, onText }) {
           <input
             className="sr-only"
             type="file"
-            accept=".pdf,.txt,application/pdf,text/plain"
+            accept={vision ? '.pdf,.txt,.jpg,.jpeg,.png,application/pdf,text/plain,image/jpeg,image/png' : '.pdf,.txt,application/pdf,text/plain'}
             disabled={disabled}
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -267,6 +268,9 @@ function AddInvoice({ samples, busy, disabled, onSample, onFile, onText }) {
           Paste text
         </button>
       </div>
+      <p className="hint">
+        {vision ? 'PDF, JPG, PNG or text, up to 4 MB. Scans and photos are read by the AI vision reader and always go to a person to confirm.' : 'PDF or text, up to 4 MB. Scans and photos need the AI reader (a Groq key).'}
+      </p>
 
       {pasting && (
         <div className="paste">
@@ -636,7 +640,7 @@ function Detail({ data, fresh, busy, onAct }) {
 
             {invoice.extraction && (
               <p className="hint">
-                Read by the {invoice.extraction.method === 'groq' ? `AI reader (${invoice.extraction.model})` : 'basic pattern reader'},{' '}
+                Read by the {invoice.extraction.method === 'groq-vision' ? `AI vision reader (${invoice.extraction.model}), from an image` : invoice.extraction.method === 'groq' ? `AI reader (${invoice.extraction.model})` : 'basic pattern reader'},{' '}
                 {Math.round(invoice.extraction.confidence * 100)}% confident.
                 {invoice.extraction.notes ? ` ${invoice.extraction.notes}` : ''}
               </p>

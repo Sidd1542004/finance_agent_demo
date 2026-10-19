@@ -29,6 +29,7 @@ export const monthOf = (date, tz = businessTimeZone()) => monthIn(date, tz);
 // Check labels describe what passing looks like ("Purchase order found"). A
 // report needs the opposite: why the invoice was held.
 const HELD_REASON = {
+  read_from_image: 'Read from a scan or photo: key fields to confirm',
   required_fields: 'Details missing from the invoice',
   reader_confidence: 'Invoice could not be read with confidence',
   jurisdiction: 'Tax rules could not be identified',

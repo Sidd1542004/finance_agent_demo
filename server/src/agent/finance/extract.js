@@ -10,7 +10,7 @@
 // reader reports must actually appear in the invoice text, otherwise confidence
 // is cut and the invoice goes to a person.
 
-import { groqJson } from '../../llm/groq.js';
+import { groqJson, groqChat } from '../../llm/groq.js';
 import { normaliseAbn, normaliseAcn } from './rules.js';
 import { latestCorrections, EDITABLE_FIELDS } from './corrections.js';
 import { hintsPrompt } from './supplierHints.js';
@@ -455,6 +455,47 @@ export async function extractWithGroq(text, { apiKey, model, fetchImpl, hints = 
   });
 }
 
+// ---------- AI vision reader (Groq), for scans and photos ----------
+
+export const VISION_PROMPT = `${SYSTEM_PROMPT}
+
+This invoice is an image (a scan or a photo). Do two things:
+1. Transcribe all the text you can see, line by line, exactly as printed. Do not summarise, correct or add anything. Write [illegible] for anything you cannot read.
+2. Read the invoice fields from that same text.
+
+Return one JSON object: { "transcription": string, "invoice": { ...the object described above, including "confidence" and "notes" } }.
+Every value in "invoice" must appear in your transcription.`;
+
+export const MAX_VISION_IMAGES = 2;
+
+/**
+ * Read invoice images with a Groq vision model.
+ * @param images [{ mimetype: 'image/png' | 'image/jpeg', data: Buffer | Uint8Array }]
+ * @returns { transcription, reading: { extracted, extraction } }, the fields grounded against the transcription
+ */
+export async function readInvoiceImages(images, { apiKey, model, fetchImpl } = {}) {
+  const parts = images.slice(0, MAX_VISION_IMAGES).map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mimetype};base64,${Buffer.from(img.data).toString('base64')}` } }));
+  const raw = await groqChat({
+    apiKey,
+    model,
+    fetchImpl,
+    timeoutMs: 40000,
+    body: {
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: VISION_PROMPT },
+        { role: 'user', content: [{ type: 'text', text: `The invoice, ${parts.length === 1 ? 'one page' : `${parts.length} pages`}:` }, ...parts] },
+      ],
+    },
+  });
+  const transcription = (typeof raw.transcription === 'string' ? raw.transcription : '').replace(/\u0000/g, '').trim().slice(0, 200_000);
+  if (transcription.replace(/\[illegible\]/gi, '').trim().length < 40) throw new Error('No readable text was found in the image. Try a sharper scan or photo, or upload a PDF with a text layer.');
+  const fields = raw.invoice && typeof raw.invoice === 'object' && !Array.isArray(raw.invoice) ? raw.invoice : raw;
+  const reading = finish(normalise(fields), transcription, { method: 'groq-vision', model, input: 'image', confidence: fields.confidence, notes: str(fields.notes) });
+  return { transcription, reading };
+}
+
 // Pick the reader from configuration.
 export function createExtractor({ groqApiKey, groqModel }) {
   if (groqApiKey) {
@@ -465,4 +506,10 @@ export function createExtractor({ groqApiKey, groqModel }) {
     };
   }
   return { mode: 'rules', model: null, extract: async (text) => extractWithRules(text) };
+}
+
+// The vision reader for scans and photos, or null without a Groq key.
+export function createVisionReader({ groqApiKey, groqVisionModel }) {
+  if (!groqApiKey) return null;
+  return { model: groqVisionModel, read: (images) => readInvoiceImages(images, { apiKey: groqApiKey, model: groqVisionModel }) };
 }
