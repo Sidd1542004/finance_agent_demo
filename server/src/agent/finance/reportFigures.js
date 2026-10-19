@@ -6,15 +6,17 @@
 
 import { cents, money, isNum, day } from './rules.js';
 import { STATUS_LABEL } from './lifecycle.js';
+import { businessTimeZone, startOfDayIn, monthIn, isoDateIn } from './timeZone.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export const isMonth = (value) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value ?? ''));
 
-// The month in the server's local time zone.
-export function monthRange(month) {
+// The month in the business's time zone (TIME_ZONE), not the server's: on
+// Vercel the server runs in UTC.
+export function monthRange(month, tz = businessTimeZone()) {
   const [y, m] = month.split('-').map(Number);
-  return { start: new Date(y, m - 1, 1), end: new Date(y, m, 1), label: `${MONTHS[m - 1]} ${y}` };
+  return { start: startOfDayIn(y, m, 1, tz), end: startOfDayIn(y, m + 1, 1, tz), label: `${MONTHS[m - 1]} ${y}` };
 }
 
 export function previousMonth(month) {
@@ -22,7 +24,7 @@ export function previousMonth(month) {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
-export const monthOf = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+export const monthOf = (date, tz = businessTimeZone()) => monthIn(date, tz);
 
 // Check labels describe what passing looks like ("Purchase order found"). A
 // report needs the opposite: why the invoice was held.
@@ -115,10 +117,7 @@ function openBankItems(entries) {
 const INACTIVE = ['rejected', 'cancelled', 'failed'];
 const WAITING = ['under_review', 'needs_review', 'on_hold'];
 const COPY_STATUSES = [...WAITING, 'rejected', 'cancelled'];
-const localIso = (d) => {
-  const x = new Date(d);
-  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
-};
+const localIso = (d) => isoDateIn(d);
 
 export function splitDuplicateCopies(invoices) {
   const distinct = new Map();

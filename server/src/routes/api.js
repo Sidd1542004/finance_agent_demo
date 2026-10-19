@@ -60,6 +60,7 @@ api.get('/health', (req, res) => {
     abr: Boolean(abrLookup),
     roles: { reviewers: config.roles.reviewers.length > 0, approvers: config.roles.approvers.length > 0, payers: config.roles.payers.length > 0 },
     demoMode: config.demoMode,
+    timeZone: config.timeZone,
   });
 });
 

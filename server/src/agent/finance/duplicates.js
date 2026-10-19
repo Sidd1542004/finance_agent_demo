@@ -9,6 +9,7 @@
 //   contentHash the same document text, even if it was read differently
 // A suspected duplicate cannot be approved or paid until a person clears it.
 
+import { businessTimeZone } from './timeZone.js';
 import crypto from 'node:crypto';
 import { isNum } from './rules.js';
 
@@ -58,7 +59,7 @@ const INACTIVE = ['rejected', 'cancelled', 'failed'];
 export function duplicateCheck(candidates, cleared, fmt = (n) => String(n)) {
   const live = candidates.filter((c) => !INACTIVE.includes(c.status));
   const gone = candidates.filter((c) => INACTIVE.includes(c.status));
-  const describe = (c) => `invoice ${c.invoiceNumber || '(no number)'} for ${fmt(c.total)} received ${new Date(c.createdAt).toLocaleDateString('en-AU')} (${c.signals.join(', ')}; now ${String(c.status).replace(/_/g, ' ')})`;
+  const describe = (c) => `invoice ${c.invoiceNumber || '(no number)'} for ${fmt(c.total)} received ${new Date(c.createdAt).toLocaleDateString('en-AU', { timeZone: businessTimeZone() })} (${c.signals.join(', ')}; now ${String(c.status).replace(/_/g, ' ')})`;
   if (!live.length) {
     return {
       id: 'duplicate',

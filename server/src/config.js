@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { businessTimeZone } from './agent/finance/timeZone.js';
 
 const list = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -25,6 +26,9 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+
+  // The business's time zone: "today", due dates, overdue and report months follow it.
+  timeZone: businessTimeZone(),
 
   // The business the agent works for. Used to sign replies to suppliers.
   companyName: process.env.COMPANY_NAME || 'Meridian Logistics Pty Ltd',

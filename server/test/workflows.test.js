@@ -313,9 +313,11 @@ test('month helpers', () => {
   assert.equal(isMonth('2026-10'), true);
   assert.equal(isMonth('2026-13'), false);
   assert.equal(isMonth('October'), false);
-  const { start, end, label } = monthRange('2026-12');
+  // Months follow the business's time zone (Australia/Sydney by default), not the server's.
+  const { start, end, label } = monthRange('2026-12', 'Australia/Sydney');
   assert.equal(label, 'December 2026');
-  assert.deepEqual([start.getMonth(), end.getFullYear(), end.getMonth()], [11, 2027, 0]);
+  assert.equal(start.toISOString(), '2026-11-30T13:00:00.000Z');
+  assert.equal(end.toISOString(), '2026-12-31T13:00:00.000Z');
 });
 
 test('the demo month report: figures, open items and commentary', async () => {

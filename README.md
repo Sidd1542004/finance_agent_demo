@@ -65,6 +65,7 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    | `MONGODB_URI` | Required. The Atlas connection string, including the database name. |
    | `GROQ_API_KEY` | Optional. Without it the app uses the basic readers. |
    | `GROQ_MODEL` | Optional. Defaults to `llama-3.3-70b-versatile`. |
+   | `TIME_ZONE` | Optional. Defaults to `Australia/Sydney`. Report months, "today", due dates and overdue follow it (Vercel's clock is UTC). |
    | `DEMO_MODE` | `true` shows Load demo month and Reset (they wipe the data). Unset or anything else: off. |
    | `ACCESS_PASSWORD` | Recommended for a public demo. Every page and API call asks for it (any user name). |
    | `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` | Optional. Default: 30 requests that run the agent per 10 minutes per IP address. |
@@ -100,7 +101,10 @@ Limits to know:
 - **Uploads are limited to 4 MB.** Vercel refuses request bodies over 4.5 MB before they
   reach the app.
 - **Each request has 60 seconds** (`maxDuration` in `vercel.json`). Processing one invoice
-  with Groq normally takes a few seconds; loading the demo month takes longer.
+  with Groq normally takes a few seconds; loading the demo month takes longer. When Groq
+  is busy (429), briefly down (5xx), unreachable or slow, a call is tried up to twice more,
+  waiting as long as Groq's `Retry-After` asks (at most 8 seconds); all attempts fit in
+  45 seconds. A bad request or a rejected key is not retried.
 - **Cold starts.** The first request after a quiet spell starts a new function instance and
   opens the database connection, so it can take a few seconds. Later requests reuse the
   connection.
