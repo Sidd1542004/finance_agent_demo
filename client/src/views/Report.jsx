@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api.js';
+import { api, API_BASE_URL } from '../api.js';
 import { money, day, when, REPORT_STATUS } from '../format.js';
 import { Rail, Reasons, RecordList, AuditTrail, useBusy, useRecords } from '../shared.jsx';
 
@@ -134,7 +134,7 @@ function ReportDetail({ data, fresh }) {
   onClick={async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/api/reports/${report._id}/csv`
+        `${API_BASE_URL}/api/reports/${report._id}/csv`
       );
 
       if (!response.ok) {

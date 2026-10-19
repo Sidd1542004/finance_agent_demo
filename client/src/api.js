@@ -1,13 +1,15 @@
 // Thin wrapper around the server API. Every function returns parsed JSON or
 // throws an Error whose message is safe to show to the user.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+// Empty: the API is on the same site as the dashboard (Vercel, `npm start`, or the
+// Vite dev proxy). Set VITE_API_BASE_URL only when the API is hosted elsewhere.
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
-const UNREACHABLE = 'Cannot reach the server. Check that the API is running on port 4000.';
+const UNREACHABLE = 'Cannot reach the server. Locally, check that the API is running on port 4000 (npm run dev). On Vercel, open /api/health and check the function logs.';
 
 async function request(path, options) {
   let res;
   try {
-     res = await fetch(`${API_BASE_URL}/api${path}`, options);
+    res = await fetch(`${API_BASE_URL}/api${path}`, options);
   } catch {
     throw new Error(UNREACHABLE);
   }

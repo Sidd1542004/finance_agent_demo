@@ -1,0 +1,12 @@
+# Never upload secrets or local build output to Vercel.
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+.vercel
+node_modules
+**/node_modules
+client/dist
+*.log
+**/*.log

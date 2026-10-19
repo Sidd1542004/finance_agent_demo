@@ -100,7 +100,10 @@ export default function App() {
               <>
                 <h1>The server is not answering</h1>
                 <p>
-                  Start MongoDB, then run <code>npm run dev</code> in the project folder and reload this page.
+                  Locally: start MongoDB, then run <code>npm run dev</code> in the project folder and reload this page.
+                </p>
+                <p>
+                  On Vercel: open <code>/api/health</code>, and check the function logs, <code>MONGODB_URI</code> and MongoDB Atlas Network Access.
                 </p>
               </>
             ) : (

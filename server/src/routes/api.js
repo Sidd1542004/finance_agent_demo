@@ -12,7 +12,9 @@ import { HttpError } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
 
 const MAX_TEXT = 200_000;
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+// Vercel refuses request bodies over 4.5 MB before they reach the app, so uploads stop at 4 MB.
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
 
 // Express 4 does not catch errors from async handlers on its own.
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -148,7 +150,7 @@ api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 // eslint-disable-next-line no-unused-vars
 api.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    const message = err.code === 'LIMIT_FILE_SIZE' ? 'That file is larger than 5 MB.' : 'The upload could not be read.';
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'That file is larger than 4 MB. Upload a smaller file, or split it.' : 'The upload could not be read.';
     return res.status(400).json({ error: message });
   }
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });

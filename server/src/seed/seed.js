@@ -4,6 +4,7 @@
 import mongoose from 'mongoose';
 import { pathToFileURL } from 'node:url';
 import { config } from '../config.js';
+import { safeUri, redactSecrets } from '../safeUri.js';
 import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report } from '../models/index.js';
 import { vendors, purchaseOrders, goodsReceipts } from './data.js';
 
@@ -29,7 +30,12 @@ export async function resetEverything() {
 
 // Run directly: node src/seed/seed.js
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await mongoose.connect(config.mongoUri);
+  try {
+    await mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 8000 });
+  } catch (err) {
+    console.error(`Could not connect to MongoDB at ${safeUri(config.mongoUri)}: ${redactSecrets(err?.message)}`);
+    process.exit(1);
+  }
   await resetEverything();
   console.log(`Sample data loaded: ${vendors.length} suppliers, ${purchaseOrders.length} purchase orders, ${goodsReceipts.length} goods receipts. Invoices, supplier emails, bank statements and reports cleared.`);
   await mongoose.disconnect();

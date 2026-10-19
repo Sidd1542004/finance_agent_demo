@@ -2,7 +2,11 @@
   "name": "finance-operations-agent",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Finance Operations Agent prototype: invoice processing on the shared six-step agent loop (MERN + Groq).",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "setup": "npm install && npm install --prefix server && npm install --prefix client",
     "dev": "concurrently -n api,web -c blue,yellow \"npm run dev --prefix server\" \"npm run dev --prefix client\"",

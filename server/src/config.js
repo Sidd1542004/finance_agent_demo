@@ -12,6 +12,10 @@ export const config = {
   port: num(process.env.PORT, 4000),
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/finance_agent',
 
+  // Sites allowed to call the API from a browser (comma-separated). Only needed when the
+  // dashboard is served from a different site than the API. Empty: no CORS headers.
+  corsOrigins: list(process.env.CORS_ORIGINS),
+
   // Leave GROQ_API_KEY empty to use the basic pattern reader instead of AI.
   groqApiKey: (process.env.GROQ_API_KEY || '').trim(),
   groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',

@@ -47,6 +47,50 @@ that only understands the sample layout, supplier emails by a keyword reader, ba
 get no AI notes, and the report summary uses standard wording. The top bar shows whether
 AI is on.
 
+## Deploy to Vercel
+
+The dashboard and the API deploy together as **one** Vercel project: the dashboard as
+static files from `client/dist`, the API as one serverless function (`api/index.js`, which
+runs the same Express app as `npm start`). `vercel.json` holds the build settings.
+
+1. **MongoDB Atlas.** In Network Access, allow `0.0.0.0/0`. Vercel functions have no fixed
+   IP address, so a narrower list will refuse them. Keep the database user's password strong.
+2. **Import the repository** in Vercel (Add New > Project). Leave the Root Directory as it
+   is (the repository root) and set Framework Preset to **Other**. Do not override the build,
+   output or install commands: they come from `vercel.json`.
+3. **Environment variables** (Project Settings > Environment Variables):
+
+   | Variable | |
+   | --- | --- |
+   | `MONGODB_URI` | Required. The Atlas connection string, including the database name. |
+   | `GROQ_API_KEY` | Optional. Without it the app uses the basic readers. |
+   | `GROQ_MODEL` | Optional. Defaults to `llama-3.3-70b-versatile`. |
+   | `DEMO_MODE` | `true` shows Load demo month and Reset. Set it to `false` for anything real. |
+   | `COMPANY_NAME`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`, policy values | Optional, as in `server/.env.example`. |
+   | `CORS_ORIGINS` | Leave unset: the dashboard and API are on the same site. |
+
+   Do **not** set `PORT` (Vercel chooses it) or `DNS_SERVERS` (a Windows-only workaround).
+   `VITE_API_BASE_URL` is not needed either: the dashboard calls `/api` on its own site.
+4. **Deploy**, then open `https://<your-project>.vercel.app/api/health`. It should answer
+   `"database": "connected"`. A 503 saying the database cannot be reached means
+   `MONGODB_URI` is wrong or Atlas Network Access is refusing Vercel. The function log
+   shows the reason, with the host only (never the user name or password).
+
+Limits to know:
+
+- **Uploads are limited to 4 MB.** Vercel refuses request bodies over 4.5 MB before they
+  reach the app.
+- **Each request has 60 seconds** (`maxDuration` in `vercel.json`). Processing one invoice
+  with Groq normally takes a few seconds; loading the demo month takes longer.
+- **Cold starts.** The first request after a quiet spell starts a new function instance and
+  opens the database connection, so it can take a few seconds. Later requests reuse the
+  connection.
+
+To run it the way Vercel does, on one port: `npm run build --prefix client`, then
+`node scripts/vercel-local.js` (port 3000). `node scripts/smoke.js <url>` runs the demo
+month, a PDF upload, a bank statement and the month-end report against any deployment.
+It resets the data, so only use it on a demo.
+
 ## Demo script
 
 Press **Load demo month** first. It wipes everything and runs the seven sample invoices
