@@ -112,6 +112,41 @@ export const SupplierHint = model(
   ).index({ vendorAbn: 1, field: 1 }, { unique: true }),
 );
 
+// ----- The audit log -----
+
+// Every status change of an invoice, payment, supplier email, bank line or
+// report (see agent/finance/audit.js). Append only: updates and deletes are
+// refused here, so no code path (and no route) can rewrite the history.
+const auditSchema = new Schema(
+  {
+    subjectKind: { type: String, enum: ['invoice', 'payment', 'query', 'statement', 'bank_line', 'report', 'system'], required: true },
+    subjectId: { type: String, required: true },
+    actor: { type: String, required: true },
+    action: { type: String, required: true },
+    from: { type: String, default: null },
+    to: { type: String, default: null },
+    reason: { type: String, default: null },
+    detail: { type: String, default: null },
+    at: { type: Date, required: true },
+  },
+  { versionKey: false },
+);
+auditSchema.index({ subjectId: 1, at: 1 });
+auditSchema.index({ at: -1 });
+export const APPEND_ONLY = 'The audit log is append only: entries cannot be changed or deleted.';
+const refuse = () => {
+  throw new Error(APPEND_ONLY);
+};
+for (const op of ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'findOneAndDelete', 'replaceOne', 'deleteOne', 'deleteMany']) {
+  auditSchema.pre(op, { document: false, query: true }, refuse);
+}
+auditSchema.pre('deleteOne', { document: true, query: false }, refuse);
+auditSchema.pre('save', function auditInsertOnly() {
+  if (!this.isNew) throw new Error(APPEND_ONLY);
+});
+auditSchema.pre('bulkWrite', refuse);
+export const AuditEvent = model('AuditEvent', auditSchema);
+
 // One record per agent run: the audit trail of the six stages.
 export const AgentRun = model(
   'AgentRun',

@@ -84,6 +84,18 @@ export function Checks({ checks }) {
   );
 }
 
+// "Load more" under a list, when the server has older records.
+export function LoadMore({ onMore, busy }) {
+  if (!onMore) return null;
+  return (
+    <div className="load-more">
+      <button type="button" className="btn btn-outline btn-block" onClick={onMore} disabled={busy}>
+        {busy ? 'Loading…' : 'Load more'}
+      </button>
+    </div>
+  );
+}
+
 export function Reasons({ reasons }) {
   return (
     <ul className="reasons">
@@ -96,25 +108,28 @@ export function Reasons({ reasons }) {
 
 // The list of records on the left of each screen.
 // rows: [{ id, title, right, status: { label, tone }, meta }]
-export function RecordList({ rows, selectedId, onSelect, empty }) {
+export function RecordList({ rows, selectedId, onSelect, empty, onMore = null, loadingMore = false }) {
   if (rows.length === 0) return <p className="empty-list">{empty}</p>;
   return (
-    <ul className="inv-list">
-      {rows.map((row) => (
-        <li key={row.id}>
-          <button className="inv-item" aria-current={row.id === selectedId ? 'true' : undefined} onClick={() => onSelect(row.id)}>
-            <span className="inv-top">
-              <span className="inv-vendor">{row.title}</span>
-              {row.right && <span className="inv-total">{row.right}</span>}
-            </span>
-            <span className="inv-bottom">
-              <span className={`status status-${row.status.tone}`}>{row.status.label}</span>
-              <span className="inv-meta">{row.meta}</span>
-            </span>
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="inv-list">
+        {rows.map((row) => (
+          <li key={row.id}>
+            <button className="inv-item" aria-current={row.id === selectedId ? 'true' : undefined} onClick={() => onSelect(row.id)}>
+              <span className="inv-top">
+                <span className="inv-vendor">{row.title}</span>
+                {row.right && <span className="inv-total">{row.right}</span>}
+              </span>
+              <span className="inv-bottom">
+                <span className={`status status-${row.status.tone}`}>{row.status.label}</span>
+                <span className="inv-meta">{row.meta}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <LoadMore onMore={onMore} busy={loadingMore} />
+    </>
   );
 }
 
@@ -140,19 +155,45 @@ export function useBusy(onError) {
 
 // A list of records plus the one that is open. `listFn` and `getFn` must be
 // stable functions (the ones from api.js are).
+export const PAGE_SIZE = 50;
+
 export function useRecords(listFn, getFn, onError) {
   const [items, setItems] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [detail, setDetail] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [freshId, setFreshId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const latest = useRef(0);
 
+  // Reload from the newest, keeping as many records as were already shown (up to 200).
+  const shown = useRef(PAGE_SIZE);
   const refresh = useCallback(async () => {
-    const list = await listFn();
-    setItems(list);
-    return list;
+    const page = await listFn({ limit: Math.min(200, Math.max(PAGE_SIZE, shown.current)) });
+    setItems(page.items);
+    setNextCursor(page.nextCursor);
+    return page.items;
   }, [listFn]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await listFn({ before: nextCursor, limit: PAGE_SIZE });
+      setItems((list) => {
+        const seen = new Set(list.map((x) => x._id));
+        const next = [...list, ...page.items.filter((x) => !seen.has(x._id))];
+        shown.current = next.length;
+        return next;
+      });
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [listFn, nextCursor, onError]);
 
   const select = useCallback(
     async (id) => {
@@ -196,7 +237,7 @@ export function useRecords(listFn, getFn, onError) {
     })();
   }, [refresh, select, onError]);
 
-  return { items, detail, selectedId, freshId, loaded, select, show, refresh };
+  return { items, nextCursor, loadingMore, loadMore, detail, selectedId, freshId, loaded, select, show, refresh };
 }
 
 const STAGE_NAME = Object.fromEntries(STAGES);

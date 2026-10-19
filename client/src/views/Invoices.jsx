@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { money, abn, acn, day, when, STATUS, AWAITING_DECISION, TO_PAY } from '../format.js';
-import { Rail, CheckIcon, AuditTrail } from '../shared.jsx';
+import { Rail, CheckIcon, AuditTrail, LoadMore, PAGE_SIZE } from '../shared.jsx';
 
 // The reviewer's name is remembered on this computer so it does not have to be
 // typed for every decision. Storage can be unavailable; the form still works.
@@ -25,7 +25,10 @@ export default function InvoicesView({ health, onError }) {
   const setError = onError;
   const [samples, setSamples] = useState([]);
   const [reference, setReference] = useState(null);
-  const [invoices, setInvoices] = useState([]);
+  const [invoices, setInvoices] = useState([]); // the loaded page(s) of the current tab
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [counts, setCounts] = useState(null); // every invoice, counted on the server
   const [payables, setPayables] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -34,13 +37,56 @@ export default function InvoicesView({ health, onError }) {
   const [busy, setBusy] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const latestRequest = useRef(0);
+  const filterRef = useRef(filter);
+  const shownCount = useRef(PAGE_SIZE);
+  const listRequest = useRef(0);
 
+  // The newest invoices of the current tab (as many as were already shown), the
+  // counts, and what is due. The server filters, so a tab is never cut short.
   const refreshList = useCallback(async () => {
-    const [list, due] = await Promise.all([api.invoices(), api.payables().catch(() => null)]);
-    setInvoices(list);
+    const request = ++listRequest.current;
+    const which = filterRef.current;
+    const [page, due] = await Promise.all([
+      api.invoices({ filter: which === 'all' ? undefined : which, limit: Math.min(200, Math.max(PAGE_SIZE, shownCount.current)) }),
+      api.payables().catch(() => null),
+    ]);
+    if (request !== listRequest.current) return page.items;
+    setInvoices(page.items);
+    setNextCursor(page.nextCursor);
+    setCounts(page.counts);
     setPayables(due);
-    return list;
+    return page.items;
   }, []);
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const which = filterRef.current;
+      const page = await api.invoices({ filter: which === 'all' ? undefined : which, before: nextCursor, limit: PAGE_SIZE });
+      if (which !== filterRef.current) return;
+      setInvoices((list) => {
+        const seen = new Set(list.map((x) => x._id));
+        const next = [...list, ...page.items.filter((x) => !seen.has(x._id))];
+        shownCount.current = next.length;
+        return next;
+      });
+      setNextCursor(page.nextCursor);
+      setCounts(page.counts);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const changeFilter = (next) => {
+    if (next === filterRef.current) return;
+    filterRef.current = next;
+    shownCount.current = PAGE_SIZE;
+    setFilter(next);
+    refreshList().catch((err) => setError(err.message));
+  };
 
   const select = useCallback(async (id) => {
     const request = ++latestRequest.current;
@@ -57,11 +103,9 @@ export default function InvoicesView({ health, onError }) {
   useEffect(() => {
     (async () => {
       try {
-        const [s, r, list, due] = await Promise.all([api.samples(), api.reference(), api.invoices(), api.payables().catch(() => null)]);
+        const [s, r, list] = await Promise.all([api.samples(), api.reference(), refreshList()]);
         setSamples(s);
         setReference(r);
-        setInvoices(list);
-        setPayables(due);
         if (list.length) select(list[0]._id);
       } catch (err) {
         setError(err.message);
@@ -69,7 +113,7 @@ export default function InvoicesView({ health, onError }) {
         setLoaded(true);
       }
     })();
-  }, [select]);
+  }, [select, refreshList]);
 
   // Run an action with a busy flag and one place for errors.
   const run = async (kind, action) => {
@@ -89,6 +133,7 @@ export default function InvoicesView({ health, onError }) {
     setDetail(data);
     setSelectedId(data.invoice._id);
     setFreshId(data.invoice._id);
+    filterRef.current = 'all';
     setFilter('all');
     // On a phone the result is below the form, so bring it into view.
     requestAnimationFrame(() => document.querySelector('.main')?.scrollIntoView({ block: 'start', behavior: 'auto' }));
@@ -114,9 +159,10 @@ export default function InvoicesView({ health, onError }) {
       }
     });
 
-  const waiting = invoices.filter((i) => AWAITING_DECISION.includes(i.status) || i.status === 'failed');
-  const toPay = invoices.filter((i) => TO_PAY.includes(i.status));
-  const shown = filter === 'waiting' ? waiting : filter === 'pay' ? toPay : invoices;
+  const total = counts?.all ?? invoices.length;
+  const waitingCount = counts?.waiting ?? invoices.filter((i) => AWAITING_DECISION.includes(i.status) || i.status === 'failed').length;
+  const toPayCount = counts?.toPay ?? invoices.filter((i) => TO_PAY.includes(i.status)).length;
+  const shown = invoices;
 
   return (
     <div className="layout">
@@ -133,19 +179,19 @@ export default function InvoicesView({ health, onError }) {
 
         <section className="card">
           <div className="tabs" role="tablist" aria-label="Invoices">
-            <button role="tab" aria-selected={filter === 'all'} className="tab" onClick={() => setFilter('all')}>
-              All <span className="count">{invoices.length}</span>
+            <button role="tab" aria-selected={filter === 'all'} className="tab" onClick={() => changeFilter('all')}>
+              All <span className="count">{total}</span>
             </button>
-            <button role="tab" aria-selected={filter === 'waiting'} className="tab" onClick={() => setFilter('waiting')}>
-              Needs a person <span className={`count ${waiting.length ? 'count-wait' : ''}`}>{waiting.length}</span>
+            <button role="tab" aria-selected={filter === 'waiting'} className="tab" onClick={() => changeFilter('waiting')}>
+              Needs a person <span className={`count ${waitingCount ? 'count-wait' : ''}`}>{waitingCount}</span>
             </button>
-            <button role="tab" aria-selected={filter === 'pay'} className="tab" onClick={() => setFilter('pay')}>
-              To pay <span className="count">{toPay.length}</span>
+            <button role="tab" aria-selected={filter === 'pay'} className="tab" onClick={() => changeFilter('pay')}>
+              To pay <span className="count">{toPayCount}</span>
             </button>
           </div>
           {shown.length === 0 ? (
             <p className="empty-list">
-              {invoices.length === 0
+              {total === 0
                 ? 'No invoices yet. Process a sample above to see the agent work.'
                 : filter === 'pay'
                   ? 'Nothing is approved and waiting to be paid.'
@@ -179,6 +225,7 @@ export default function InvoicesView({ health, onError }) {
               })}
             </ul>
           )}
+          {shown.length > 0 && <LoadMore onMore={nextCursor ? loadMore : null} busy={loadingMore} />}
         </section>
 
         {payables && <Payables data={payables} onSelect={select} />}
@@ -187,7 +234,7 @@ export default function InvoicesView({ health, onError }) {
       </aside>
 
       <main className="main">
-        {invoices.length > 0 && <Kpis invoices={invoices} />}
+        {total > 0 && <Kpis invoices={invoices} counts={counts?.kpis} />}
         {detail ? (
           <Detail key={detail.invoice._id} data={detail} fresh={freshId === detail.invoice._id} busy={busy} onAct={act} />
         ) : (
@@ -904,13 +951,21 @@ function StatusHistory({ events, currency }) {
 }
 
 // The four counts the landing page shows, under the new lifecycle.
-function Kpis({ invoices }) {
-  const items = [
-    ['In queue', invoices.filter((i) => !['payment_completed', 'rejected', 'cancelled'].includes(i.status)).length],
-    ['Matched by agent', invoices.filter((i) => i.decision?.outcome === 'under_review' && i.status !== 'cancelled').length],
-    ['Exceptions', invoices.filter((i) => ['needs_review', 'on_hold', 'failed', 'payment_failed'].includes(i.status)).length, true],
-    ['Awaiting payment', invoices.filter((i) => TO_PAY.includes(i.status)).length],
-  ];
+// Counted on the server across every invoice (the list may show only a page).
+function Kpis({ invoices, counts }) {
+  const items = counts
+    ? [
+        ['In queue', counts.inQueue],
+        ['Matched by agent', counts.matchedByAgent],
+        ['Exceptions', counts.exceptions, true],
+        ['Awaiting payment', counts.awaitingPayment],
+      ]
+    : [
+        ['In queue', invoices.filter((i) => !['payment_completed', 'rejected', 'cancelled'].includes(i.status)).length],
+        ['Matched by agent', invoices.filter((i) => i.decision?.outcome === 'under_review' && i.status !== 'cancelled').length],
+        ['Exceptions', invoices.filter((i) => ['needs_review', 'on_hold', 'failed', 'payment_failed'].includes(i.status)).length, true],
+        ['Awaiting payment', invoices.filter((i) => TO_PAY.includes(i.status)).length],
+      ];
   return (
     <dl className="kpis">
       {items.map(([label, value, flag]) => (

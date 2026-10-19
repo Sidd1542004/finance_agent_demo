@@ -13,6 +13,7 @@ import { processQuery, getQueryDetail, resolveQuery } from '../services/queries.
 import { processStatement, getStatementDetail, resolveLine } from '../services/statements.js';
 import { writeReport, getReportDetail } from '../services/reports.js';
 import { loadDemoMonth } from '../services/demo.js';
+import { pageOf, pageParams } from './paging.js';
 
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
@@ -31,7 +32,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/queries',
     wrap(async (req, res) => {
-      res.json(await VendorQuery.find().select('status from subject createdAt supplier.name decision.outcome').sort({ createdAt: -1 }).limit(200).lean());
+      res.json(await pageOf(VendorQuery, {}, pageParams(req.query), { select: 'status from subject createdAt supplier.name decision.outcome' }));
     }),
   );
 
@@ -101,16 +102,18 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/statements',
     wrap(async (req, res) => {
-      const docs = await BankStatement.find().select('status source createdAt lines.status lines.amount').sort({ createdAt: -1 }).limit(100).lean();
       res.json(
-        docs.map((s) => ({
-          _id: s._id,
-          status: s.status,
-          source: s.source,
-          createdAt: s.createdAt,
-          lineCount: s.lines.length,
-          openCount: s.lines.filter((l) => ['suggested', 'exception', 'unmatched'].includes(l.status)).length,
-        })),
+        await pageOf(BankStatement, {}, pageParams(req.query), {
+          select: 'status source createdAt lines.status lines.amount',
+          map: (s) => ({
+            _id: s._id,
+            status: s.status,
+            source: s.source,
+            createdAt: s.createdAt,
+            lineCount: s.lines.length,
+            openCount: s.lines.filter((l) => ['suggested', 'exception', 'unmatched'].includes(l.status)).length,
+          }),
+        }),
       );
     }),
   );
@@ -182,7 +185,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/reports',
     wrap(async (req, res) => {
-      res.json(await Report.find().select('month status createdAt figures.label').sort({ createdAt: -1 }).limit(100).lean());
+      res.json(await pageOf(Report, {}, pageParams(req.query), { select: 'month status createdAt figures.label' }));
     }),
   );
 

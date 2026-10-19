@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          npm ci --prefix server
+          npm ci --prefix client
+
+      # No database, network or secrets needed: the tests use the in-memory ledger.
+      - name: Server tests
+        run: npm test --prefix server
+
+      - name: Client build
+        run: npm run build --prefix client
+
+      - name: Format check
+        run: npm run format:check

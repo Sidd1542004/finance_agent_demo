@@ -367,6 +367,10 @@ textarea {
   padding: 10px 2px 2px;
 }
 
+.load-more {
+  margin-top: 16px;
+}
+
 .inv-list {
   margin: 0 -8px -8px;
   max-height: 420px;

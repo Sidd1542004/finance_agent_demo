@@ -5,10 +5,11 @@ import { createReconciliationAgent } from '../agent/finance/reconciliationAgent.
 import { createExplainer } from '../agent/finance/reconcileNotes.js';
 import { needsPerson } from '../agent/finance/reconcileRules.js';
 import { money } from '../agent/finance/rules.js';
+import { bankLineId } from '../agent/finance/audit.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { BankStatement } from '../models/index.js';
 import { config } from '../config.js';
-import { HttpError, runAndRecord, latestRun, addHumanStep, whoAndWhy, failedDecision } from './runs.js';
+import { HttpError, runAndRecord, latestRun, addHumanStep, whoAndWhy, failedDecision, auditFailed, recordAudit } from './runs.js';
 
 const agent = createReconciliationAgent({
   ledger: sampleLedger,
@@ -20,7 +21,9 @@ export async function processStatement(statement) {
   const result = await runAndRecord(agent, { statement }, { kind: 'statement', id: statement._id });
   if (!result.outcome) {
     await sampleLedger.revertStatement(String(statement._id));
+    const from = statement.status;
     await BankStatement.updateOne({ _id: statement._id }, { $set: { status: 'failed', decision: failedDecision(result) } });
+    await auditFailed('statement', statement._id, from, result);
   }
   return result;
 }
@@ -49,6 +52,7 @@ export async function resolveLine(id, lineNumber, input) {
   if (!line) throw new HttpError(404, 'That line is not on this statement.');
   if (!needsPerson(line)) throw new HttpError(409, 'This line has already been decided.');
 
+  const lineFrom = line.status;
   const label = `Line ${line.n} (${line.description}, ${money(Math.abs(line.amount))})`;
   let summary;
   let paidId = null;
@@ -81,6 +85,26 @@ export async function resolveLine(id, lineNumber, input) {
     throw err;
   }
 
+  await recordAudit({
+    subjectKind: 'bank_line',
+    subjectId: bankLineId(String(statement._id), line.n),
+    actor: who,
+    action,
+    from: lineFrom,
+    to: line.status,
+    reason: why || null,
+    detail: line.invoiceNumber ? `Invoice ${line.invoiceNumber}.` : null,
+  });
+  if (done)
+    await recordAudit({
+      subjectKind: 'statement',
+      subjectId: statement._id,
+      actor: who,
+      action: 'reconciled',
+      from: 'needs_person',
+      to: 'reconciled',
+      reason: 'Every line has been decided.',
+    });
   await addHumanStep(id, summary, done ? 'reconciled' : undefined);
   return getStatementDetail(id);
 }

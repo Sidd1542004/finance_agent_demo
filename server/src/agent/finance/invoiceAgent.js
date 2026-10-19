@@ -224,8 +224,10 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
           }
           invoice.status = 'failed';
           invoice.decision = { outcome: 'failed', reasons: [`The agent stopped at the "${state.error.stage}" step: ${state.error.message}`] };
-          pushEvent(invoice, { actor: 'Agent', action: 'processed', from, to: 'failed', reason: state.error.message });
+          const event = { actor: 'Agent', action: 'processed', from, to: 'failed', reason: state.error.message };
+          pushEvent(invoice, event);
           await save(invoice);
+          await ledger.recordAudit?.({ subjectKind: 'invoice', subjectId: invoice.id, ...event });
           state.outcome = 'failed';
           return { summary: 'Flagged for a person because the agent could not finish.' };
         }
@@ -234,14 +236,16 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         const reasons = state.escalation?.reasons || [];
         invoice.status = to;
         invoice.decision = { outcome: to, reasons };
-        pushEvent(invoice, {
+        const event = {
           actor: 'Agent',
           action: 'processed',
           from,
           to,
           reason: reasons.length ? `${reasons.length} exception(s)` : `Match score ${invoice.match?.score?.total}%`,
-        });
+        };
+        pushEvent(invoice, event);
         await save(invoice);
+        await ledger.recordAudit?.({ subjectKind: 'invoice', subjectId: invoice.id, ...event });
         state.outcome = to;
         if (to === 'under_review') {
           return { summary: 'Sent to the approval queue as eligible for approval. A person must approve it.' };

@@ -9,12 +9,20 @@ import { Invoice } from '../models/index.js';
 import { sampleInvoices, renderInvoiceText } from '../seed/data.js';
 import { resetEverything } from '../seed/seed.js';
 import { processInvoice, performInvoiceAction } from './invoices.js';
+import { recordAudit } from './runs.js';
 
 const DEMO_APPROVER = 'Priya N (demo)';
 const DEMO_PAYER = 'Sam K (demo)';
 
 export async function loadDemoMonth() {
   await resetEverything();
+  await recordAudit({
+    subjectKind: 'system',
+    subjectId: 'demo',
+    actor: 'Demo',
+    action: 'demo_loaded',
+    detail: 'Everything was deleted and the demo month loaded. The audit log is kept.',
+  });
 
   const ids = {};
   const submit = async (sample) => {

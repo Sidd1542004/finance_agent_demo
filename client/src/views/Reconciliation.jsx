@@ -59,6 +59,8 @@ export default function ReconciliationView({ onError }) {
             rows={rows}
             selectedId={records.selectedId}
             onSelect={records.select}
+            onMore={records.nextCursor ? records.loadMore : null}
+            loadingMore={records.loadingMore}
             empty="No statements yet. Reconcile the sample above. It refers to the demo month, so load that first."
           />
         </section>

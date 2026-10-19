@@ -55,7 +55,14 @@ export default function ReportView({ onError }) {
         </section>
         <section className="card">
           <h2>Reports</h2>
-          <RecordList rows={rows} selectedId={records.selectedId} onSelect={records.select} empty="No reports yet." />
+          <RecordList
+            rows={rows}
+            selectedId={records.selectedId}
+            onSelect={records.select}
+            onMore={records.nextCursor ? records.loadMore : null}
+            loadingMore={records.loadingMore}
+            empty="No reports yet."
+          />
         </section>
       </aside>
 

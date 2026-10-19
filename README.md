@@ -36,7 +36,7 @@ npm run dev
 Open http://localhost:5173. The sample suppliers, purchase orders and deliveries load
 themselves the first time the server starts.
 
-Other commands: `npm test` (154 tests, no database or network needed), `npm run seed`
+Other commands: `npm test` (the server tests; no database, network or keys needed), `npm run format` / `npm run format:check` (Prettier). GitHub Actions (`.github/workflows/ci.yml`) runs the tests, the client build and the format check on every push and pull request., `npm run seed`
 (wipe and reload the sample data), `npm run build` then `npm start` (serve the dashboard
 and the API together on port 4000).
 
@@ -313,7 +313,10 @@ invoice itself) and gives it to the AI reader for that supplier's later invoices
 never stands in for the invoice: every value must still appear in the invoice's text.
 
 Every status change is written to the invoice's history with who, from, to, reason and
-time. Changes are compare-and-set on the status, and the payment collection has one
+time, and to the **audit log** (`AuditEvent`): one entry per status change of an invoice,
+payment, supplier email, bank line or report, with subject, actor, action, from, to, reason,
+detail and time. The log is append only: the model refuses updates and deletes, no route
+changes it, and Reset and Load demo month keep it (they add an entry saying so). Changes are compare-and-set on the status, and the payment collection has one
 payment per invoice (unique index), so two people clicking at once cannot both succeed.
 
 Optional controls in `server/.env`: `REVIEWERS`, `APPROVERS`, `PAYERS` (comma-separated
@@ -330,6 +333,9 @@ Names are typed, not logged in, so these are guard rails, not security.
 | `POST /api/invoices/:id/approval` | Kept: `approve`, `approve_received`, `reject`. |
 | `POST /api/invoices/:id/rerun` | Kept: re-checks through the `rerun` action. |
 | `GET /api/health` | Adds `abr` and which roles are configured; `policy` now has `matchThreshold`, `missingAbn`, `segregateDuties`. |
+| `GET /api/invoices`, `/api/queries`, `/api/statements`, `/api/reports` | One page at a time, newest first: `?before=<nextCursor>&limit=<n>` (default 50, at most 200). Answers `{ items, nextCursor }`; `nextCursor` is null on the last page. Invoices also take `?filter=waiting|pay` and return `counts` (tabs and KPIs) over every invoice. |
+| `GET /api/audit?subjectId=<id>` | The append-only audit log for one invoice, payment, supplier email, report, or bank line (`<statement id>:<line number>`), oldest first. Without `subjectId`, the latest entries. |
+| `GET /api/cron/daily-summary` | The daily summary email; needs `Authorization: Bearer <CRON_SECRET>`. `?preview=1` returns it without sending. |
 
 `AUTO_APPROVE_LIMIT` is gone; the new settings are `MATCH_THRESHOLD`,
 `MISSING_ABN_POLICY`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`,

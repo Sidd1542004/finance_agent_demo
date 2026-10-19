@@ -23,13 +23,20 @@ async function request(path, options) {
   return data;
 }
 
+// ?before=<cursor>&limit=<n>&filter=..., leaving out what is not set.
+const query = (params = {}) => {
+  const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  return q.toString() ? `?${q}` : '';
+};
+
 const json = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export const api = {
   health: () => request('/health'),
   samples: () => request('/samples'),
   reference: () => request('/reference'),
-  invoices: () => request('/invoices'),
+  // Lists come a page at a time: { items, nextCursor }.
+  invoices: (params) => request(`/invoices${query(params)}`),
   invoice: (id) => request(`/invoices/${id}`),
   processSample: (sampleId) => request('/invoices', json({ sampleId })),
   processText: (text) => request('/invoices', json({ text })),
@@ -48,7 +55,7 @@ export const api = {
 
   // Supplier emails
   querySamples: () => request('/query-samples'),
-  queries: () => request('/queries'),
+  queries: (params) => request(`/queries${query(params)}`),
   query: (id) => request(`/queries/${id}`),
   processQuerySample: (sampleId) => request('/queries', json({ sampleId })),
   processQuery: (email) => request('/queries', json(email)),
@@ -57,7 +64,7 @@ export const api = {
 
   // Bank reconciliation
   statementSample: () => request('/statement-sample'),
-  statements: () => request('/statements'),
+  statements: (params) => request(`/statements${query(params)}`),
   statement: (id) => request(`/statements/${id}`),
   processStatementSample: (sampleId) => request('/statements', json({ sampleId })),
   processStatementText: (text) => request('/statements', json({ text })),
@@ -70,7 +77,7 @@ export const api = {
   resolveLine: (id, n, body) => request(`/statements/${id}/lines/${n}/resolution`, json(body)),
 
   // Month-end report
-  reports: () => request('/reports'),
+  reports: (params) => request(`/reports${query(params)}`),
   report: (id) => request(`/reports/${id}`),
   writeReport: (month) => request('/reports', json({ month })),
 };

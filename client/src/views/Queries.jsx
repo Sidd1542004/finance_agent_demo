@@ -64,6 +64,8 @@ export default function QueriesView({ onError }) {
             rows={rows}
             selectedId={records.selectedId}
             onSelect={records.select}
+            onMore={records.nextCursor ? records.loadMore : null}
+            loadingMore={records.loadingMore}
             empty="No emails yet. Process a sample above. The samples refer to the demo month, so load that first."
           />
         </section>

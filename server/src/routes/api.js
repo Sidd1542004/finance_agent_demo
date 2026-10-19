@@ -10,8 +10,11 @@ import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAct
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
 import { createDailySummaryHandler } from '../services/dailySummary.js';
 import { createMailer } from '../services/mailer.js';
-import { HttpError } from '../services/runs.js';
+import { sampleLedger } from '../integrations/sampleLedger.js';
+import { HttpError, recordAudit } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
+import { pageOf, pageParams } from './paging.js';
+import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { createWorkLimiter } from '../rateLimit.js';
 
 const MAX_TEXT = 200_000;
@@ -24,6 +27,23 @@ const work = createWorkLimiter(config.rateLimit);
 // Person's actions that send the invoice back through the agent.
 const RERUN_ACTIONS = new Set(['rerun', 'link_po', 'clear_duplicate', 'edit_fields']);
 const workIfRerun = (req, res, next) => (RERUN_ACTIONS.has(req.params.action) ? work(req, res, next) : next());
+
+const INVOICE_FILTERS = {
+  waiting: { status: { $in: [...AWAITING_DECISION, 'failed'] } },
+  pay: { status: { $in: ['approved', 'payment_pending', 'payment_failed'] } },
+};
+
+async function invoiceCounts() {
+  const [all, waiting, toPay, inQueue, matchedByAgent, exceptions] = await Promise.all([
+    Invoice.countDocuments(),
+    Invoice.countDocuments(INVOICE_FILTERS.waiting),
+    Invoice.countDocuments(INVOICE_FILTERS.pay),
+    Invoice.countDocuments({ status: { $nin: ['payment_completed', 'rejected', 'cancelled'] } }),
+    Invoice.countDocuments({ 'decision.outcome': 'under_review', status: { $ne: 'cancelled' } }),
+    Invoice.countDocuments({ status: { $in: ['needs_review', 'on_hold', 'failed', 'payment_failed'] } }),
+  ]);
+  return { all, waiting, toPay, kpis: { inQueue, matchedByAgent, exceptions, awaitingPayment: toPay } };
+}
 
 // Express 4 does not catch errors from async handlers on its own.
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -68,14 +88,14 @@ api.get(
 api.get(
   '/invoices',
   wrap(async (req, res) => {
-    const invoices = await Invoice.find()
-      .select(
+    // ?filter=waiting (needs a person) | pay (approved, to pay) | all, plus ?before= and ?limit= (see paging.js).
+    const filter = INVOICE_FILTERS[req.query.filter] || {};
+    const page = await pageOf(Invoice, filter, pageParams(req.query), {
+      select:
         'status source createdAt extracted.vendorName extracted.invoiceNumber extracted.total extracted.currency decision checks.id checks.status approval.decision due match.score.total recovery.status',
-      )
-      .sort({ createdAt: -1 })
-      .limit(200)
-      .lean();
-    res.json(invoices);
+    });
+    // The tab counts and the KPIs cover every invoice, not just the ones loaded.
+    res.json({ ...page, counts: await invoiceCounts() });
   }),
 );
 
@@ -149,6 +169,19 @@ api.post(
   }),
 );
 
+// The append-only audit log: every status change of an invoice, payment,
+// supplier email, bank line or report. Read only: no route changes or deletes it.
+// ?subjectId=<id> gives one record's history, oldest first (a bank line's id is
+// "<statement id>:<line number>"); without it, the latest entries, newest first.
+api.get(
+  '/audit',
+  wrap(async (req, res) => {
+    const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId.trim().slice(0, 100) : '';
+    const limit = Math.min(500, Math.max(1, Math.floor(Number(req.query.limit)) || 200));
+    res.json({ items: await sampleLedger.listAudit({ subjectId: subjectId || null, limit }) });
+  }),
+);
+
 // Overdue and due-soon invoices, and the cash needed.
 api.get(
   '/payables',
@@ -162,6 +195,13 @@ api.post(
   wrap(async (req, res) => {
     if (!config.demoMode) throw new HttpError(403, 'Reset is only available in demo mode.');
     await resetEverything();
+    await recordAudit({
+      subjectKind: 'system',
+      subjectId: 'demo',
+      actor: 'Demo',
+      action: 'reset',
+      detail: 'Every invoice, email, statement and report was deleted. The audit log is kept.',
+    });
     res.json({ ok: true });
   }),
 );

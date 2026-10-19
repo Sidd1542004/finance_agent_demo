@@ -3,6 +3,8 @@
 
 import { runAgent } from '../agent/core/loop.js';
 import { AgentRun } from '../models/index.js';
+import { sampleLedger } from '../integrations/sampleLedger.js';
+import { bankLineId } from '../agent/finance/audit.js';
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -11,7 +13,13 @@ export class HttpError extends Error {
   }
 }
 
+// Append to the audit log (see agent/finance/audit.js).
+export const recordAudit = (entry) => sampleLedger.recordAudit(entry);
+export const recordAudits = (entries) => sampleLedger.recordAudits(entries);
+
 export async function runAndRecord(agent, input, { kind, id }) {
+  const record = input[kind];
+  const from = record?.status ?? null;
   const run = await AgentRun.create({ agent: agent.name, subjectKind: kind, subjectId: id, status: 'running', steps: [] });
   const result = await runAgent(agent, input, {
     onStep: async (_step, steps) => {
@@ -22,7 +30,39 @@ export async function runAndRecord(agent, input, { kind, id }) {
   run.status = result.outcome || 'failed';
   run.finishedAt = new Date();
   await run.save();
+
+  // The agent's status change, and for a statement each line's result.
+  if (result.outcome && record && record.status !== from) {
+    const reasons = record.decision?.reasons?.length || 0;
+    await recordAudit({
+      subjectKind: kind,
+      subjectId: id,
+      actor: 'Agent',
+      action: 'processed',
+      from,
+      to: record.status,
+      reason: reasons ? `${reasons} reason${reasons === 1 ? '' : 's'} for a person` : null,
+    });
+  }
+  if (result.outcome && kind === 'statement') {
+    await recordAudits(
+      (record.lines || []).map((l) => ({
+        subjectKind: 'bank_line',
+        subjectId: bankLineId(id, l.n),
+        actor: 'Agent',
+        action: 'reconciled',
+        from: null,
+        to: l.status,
+        detail: l.candidate?.invoiceNumber ? `Suggested invoice ${l.candidate.invoiceNumber}.` : l.invoiceNumber ? `Invoice ${l.invoiceNumber}.` : null,
+      })),
+    );
+  }
   return result;
+}
+
+// The agent could not finish: the record is marked failed, and that is logged.
+export async function auditFailed(kind, id, from, result) {
+  await recordAudit({ subjectKind: kind, subjectId: id, actor: 'Agent', action: 'failed', from, to: 'failed', reason: failedDecision(result).reasons[0] });
 }
 
 export const latestRun = (id) => AgentRun.findOne({ subjectId: id }).sort({ createdAt: -1 }).lean();

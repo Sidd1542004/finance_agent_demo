@@ -12,7 +12,7 @@ import { payablesSummary, todayIso } from '../agent/finance/due.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { Invoice, AgentRun, Payment, PurchaseOrder } from '../models/index.js';
 import { config } from '../config.js';
-import { HttpError } from './runs.js';
+import { HttpError, recordAudit } from './runs.js';
 import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 
 export const extractor = createExtractor(config);
@@ -45,10 +45,9 @@ export async function processInvoice(invoice, { reading = null } = {}) {
 
   // If even the escalate stage failed, make sure the invoice is not left looking fine.
   if (!result.outcome) {
-    await Invoice.updateOne(
-      { _id: invoice._id },
-      { $set: { status: 'failed', decision: { outcome: 'failed', reasons: [`The agent could not finish: ${result.error?.message || 'unknown error'}`] } } },
-    );
+    const reason = `The agent could not finish: ${result.error?.message || 'unknown error'}`;
+    await Invoice.updateOne({ _id: invoice._id }, { $set: { status: 'failed', decision: { outcome: 'failed', reasons: [reason] } } });
+    await recordAudit({ subjectKind: 'invoice', subjectId: invoice._id, actor: 'Agent', action: 'failed', from: invoice.status, to: 'failed', reason });
   }
 
   run.status = result.outcome || 'failed';
