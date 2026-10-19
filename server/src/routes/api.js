@@ -10,11 +10,18 @@ import { resetEverything } from '../seed/seed.js';
 import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup } from '../services/invoices.js';
 import { HttpError } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
+import { createWorkLimiter } from '../rateLimit.js';
 
 const MAX_TEXT = 200_000;
 // Vercel refuses request bodies over 4.5 MB before they reach the app, so uploads stop at 4 MB.
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
+
+// Requests that call Groq or process a file. See rateLimit.js.
+const work = createWorkLimiter(config.rateLimit);
+// Person's actions that send the invoice back through the agent.
+const RERUN_ACTIONS = new Set(['rerun', 'link_po', 'clear_duplicate', 'edit_fields']);
+const workIfRerun = (req, res, next) => (RERUN_ACTIONS.has(req.params.action) ? work(req, res, next) : next());
 
 // Express 4 does not catch errors from async handlers on its own.
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
@@ -86,7 +93,7 @@ api.get('/invoices/:id', wrap(async (req, res) => {
 }));
 
 // Add an invoice (sample, pasted text or uploaded file) and run the agent on it.
-api.post('/invoices', upload.single('file'), wrap(async (req, res) => {
+api.post('/invoices', work, upload.single('file'), wrap(async (req, res) => {
   let source;
   let rawText;
 
@@ -117,13 +124,13 @@ api.post('/invoices', upload.single('file'), wrap(async (req, res) => {
 }));
 
 // Run the agent again, for example after fixing the Groq key or receiving the missing goods.
-api.post('/invoices/:id/rerun', wrap(async (req, res) => {
+api.post('/invoices/:id/rerun', work, wrap(async (req, res) => {
   res.json(await performInvoiceAction(requireId(req), 'rerun', { decidedBy: 'Reviewer', ...(req.body || {}) }));
 }));
 
 // Every person's action on an invoice. The backend checks the status, the
 // person's role and the required note; see agent/finance/lifecycle.js.
-api.post('/invoices/:id/actions/:action', wrap(async (req, res) => {
+api.post('/invoices/:id/actions/:action', workIfRerun, wrap(async (req, res) => {
   res.json(await performInvoiceAction(requireId(req), req.params.action, req.body || {}));
 }));
 
@@ -143,7 +150,7 @@ api.post('/reset', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-registerFinanceRoutes(api, { upload });
+registerFinanceRoutes(api, { upload, work });
 
 api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

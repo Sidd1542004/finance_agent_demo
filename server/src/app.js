@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 
 import { config } from './config.js';
 import { safeUri, redactSecrets } from './safeUri.js';
+import { requireAccessPassword } from './accessAuth.js';
 import { api } from './routes/api.js';
 import { seedIfEmpty } from './seed/seed.js';
 
@@ -63,6 +64,11 @@ export const ensureDatabase = createDatabaseGate({
 export const app = express();
 
 app.disable('x-powered-by');
+// Behind Vercel's proxy the client's address is in X-Forwarded-For; the rate limits need it.
+app.set('trust proxy', 1);
+
+// Optional shared password, before anything else (the API and, locally, the dashboard).
+if (config.accessPassword) app.use(requireAccessPassword(config.accessPassword));
 
 // Only needed when the dashboard is served from a different site than the API.
 // On Vercel (one project) and locally (the Vite proxy) it is the same site.

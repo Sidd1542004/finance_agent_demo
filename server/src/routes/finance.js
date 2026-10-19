@@ -21,7 +21,7 @@ const requireId = (req, what) => {
   return req.params.id;
 };
 
-export function registerFinanceRoutes(api, { upload }) {
+export function registerFinanceRoutes(api, { upload, work }) {
   // ---------- Vendor queries ----------
 
   api.get('/query-samples', (req, res) => {
@@ -36,7 +36,7 @@ export function registerFinanceRoutes(api, { upload }) {
     res.json(await getQueryDetail(requireId(req, 'email')));
   }));
 
-  api.post('/queries', wrap(async (req, res) => {
+  api.post('/queries', work, wrap(async (req, res) => {
     let fields;
     if (req.body?.sampleId) {
       const sample = findSampleQuery(req.body.sampleId);
@@ -56,7 +56,7 @@ export function registerFinanceRoutes(api, { upload }) {
     res.status(201).json(await getQueryDetail(query._id));
   }));
 
-  api.post('/queries/:id/rerun', wrap(async (req, res) => {
+  api.post('/queries/:id/rerun', work, wrap(async (req, res) => {
     const query = await VendorQuery.findById(requireId(req, 'email'));
     if (!query) throw new HttpError(404, 'That email no longer exists.');
     if (!['failed', 'needs_person'].includes(query.status)) throw new HttpError(409, 'Only emails that failed or are waiting for a person can be processed again.');
@@ -93,7 +93,7 @@ export function registerFinanceRoutes(api, { upload }) {
     res.json(await getStatementDetail(requireId(req, 'statement')));
   }));
 
-  api.post('/statements', upload.single('file'), wrap(async (req, res) => {
+  api.post('/statements', work, upload.single('file'), wrap(async (req, res) => {
     let source;
     let rawText;
     if (req.file) {
@@ -120,7 +120,7 @@ export function registerFinanceRoutes(api, { upload }) {
     res.status(201).json(await getStatementDetail(statement._id));
   }));
 
-  api.post('/statements/:id/rerun', wrap(async (req, res) => {
+  api.post('/statements/:id/rerun', work, wrap(async (req, res) => {
     const statement = await BankStatement.findById(requireId(req, 'statement'));
     if (!statement) throw new HttpError(404, 'That statement no longer exists.');
     // A statement a person has started deciding is not run again, so their work is not lost.
@@ -151,7 +151,7 @@ export function registerFinanceRoutes(api, { upload }) {
     res.send(figuresToCsv(report.figures));
   }));
 
-  api.post('/reports', wrap(async (req, res) => {
+  api.post('/reports', work, wrap(async (req, res) => {
     const month = req.body?.month || monthOf(new Date());
     if (!isMonth(month)) throw new HttpError(400, 'Choose a month for the report.');
     res.status(201).json(await writeReport(month));
@@ -159,7 +159,7 @@ export function registerFinanceRoutes(api, { upload }) {
 
   // ---------- Demo ----------
 
-  api.post('/demo/load', wrap(async (req, res) => {
+  api.post('/demo/load', work, wrap(async (req, res) => {
     if (!config.demoMode) throw new HttpError(403, 'The demo month is only available in demo mode.');
     res.json(await loadDemoMonth());
   }));

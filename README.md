@@ -65,7 +65,9 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    | `MONGODB_URI` | Required. The Atlas connection string, including the database name. |
    | `GROQ_API_KEY` | Optional. Without it the app uses the basic readers. |
    | `GROQ_MODEL` | Optional. Defaults to `llama-3.3-70b-versatile`. |
-   | `DEMO_MODE` | `true` shows Load demo month and Reset. Set it to `false` for anything real. |
+   | `DEMO_MODE` | `true` shows Load demo month and Reset (they wipe the data). Unset or anything else: off. |
+   | `ACCESS_PASSWORD` | Recommended for a public demo. Every page and API call asks for it (any user name). |
+   | `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` | Optional. Default: 30 requests that run the agent per 10 minutes per IP address. |
    | `COMPANY_NAME`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`, policy values | Optional, as in `server/.env.example`. |
    | `CORS_ORIGINS` | Leave unset: the dashboard and API are on the same site. |
 
@@ -75,6 +77,23 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    `"database": "connected"`. A 503 saying the database cannot be reached means
    `MONGODB_URI` is wrong or Atlas Network Access is refusing Vercel. The function log
    shows the reason, with the host only (never the user name or password).
+
+Protecting a public demo:
+
+- **Shared password.** With `ACCESS_PASSWORD` set, the browser asks for a password (any user
+  name) before showing anything. On Vercel, `middleware.js` checks it for the dashboard's
+  static files; the Express app checks it for the API (and for everything when run locally).
+  The password is compared in constant time. It is one shared password, not user accounts.
+- **Vercel Deployment Protection** (Project Settings > Deployment Protection) can protect
+  preview deployments, or every deployment, behind a Vercel login as well.
+- **Demo buttons.** Load demo month and Reset only work when `DEMO_MODE=true`; the server
+  refuses them otherwise, whatever the dashboard shows.
+- **Rate limits.** Requests that call Groq or process a file (adding or re-processing an
+  invoice, supplier email or bank statement, a person's action that re-runs the agent,
+  writing a report, loading the demo month) are limited per IP address: 30 per 10 minutes
+  by default (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MINUTES`). The count is kept in memory,
+  so **on Vercel each function instance counts separately**: treat it as a brake on runaway
+  use, not an exact quota. Reading the dashboard is not limited.
 
 Limits to know:
 

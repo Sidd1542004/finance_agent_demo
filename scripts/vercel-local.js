@@ -1,4 +1,5 @@
 // Run the app the way Vercel does, on one port, without the Vercel CLI:
+//   - middleware.js runs first (the optional ACCESS_PASSWORD check);
 //   - files in client/dist are served as static files;
 //   - /api/<path>?<query> is rewritten to /api?__path=<path>&<query> and handed
 //     to the serverless function in api/index.js (see vercel.json);
@@ -15,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import handler from '../api/index.js';
+import middleware from '../middleware.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'client', 'dist');
@@ -28,8 +30,13 @@ function sendFile(res, file) {
 }
 
 http
-  .createServer((req, res) => {
+  .createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    const stop = await middleware(new Request(url, { headers: Object.entries(req.headers).filter(([, v]) => typeof v === 'string') }));
+    if (stop) {
+      res.writeHead(stop.status, Object.fromEntries(stop.headers));
+      return res.end(await stop.text());
+    }
     // Vercel serves files from the output directory before applying rewrites.
     const file = path.join(dist, decodeURIComponent(url.pathname));
     if (file.startsWith(dist) && url.pathname !== '/' && fs.existsSync(file) && fs.statSync(file).isFile()) return sendFile(res, file);

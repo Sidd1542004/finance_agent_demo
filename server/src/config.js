@@ -29,8 +29,18 @@ export const config = {
   // The business the agent works for. Used to sign replies to suppliers.
   companyName: process.env.COMPANY_NAME || 'Meridian Logistics Pty Ltd',
 
-  // Demo mode enables the "Load demo month" and "Reset" buttons. Turn it off for anything real.
-  demoMode: process.env.DEMO_MODE !== 'false',
+  // Demo mode enables the "Load demo month" and "Reset" buttons. Only when DEMO_MODE=true.
+  demoMode: String(process.env.DEMO_MODE || '').trim().toLowerCase() === 'true',
+
+  // Optional shared password for the whole site (HTTP Basic auth, any user name).
+  accessPassword: process.env.ACCESS_PASSWORD || '',
+
+  // Requests that call Groq or process files, per client IP address, per server
+  // instance (on Vercel each warm instance counts separately).
+  rateLimit: {
+    windowMinutes: num(process.env.RATE_LIMIT_WINDOW_MINUTES, 10),
+    max: num(process.env.RATE_LIMIT_MAX, 30),
+  },
 
   // Optional Australian Business Register lookup. Free GUID: https://abr.business.gov.au/Tools/WebServices
   // Without it, ABNs are checked for a valid number only and shown as "not verified".
