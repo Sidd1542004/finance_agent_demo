@@ -13,7 +13,12 @@ export const EXCEPTION_STATUSES = ['needs_review', 'on_hold', 'payment_failed', 
 const OPEN_LINE = ['suggested', 'exception', 'unmatched'];
 
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const clip = (s, n) => (String(s).length > n ? `${String(s).slice(0, n - 1).trimEnd()}…` : String(s));
+const clip = (s, n) =>
+  String(s).length > n
+    ? `${String(s)
+        .slice(0, n - 1)
+        .trimEnd()}…`
+    : String(s);
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Invoices that moved into an exception status in the 24 hours before `now`, and are still there. */
@@ -23,7 +28,16 @@ export function newExceptions(invoices, now = new Date()) {
     .filter((i) => EXCEPTION_STATUSES.includes(i.status))
     .map((i) => ({ i, at: [...(i.events || [])].reverse().find((e) => e.to === i.status && String(e.at) >= since)?.at }))
     .filter((x) => x.at)
-    .map(({ i, at }) => ({ id: String(i._id ?? i.id), invoiceNumber: i.extracted?.invoiceNumber ?? null, vendorName: i.extracted?.vendorName ?? null, total: i.extracted?.total ?? null, currency: i.extracted?.currency || 'AUD', status: i.status, at, reason: i.decision?.reasons?.[0] ?? null }));
+    .map(({ i, at }) => ({
+      id: String(i._id ?? i.id),
+      invoiceNumber: i.extracted?.invoiceNumber ?? null,
+      vendorName: i.extracted?.vendorName ?? null,
+      total: i.extracted?.total ?? null,
+      currency: i.extracted?.currency || 'AUD',
+      status: i.status,
+      at,
+      reason: i.decision?.reasons?.[0] ?? null,
+    }));
 }
 
 /** Bank lines still waiting for a decision, without their descriptions. */
@@ -31,7 +45,8 @@ export function openBankLines(statements) {
   const out = [];
   for (const s of statements) {
     for (const l of s.lines || []) {
-      if (OPEN_LINE.includes(l.status)) out.push({ statementId: String(s._id ?? s.id), filename: s.source?.filename ?? s.filename ?? null, n: l.n, date: l.date ?? null, amount: l.amount, status: l.status });
+      if (OPEN_LINE.includes(l.status))
+        out.push({ statementId: String(s._id ?? s.id), filename: s.source?.filename ?? s.filename ?? null, n: l.n, date: l.date ?? null, amount: l.amount, status: l.status });
     }
   }
   return out;
@@ -48,7 +63,12 @@ export function buildDailySummary({ payables, exceptions, queries, bankLines, ap
   const link = String(appUrl || '').replace(/\/+$/, '');
   const m = (n, cur = 'AUD') => (cur === 'AUD' ? money(n) : fmtMoney(n, cur));
   const inv = (r) => `${r.invoiceNumber || '(no number)'} from ${r.vendorName || 'an unknown supplier'}`;
-  const due = (r) => (r.daysUntil < 0 ? `${plural(-r.daysUntil, 'day')} overdue (due ${day(r.dueDate)})` : r.daysUntil === 0 ? 'due today' : `due ${day(r.dueDate)}, in ${plural(r.daysUntil, 'day')}`);
+  const due = (r) =>
+    r.daysUntil < 0
+      ? `${plural(-r.daysUntil, 'day')} overdue (due ${day(r.dueDate)})`
+      : r.daysUntil === 0
+        ? 'due today'
+        : `due ${day(r.dueDate)}, in ${plural(r.daysUntil, 'day')}`;
 
   const sections = [
     {
@@ -65,11 +85,16 @@ export function buildDailySummary({ payables, exceptions, queries, bankLines, ap
     },
     {
       title: 'Supplier emails waiting for a reply',
-      items: queries.map((q) => `${q.supplierName || q.from}: "${String(q.subject || '(no subject)').slice(0, 120)}", received ${day(String(q.createdAt instanceof Date ? q.createdAt.toISOString() : q.createdAt).slice(0, 10))}.`),
+      items: queries.map(
+        (q) =>
+          `${q.supplierName || q.from}: "${String(q.subject || '(no subject)').slice(0, 120)}", received ${day(String(q.createdAt instanceof Date ? q.createdAt.toISOString() : q.createdAt).slice(0, 10))}.`,
+      ),
     },
     {
       title: 'Bank lines needing a decision',
-      items: bankLines.map((l) => `Line ${l.n}${l.filename ? ` of ${l.filename}` : ''}${l.date ? `, ${day(l.date)}` : ''}: ${m(Math.abs(l.amount))} ${l.amount < 0 ? 'out' : 'in'}.`),
+      items: bankLines.map(
+        (l) => `Line ${l.n}${l.filename ? ` of ${l.filename}` : ''}${l.date ? `, ${day(l.date)}` : ''}: ${m(Math.abs(l.amount))} ${l.amount < 0 ? 'out' : 'in'}.`,
+      ),
     },
   ];
 
@@ -79,7 +104,8 @@ export function buildDailySummary({ payables, exceptions, queries, bankLines, ap
     ? `Finance Operations Agent: ${plural(payables.overdue.length, 'overdue invoice')}, ${plural(exceptions.length, 'new exception')}, ${plural(total, 'item')} to look at`
     : 'Finance Operations Agent: nothing needs attention today';
   const intro = `Daily summary for ${day(payables.today)}${companyName ? `, ${companyName}` : ''}. ${total ? `${plural(total, 'item needs', 'items need')} a person.` : 'Nothing needs a person today.'}`;
-  const footer = 'Sent by the Finance Operations Agent. The agent approves and pays nothing: every decision is made by a person in the dashboard. Payments in this prototype are simulated.';
+  const footer =
+    'Sent by the Finance Operations Agent. The agent approves and pays nothing: every decision is made by a person in the dashboard. Payments in this prototype are simulated.';
 
   const text = [
     intro,

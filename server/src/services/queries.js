@@ -38,7 +38,9 @@ export async function resolveQuery(id, input) {
   const { action } = input;
   if (!['send', 'close'].includes(action)) throw new HttpError(400, 'Choose to send a reply or close the email.');
   const { who, why } = whoAndWhy(input);
-  const body = String(input.body || '').trim().slice(0, 8000);
+  const body = String(input.body || '')
+    .trim()
+    .slice(0, 8000);
   if (action === 'send' && !body) throw new HttpError(400, 'Write the reply before sending it.');
   if (action === 'close' && !why) throw new HttpError(400, 'Add a note saying why no reply is being sent.');
 
@@ -54,7 +56,15 @@ export async function resolveQuery(id, input) {
     try {
       // The agent's own reply, if any, was held. Replace it with the person's.
       await OutboxMessage.deleteMany({ queryId: query._id, status: { $ne: 'sent' } });
-      await OutboxMessage.create({ queryId: query._id, to: emailAddress(query.from), subject: query.draft?.subject || subject, body, sentBy: who, status: 'sent', sentAt: new Date() });
+      await OutboxMessage.create({
+        queryId: query._id,
+        to: emailAddress(query.from),
+        subject: query.draft?.subject || subject,
+        body,
+        sentBy: who,
+        status: 'sent',
+        sentAt: new Date(),
+      });
     } catch (err) {
       await VendorQuery.updateOne({ _id: id }, { $set: { status: 'needs_person', resolution: null } });
       throw new HttpError(422, `The reply could not be placed in the outbox (${err.message}). The email is still waiting.`);

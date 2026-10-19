@@ -7,8 +7,7 @@
 export const cents = (n) => Math.round(Number(n) * 100);
 export const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
 
-export const money = (n) =>
-  isNum(n) ? n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }) : 'not shown';
+export const money = (n) => (isNum(n) ? n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }) : 'not shown');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "2026-10-14" -> "14 Oct 2026". Anything else is returned as it was read.

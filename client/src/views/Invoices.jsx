@@ -120,102 +120,99 @@ export default function InvoicesView({ health, onError }) {
 
   return (
     <div className="layout">
-        <aside className="side">
-          <AddInvoice
-            samples={samples}
-            vision={Boolean(health?.reader?.vision)}
-            busy={busy === 'process'}
-            disabled={Boolean(busy) || !health}
-            onSample={(id) => processWith(() => api.processSample(id))}
-            onFile={(file) => processWith(() => api.processFile(file))}
-            onText={(text) => processWith(() => api.processText(text))}
-          />
+      <aside className="side">
+        <AddInvoice
+          samples={samples}
+          vision={Boolean(health?.reader?.vision)}
+          busy={busy === 'process'}
+          disabled={Boolean(busy) || !health}
+          onSample={(id) => processWith(() => api.processSample(id))}
+          onFile={(file) => processWith(() => api.processFile(file))}
+          onText={(text) => processWith(() => api.processText(text))}
+        />
 
-          <section className="card">
-            <div className="tabs" role="tablist" aria-label="Invoices">
-              <button role="tab" aria-selected={filter === 'all'} className="tab" onClick={() => setFilter('all')}>
-                All <span className="count">{invoices.length}</span>
-              </button>
-              <button role="tab" aria-selected={filter === 'waiting'} className="tab" onClick={() => setFilter('waiting')}>
-                Needs a person <span className={`count ${waiting.length ? 'count-wait' : ''}`}>{waiting.length}</span>
-              </button>
-              <button role="tab" aria-selected={filter === 'pay'} className="tab" onClick={() => setFilter('pay')}>
-                To pay <span className="count">{toPay.length}</span>
-              </button>
-            </div>
-            {shown.length === 0 ? (
-              <p className="empty-list">
-                {invoices.length === 0 ? 'No invoices yet. Process a sample above to see the agent work.' : filter === 'pay' ? 'Nothing is approved and waiting to be paid.' : 'Nothing is waiting for a person.'}
-              </p>
-            ) : (
-              <ul className="inv-list">
-                {shown.map((inv) => {
-                  const status = STATUS[inv.status] || STATUS.received;
-                  const score = inv.match?.score?.total;
-                  const overdue = inv.due?.state === 'overdue' && !['payment_completed', 'rejected', 'cancelled'].includes(inv.status);
-                  return (
-                    <li key={inv._id}>
-                      <button className="inv-item" aria-current={inv._id === selectedId ? 'true' : undefined} onClick={() => select(inv._id)}>
-                        <span className="inv-top">
-                          <span className="inv-vendor">{inv.extracted?.vendorName || 'Unread invoice'}</span>
-                          <span className="inv-total">{money(inv.extracted?.total, inv.extracted?.currency)}</span>
-                        </span>
-                        <span className="inv-bottom">
-                          <span className={`status status-${status.tone}`}>{status.label}</span>
-                          <span className="inv-meta">
-                            {overdue && <span className="tag tag-err">Overdue</span>}
-                            {inv.recovery?.status === 'open' && <span className="tag tag-err">Recovery</span>}
-                            {typeof score === 'number' && <span className="tag">{score}%</span>}
-                            {inv.extracted?.invoiceNumber || when(inv.createdAt)}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          {payables && <Payables data={payables} onSelect={select} />}
-          {health && <Rules health={health} />}
-          {reference && <Reference data={reference} />}
-        </aside>
-
-        <main className="main">
-          {invoices.length > 0 && <Kpis invoices={invoices} />}
-          {detail ? (
-            <Detail
-              key={detail.invoice._id}
-              data={detail}
-              fresh={freshId === detail.invoice._id}
-              busy={busy}
-              onAct={act}
-            />
+        <section className="card">
+          <div className="tabs" role="tablist" aria-label="Invoices">
+            <button role="tab" aria-selected={filter === 'all'} className="tab" onClick={() => setFilter('all')}>
+              All <span className="count">{invoices.length}</span>
+            </button>
+            <button role="tab" aria-selected={filter === 'waiting'} className="tab" onClick={() => setFilter('waiting')}>
+              Needs a person <span className={`count ${waiting.length ? 'count-wait' : ''}`}>{waiting.length}</span>
+            </button>
+            <button role="tab" aria-selected={filter === 'pay'} className="tab" onClick={() => setFilter('pay')}>
+              To pay <span className="count">{toPay.length}</span>
+            </button>
+          </div>
+          {shown.length === 0 ? (
+            <p className="empty-list">
+              {invoices.length === 0
+                ? 'No invoices yet. Process a sample above to see the agent work.'
+                : filter === 'pay'
+                  ? 'Nothing is approved and waiting to be paid.'
+                  : 'Nothing is waiting for a person.'}
+            </p>
           ) : (
-            <div className="blank">
-              {!loaded ? (
-                <p>Loading…</p>
-              ) : !health ? (
-                <>
-                  <h1>The server is not answering</h1>
-                  <p>
-                    Start MongoDB, then run <code>npm run dev</code> in the project folder and reload this page.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <h1>Give the agent an invoice</h1>
-                  <p>
-                    Pick a sample on the left and process it. The agent reads the invoice, checks the supplier and tax, matches it to the purchase
-                    order and what was delivered, and scores the match. It never approves or pays: a clean invoice goes to you as eligible for
-                    approval, anything else goes to you with the reasons.
-                  </p>
-                </>
-              )}
-            </div>
+            <ul className="inv-list">
+              {shown.map((inv) => {
+                const status = STATUS[inv.status] || STATUS.received;
+                const score = inv.match?.score?.total;
+                const overdue = inv.due?.state === 'overdue' && !['payment_completed', 'rejected', 'cancelled'].includes(inv.status);
+                return (
+                  <li key={inv._id}>
+                    <button className="inv-item" aria-current={inv._id === selectedId ? 'true' : undefined} onClick={() => select(inv._id)}>
+                      <span className="inv-top">
+                        <span className="inv-vendor">{inv.extracted?.vendorName || 'Unread invoice'}</span>
+                        <span className="inv-total">{money(inv.extracted?.total, inv.extracted?.currency)}</span>
+                      </span>
+                      <span className="inv-bottom">
+                        <span className={`status status-${status.tone}`}>{status.label}</span>
+                        <span className="inv-meta">
+                          {overdue && <span className="tag tag-err">Overdue</span>}
+                          {inv.recovery?.status === 'open' && <span className="tag tag-err">Recovery</span>}
+                          {typeof score === 'number' && <span className="tag">{score}%</span>}
+                          {inv.extracted?.invoiceNumber || when(inv.createdAt)}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </main>
+        </section>
+
+        {payables && <Payables data={payables} onSelect={select} />}
+        {health && <Rules health={health} />}
+        {reference && <Reference data={reference} />}
+      </aside>
+
+      <main className="main">
+        {invoices.length > 0 && <Kpis invoices={invoices} />}
+        {detail ? (
+          <Detail key={detail.invoice._id} data={detail} fresh={freshId === detail.invoice._id} busy={busy} onAct={act} />
+        ) : (
+          <div className="blank">
+            {!loaded ? (
+              <p>Loading…</p>
+            ) : !health ? (
+              <>
+                <h1>The server is not answering</h1>
+                <p>
+                  Start MongoDB, then run <code>npm run dev</code> in the project folder and reload this page.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1>Give the agent an invoice</h1>
+                <p>
+                  Pick a sample on the left and process it. The agent reads the invoice, checks the supplier and tax, matches it to the purchase order and what was delivered, and
+                  scores the match. It never approves or pays: a clean invoice goes to you as eligible for approval, anything else goes to you with the reasons.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
@@ -269,7 +266,9 @@ function AddInvoice({ samples, vision, busy, disabled, onSample, onFile, onText 
         </button>
       </div>
       <p className="hint">
-        {vision ? 'PDF, JPG, PNG or text, up to 4 MB. Scans and photos are read by the AI vision reader and always go to a person to confirm.' : 'PDF or text, up to 4 MB. Scans and photos need the AI reader (a Groq key).'}
+        {vision
+          ? 'PDF, JPG, PNG or text, up to 4 MB. Scans and photos are read by the AI vision reader and always go to a person to confirm.'
+          : 'PDF or text, up to 4 MB. Scans and photos need the AI reader (a Groq key).'}
       </p>
 
       {pasting && (
@@ -331,8 +330,8 @@ function Rules({ health }) {
         </div>
       </dl>
       <p className="hint">
-        A score at or above the threshold makes an invoice eligible for a person to approve. It is never approved or paid automatically, and a
-        failed mandatory check still stops it. Change these in server/.env.
+        A score at or above the threshold makes an invoice eligible for a person to approve. It is never approved or paid automatically, and a failed mandatory check still stops
+        it. Change these in server/.env.
       </p>
     </section>
   );
@@ -478,10 +477,7 @@ function Detail({ data, fresh, busy, onAct }) {
             {score && <ScorePanel score={score} />}
             <section className="panel">
               <h2>
-                Checks{' '}
-                <span className="panel-count">
-                  {exceptions ? `${exceptions} exception${exceptions === 1 ? '' : 's'}` : 'no exceptions'}
-                </span>
+                Checks <span className="panel-count">{exceptions ? `${exceptions} exception${exceptions === 1 ? '' : 's'}` : 'no exceptions'}</span>
               </h2>
               <ul className="checks">
                 {sortedChecks.map((c) => (
@@ -506,7 +502,10 @@ function Detail({ data, fresh, busy, onAct }) {
           {invoice.match?.suggestions?.length > 0 && !invoice.matchedPo && (
             <section className="panel">
               <h2>Possible purchase orders</h2>
-              <p className="hint">The invoice quotes no purchase order the agent could use. These are suggestions, not confirmed matches: a reviewer must check and link one. Nothing is linked or approved on the amount alone.</p>
+              <p className="hint">
+                The invoice quotes no purchase order the agent could use. These are suggestions, not confirmed matches: a reviewer must check and link one. Nothing is linked or
+                approved on the amount alone.
+              </p>
               <ul className="suggestions">
                 {invoice.match.suggestions.map((s) => (
                   <li key={s.poNumber}>
@@ -640,8 +639,13 @@ function Detail({ data, fresh, busy, onAct }) {
 
             {invoice.extraction && (
               <p className="hint">
-                Read by the {invoice.extraction.method === 'groq-vision' ? `AI vision reader (${invoice.extraction.model}), from an image` : invoice.extraction.method === 'groq' ? `AI reader (${invoice.extraction.model})` : 'basic pattern reader'},{' '}
-                {Math.round(invoice.extraction.confidence * 100)}% confident.
+                Read by the{' '}
+                {invoice.extraction.method === 'groq-vision'
+                  ? `AI vision reader (${invoice.extraction.model}), from an image`
+                  : invoice.extraction.method === 'groq'
+                    ? `AI reader (${invoice.extraction.model})`
+                    : 'basic pattern reader'}
+                , {Math.round(invoice.extraction.confidence * 100)}% confident.
                 {invoice.extraction.notes ? ` ${invoice.extraction.notes}` : ''}
               </p>
             )}
@@ -720,20 +724,27 @@ function Summary({ invoice, exceptions }) {
       <dl className="fields">
         <Field label="Tax rules" value={juris} />
         <Field label="Supplier tax number" value={idState(id)} />
-        {acnCheck && <Field label="Supplier ACN" value={acnCheck.status === 'fail' ? `Found but invalid: ${acn(e.acn)}` : `Found, not verified: ${acn(e.acn)}`} flag={acnCheck.status === 'fail'} />}
+        {acnCheck && (
+          <Field
+            label="Supplier ACN"
+            value={acnCheck.status === 'fail' ? `Found but invalid: ${acn(e.acn)}` : `Found, not verified: ${acn(e.acn)}`}
+            flag={acnCheck.status === 'fail'}
+          />
+        )}
         <Field label="Customer / Bill to" value={e.customerName} missing="Missing" />
         <Field label="Customer ABN" value={e.customerAbn ? abn(e.customerAbn) : null} missing="Not shown on the invoice" />
-        <Field
-          label="Approved supplier"
-          value={supplierValue}
-          missing="Supplier not matched"
-          flag={Boolean(invoice.supplier?.conflict)}
-        />
+        <Field label="Approved supplier" value={supplierValue} missing="Supplier not matched" flag={Boolean(invoice.supplier?.conflict)} />
         <Field label="Purchase order match" value={`${poStatus}${invoice.matchedPo ? `: ${invoice.matchedPo}` : ''}`} flag={poStatus !== 'Matched'} />
-        {invoice.match?.linkedBy && <Field label="Linked by" value={`${invoice.match.linkedBy.decidedBy}${invoice.match.linkedBy.note ? `: ${invoice.match.linkedBy.note}` : ''}`} />}
+        {invoice.match?.linkedBy && (
+          <Field label="Linked by" value={`${invoice.match.linkedBy.decidedBy}${invoice.match.linkedBy.note ? `: ${invoice.match.linkedBy.note}` : ''}`} />
+        )}
         <Field
           label="Due"
-          value={due?.date ? `${day(due.date)}${due.source === 'terms' ? ` (from terms: ${due.terms})` : ''}${closed ? '' : days < 0 ? `, ${-days} days overdue` : days === 0 ? ', due today' : `, in ${days} days`}` : null}
+          value={
+            due?.date
+              ? `${day(due.date)}${due.source === 'terms' ? ` (from terms: ${due.terms})` : ''}${closed ? '' : days < 0 ? `, ${-days} days overdue` : days === 0 ? ', due today' : `, in ${days} days`}`
+              : null
+          }
           missing="No due date or terms"
           flag={!closed && days !== null && days < 0}
         />
@@ -793,7 +804,12 @@ function Comparison({ rows, po, linkedBy }) {
   return (
     <section className="panel">
       <h2>Invoice against {po ? po.poNumber : 'purchase order'}</h2>
-      {linkedBy && <p className="hint">Purchase order linked by {linkedBy.decidedBy}{linkedBy.note ? `: ${linkedBy.note}` : ''}.</p>}
+      {linkedBy && (
+        <p className="hint">
+          Purchase order linked by {linkedBy.decidedBy}
+          {linkedBy.note ? `: ${linkedBy.note}` : ''}.
+        </p>
+      )}
       <div className="table-scroll">
         <table className="lines po-compare">
           <thead>
@@ -839,11 +855,22 @@ function PaymentPanel({ payment, currency }) {
         <Field label="Scheduled for" value={payment.scheduledFor ? day(payment.scheduledFor) : null} />
         <Field label="Scheduled by" value={payment.scheduledBy} />
         <Field label="Reference" value={payment.reference} missing="None yet" />
-        <Field label="Paid" value={paid ? `${money(paid, currency)}${paid < payment.amount ? ` of ${money(payment.amount, currency)} (part payment)` : ''}` : null} missing="Nothing yet" flag={paid > 0 && paid < payment.amount} />
+        <Field
+          label="Paid"
+          value={paid ? `${money(paid, currency)}${paid < payment.amount ? ` of ${money(payment.amount, currency)} (part payment)` : ''}` : null}
+          missing="Nothing yet"
+          flag={paid > 0 && paid < payment.amount}
+        />
         <Field label="Paid on" value={payment.paidOn ? day(payment.paidOn) : null} missing="—" />
         {payment.bank && <Field label="Bank line" value={`${payment.bank.description} (${day(payment.bank.date)})`} />}
         {payment.failure && <Field label="Why it failed" value={payment.failure.reason} flag />}
-        {payment.recovery && <Field label="Recovery" value={`${payment.recovery.status === 'open' ? 'Open' : 'Closed'}: ${payment.recovery.note}${payment.recovery.closeNote ? ` / ${payment.recovery.closeNote}` : ''}`} flag={payment.recovery.status === 'open'} />}
+        {payment.recovery && (
+          <Field
+            label="Recovery"
+            value={`${payment.recovery.status === 'open' ? 'Open' : 'Closed'}: ${payment.recovery.note}${payment.recovery.closeNote ? ` / ${payment.recovery.closeNote}` : ''}`}
+            flag={payment.recovery.status === 'open'}
+          />
+        )}
       </dl>
     </section>
   );
@@ -925,8 +952,8 @@ function Outcome({ invoice, payment }) {
         <section className="outcome outcome-wait">
           <h2>Eligible for approval: waiting for a person</h2>
           <p>
-            Every check passed{score ? ` and the match score is ${score.total}% (threshold ${score.threshold}%)` : ''}. This is not an approval. Nothing is
-            paid until a person approves it and then schedules the payment.
+            Every check passed{score ? ` and the match score is ${score.total}% (threshold ${score.threshold}%)` : ''}. This is not an approval. Nothing is paid until a person
+            approves it and then schedules the payment.
           </p>
         </section>
       );
@@ -941,7 +968,8 @@ function Outcome({ invoice, payment }) {
           <h2>{justReopened ? 'Reopened for review' : invoice.status === 'on_hold' ? 'On hold: the agent stopped here' : 'Needs review: the agent stopped here'}</h2>
           {justReopened ? (
             <p>
-              {invoice.reopened.decidedBy} reopened this invoice{invoice.reopened.from ? ` from ${STATUS[invoice.reopened.from]?.label || invoice.reopened.from}` : ''}: {invoice.reopened.note}
+              {invoice.reopened.decidedBy} reopened this invoice{invoice.reopened.from ? ` from ${STATUS[invoice.reopened.from]?.label || invoice.reopened.from}` : ''}:{' '}
+              {invoice.reopened.note}
             </p>
           ) : (
             reasons.length > 0 && list(reasons)
@@ -951,8 +979,16 @@ function Outcome({ invoice, payment }) {
               The earlier {invoice.reopened.priorDecision.type} by {invoice.reopened.priorDecision.decidedBy} is kept in the status history below, not deleted.
             </p>
           )}
-          {invoice.hold && <p className="outcome-note">Placed on hold by {invoice.hold.decidedBy}: {invoice.hold.note}</p>}
-          {invoice.correction && <p className="outcome-note">Corrected invoice requested by {invoice.correction.decidedBy}: {invoice.correction.note}</p>}
+          {invoice.hold && (
+            <p className="outcome-note">
+              Placed on hold by {invoice.hold.decidedBy}: {invoice.hold.note}
+            </p>
+          )}
+          {invoice.correction && (
+            <p className="outcome-note">
+              Corrected invoice requested by {invoice.correction.decidedBy}: {invoice.correction.note}
+            </p>
+          )}
         </section>
       );
     }
@@ -1013,8 +1049,8 @@ function Outcome({ invoice, payment }) {
               <p>{invoice.reversal.note}</p>
               {invoice.reversal.approval && (
                 <p className="outcome-note">
-                  Originally approved by {invoice.reversal.approval.decidedBy} on {when(invoice.reversal.approval.decidedAt)} for{' '}
-                  {money(invoice.reversal.approval.amount, cur)}. Kept for the record.
+                  Originally approved by {invoice.reversal.approval.decidedBy} on {when(invoice.reversal.approval.decidedAt)} for {money(invoice.reversal.approval.amount, cur)}.
+                  Kept for the record.
                 </p>
               )}
             </>
@@ -1098,7 +1134,10 @@ function shownValue(field, value, cur) {
   if (field === 'abn') return abn(value);
   if (['subtotal', 'gst', 'total'].includes(field)) return money(value, cur);
   if (field === 'invoiceDate' || field === 'dueDate') return day(value);
-  if (field === 'lines') return value.length ? `${value.length} line${value.length === 1 ? '' : 's'} (${value.map((l) => `${l.sku || l.description}: ${l.qty ?? '?'} × ${money(l.unitPrice, cur)}`).join('; ')})` : 'no line items';
+  if (field === 'lines')
+    return value.length
+      ? `${value.length} line${value.length === 1 ? '' : 's'} (${value.map((l) => `${l.sku || l.description}: ${l.qty ?? '?'} × ${money(l.unitPrice, cur)}`).join('; ')})`
+      : 'no line items';
   return String(value);
 }
 const correctionText = (c, cur) => `${FIELD_LABEL[c.field] || c.field}: ${shownValue(c.field, c.from, cur)} → ${shownValue(c.field, c.to, cur)}`;
@@ -1137,7 +1176,8 @@ function Actions({ data, busy, onAct }) {
     if (!name.trim()) return setHint('Enter your name so the decision is on record.');
     if (a.noteRequired && !note.trim()) return setHint(`Add a note with the reason to ${a.label.toLowerCase()}.`);
     if (a.id === 'link_po') setFields({ poNumber: invoice.match?.suggestions?.[0]?.poNumber || linkablePos[0]?.poNumber || '' });
-    if (a.id === 'schedule_payment') setFields({ method: payment?.method || 'EFT', scheduledFor: invoice.due?.date && invoice.due.date >= todayIso() ? invoice.due.date : todayIso(), reference: '' });
+    if (a.id === 'schedule_payment')
+      setFields({ method: payment?.method || 'EFT', scheduledFor: invoice.due?.date && invoice.due.date >= todayIso() ? invoice.due.date : todayIso(), reference: '' });
     if (a.id === 'edit_fields') setFields(editableFrom(e));
     if (a.id === 'record_payment') setFields({ amount: remaining ?? '', paidOn: todayIso(), method: payment?.method || 'EFT', reference: '' });
     if (a.confirm || WITH_FIELDS.includes(a.id)) return setPending(a);
@@ -1148,7 +1188,7 @@ function Actions({ data, busy, onAct }) {
     onAct(a.id, { decidedBy: name.trim(), note: note.trim(), ...extra });
   };
 
-  const amountFor = (id) => (id === 'approve_received' ? partial?.total : id === 'approve' ? e.total : payment?.amount ?? invoice.approval?.amount);
+  const amountFor = (id) => (id === 'approve_received' ? partial?.total : id === 'approve' ? e.total : (payment?.amount ?? invoice.approval?.amount));
   const confirmText = (a) => {
     const who = e.vendorName || 'this supplier';
     switch (a.id) {
@@ -1182,8 +1222,13 @@ function Actions({ data, busy, onAct }) {
   };
   const set = (k) => (ev) => setFields((f) => ({ ...f, [k]: ev.target.value }));
   const poChoices = [
-    ...(invoice.match?.suggestions || []).map((s) => ({ poNumber: s.poNumber, label: `${s.poNumber} · ${s.vendorName} (suggested, not confirmed, ${s.score}%${s.supplierOwnership && s.supplierOwnership !== 'confirmed_by_abn' ? ', supplier not verified' : ''})` })),
-    ...linkablePos.filter((p) => !(invoice.match?.suggestions || []).some((s) => s.poNumber === p.poNumber)).map((p) => ({ poNumber: p.poNumber, label: `${p.poNumber} · ${p.vendorName}` })),
+    ...(invoice.match?.suggestions || []).map((s) => ({
+      poNumber: s.poNumber,
+      label: `${s.poNumber} · ${s.vendorName} (suggested, not confirmed, ${s.score}%${s.supplierOwnership && s.supplierOwnership !== 'confirmed_by_abn' ? ', supplier not verified' : ''})`,
+    })),
+    ...linkablePos
+      .filter((p) => !(invoice.match?.suggestions || []).some((s) => s.poNumber === p.poNumber))
+      .map((p) => ({ poNumber: p.poNumber, label: `${p.poNumber} · ${p.vendorName}` })),
   ];
   const fieldsOk =
     !pending ||
@@ -1224,7 +1269,11 @@ function Actions({ data, busy, onAct }) {
         </div>
       )}
       {!pending && enabled.some((a) => a.noteRequired) && <p className="hint">* needs a note with the reason.</p>}
-      {hint && <p className="form-hint" role="alert">{hint}</p>}
+      {hint && (
+        <p className="form-hint" role="alert">
+          {hint}
+        </p>
+      )}
 
       {!pending && blocked.length > 0 && (
         <ul className="blocked">
@@ -1270,7 +1319,12 @@ function Actions({ data, busy, onAct }) {
                 <label className="field-label" htmlFor="pay-date">
                   {pending.id === 'record_payment' ? 'Paid on' : 'Pay on'}
                 </label>
-                <input id="pay-date" type="date" value={pending.id === 'record_payment' ? fields.paidOn : fields.scheduledFor} onChange={set(pending.id === 'record_payment' ? 'paidOn' : 'scheduledFor')} />
+                <input
+                  id="pay-date"
+                  type="date"
+                  value={pending.id === 'record_payment' ? fields.paidOn : fields.scheduledFor}
+                  onChange={set(pending.id === 'record_payment' ? 'paidOn' : 'scheduledFor')}
+                />
               </div>
               <div>
                 <label className="field-label" htmlFor="pay-method">
@@ -1294,7 +1348,11 @@ function Actions({ data, busy, onAct }) {
             <p className="form-hint">This is a part payment. {money(remaining - Number(fields.amount), cur)} will still be due and the invoice stays Payment Pending.</p>
           )}
           <div className="decision-actions">
-            <button className={`btn ${DANGER.includes(pending.id) ? 'btn-danger' : 'btn-primary'}`} disabled={working || !fieldsOk} onClick={() => submit(pending, pending.id === 'record_payment' ? { ...fields, amount: Number(fields.amount) } : pending.id === 'edit_fields' ? { fields } : fields)}>
+            <button
+              className={`btn ${DANGER.includes(pending.id) ? 'btn-danger' : 'btn-primary'}`}
+              disabled={working || !fieldsOk}
+              onClick={() => submit(pending, pending.id === 'record_payment' ? { ...fields, amount: Number(fields.amount) } : pending.id === 'edit_fields' ? { fields } : fields)}
+            >
               {busy === pending.id ? 'Working…' : `Confirm: ${pending.label}`}
             </button>
             <button className="btn btn-outline" disabled={working} onClick={() => setPending(null)}>
@@ -1363,7 +1421,13 @@ function EditFields({ fields, setFields }) {
               <tr key={i}>
                 {LINE_COLUMNS.map(([k, label, type]) => (
                   <td key={k} className={type === 'number' ? 'num' : undefined}>
-                    <input aria-label={`Line ${i + 1} ${label.toLowerCase()}`} type={type} step={type === 'number' ? 'any' : undefined} value={l[k] ?? ''} onChange={setLine(i, k)} />
+                    <input
+                      aria-label={`Line ${i + 1} ${label.toLowerCase()}`}
+                      type={type}
+                      step={type === 'number' ? 'any' : undefined}
+                      value={l[k] ?? ''}
+                      onChange={setLine(i, k)}
+                    />
                   </td>
                 ))}
                 <td>

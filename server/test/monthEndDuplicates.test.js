@@ -19,7 +19,8 @@ import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleInvoices, renderInvoiceText, sampleStatement } from '../src/seed/data.js';
 
 const policy = { matchThreshold: 85, missingAbn: 'review', priceTolerancePct: 2, minConfidence: 0.8, gstRatePct: 10, roundingTolerance: 0.05 };
-const pdfText = async (name) => (await extractText(await getDocumentProxy(new Uint8Array(fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url)))), { mergePages: true })).text;
+const pdfText = async (name) =>
+  (await extractText(await getDocumentProxy(new Uint8Array(fs.readFileSync(new URL(`./fixtures/${name}`, import.meta.url)))), { mergePages: true })).text;
 const OPEN = ['suggested', 'exception', 'unmatched'];
 
 function setup() {
@@ -77,7 +78,10 @@ test('INV-000003 sent twice: two records are kept, the copy is blocked as a dupl
   assert.equal(invoices.length, 2, 'every submission is kept as its own record');
   assert.equal(second.status, 'needs_review');
   assert.ok(failedIds(second).includes('duplicate'));
-  assert.deepEqual(second.match.duplicates.map((d) => d.id), [first.id]);
+  assert.deepEqual(
+    second.match.duplicates.map((d) => d.id),
+    [first.id],
+  );
 
   // Duplicate detection and approval safety are unchanged.
   await assert.rejects(act(second, 'approve', { note: 'Approve anyway' }), ActionError);
@@ -115,7 +119,10 @@ test('a duplicate copy of an invoice that is already approved and paid still sho
   assert.equal(f.payments.approvedValue, 1402.5, 'the approved amount is not doubled');
   const items = itemsAbout(f, /HOS-10482/);
   assert.equal(items.length, 1);
-  assert.match(items[0], /^A second copy of invoice HOS-10482 from Harbour Office Supplies Pty Ltd \(\$1,402\.50\), received .*, is a possible duplicate of an invoice that is payment pending\. It needs review before it can be approved or paid\./);
+  assert.match(
+    items[0],
+    /^A second copy of invoice HOS-10482 from Harbour Office Supplies Pty Ltd \(\$1,402\.50\), received .*, is a possible duplicate of an invoice that is payment pending\. It needs review before it can be approved or paid\./,
+  );
   assert.deepEqual(checkFigures(f), []);
 });
 
@@ -156,7 +163,10 @@ test('the same statement reconciled three times: each bank line is counted once,
   const runs = [await s.reconcile(sampleStatement.csv), await s.reconcile(sampleStatement.csv), await s.reconcile(sampleStatement.csv)];
 
   // What each run recorded (the history): the later runs see the lines the first run matched as already paid.
-  assert.deepEqual(runs.map((r) => r.lines.filter((l) => OPEN.includes(l.status)).length), [3, 5, 5]);
+  assert.deepEqual(
+    runs.map((r) => r.lines.filter((l) => OPEN.includes(l.status)).length),
+    [3, 5, 5],
+  );
   assert.equal(s.ledger.payments.filter((p) => p.status === 'paid').length, 2, 'the re-runs paid nothing twice');
 
   let { figures: f } = await s.report();
@@ -177,7 +187,11 @@ test('the same statement reconciled three times: each bank line is counted once,
   assert.equal(f.bank.linesDismissed, 3);
   assert.equal(f.bank.linesMatched, 2);
   assert.deepEqual(itemsAbout(f, /bank line/), []);
-  assert.deepEqual(runs.map((r) => r.lines.filter((l) => OPEN.includes(l.status)).length), [3, 5, 2], 'history is not rewritten');
+  assert.deepEqual(
+    runs.map((r) => r.lines.filter((l) => OPEN.includes(l.status)).length),
+    [3, 5, 2],
+    'history is not rewritten',
+  );
   assert.equal(s.statements.length, 3);
 });
 

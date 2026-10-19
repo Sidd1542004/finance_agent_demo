@@ -21,7 +21,7 @@ const summary = (d) => ({
   status: d.status,
   createdAt: d.createdAt,
   humanDecision: d.approval?.decision ?? null,
-  approvedAmount: d.approval?.amount ?? (d.approval ? d.extracted?.total ?? null : null),
+  approvedAmount: d.approval?.amount ?? (d.approval ? (d.extracted?.total ?? null) : null),
   agentOutcome: d.decision?.outcome ?? null,
   currency: d.extracted?.currency || 'AUD',
   failedChecks: (d.checks || []).filter((c) => c.status === 'fail').map((c) => ({ id: c.id, label: c.label })),
@@ -78,7 +78,7 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       for (const d of invoices.filter((i) => i.matchedPo === poNumber && i.id !== excludeId && !skip.includes(i.id) && i.createdAt < before && !INACTIVE.includes(i.status))) {
         for (const l of d.lineMatches || []) {
           if (!l.onPo || typeof l.qtyInvoiced !== 'number') continue;
-          const qty = d.approval?.decision === 'approve_received' ? l.qtyPayable ?? l.qtyInvoiced : l.qtyInvoiced;
+          const qty = d.approval?.decision === 'approve_received' ? (l.qtyPayable ?? l.qtyInvoiced) : l.qtyInvoiced;
           totals[skuKey(l.sku)] = (totals[skuKey(l.sku)] || 0) + qty;
         }
       }
@@ -89,7 +89,14 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     async findDuplicateCandidates({ fingerprints, excludeId, before }) {
       return invoices
         .filter((i) => i.id !== excludeId && i.createdAt < before && sharedSignals(fingerprints, i.fingerprints).length)
-        .map((i) => ({ id: i.id, invoiceNumber: i.extracted?.invoiceNumber ?? null, total: i.extracted?.total ?? null, status: i.status, createdAt: i.createdAt, signals: sharedSignals(fingerprints, i.fingerprints) }));
+        .map((i) => ({
+          id: i.id,
+          invoiceNumber: i.extracted?.invoiceNumber ?? null,
+          total: i.extracted?.total ?? null,
+          status: i.status,
+          createdAt: i.createdAt,
+          signals: sharedSignals(fingerprints, i.fingerprints),
+        }));
     },
     async listInvoices(range) {
       return between(invoices, range).map(summary);
@@ -146,7 +153,9 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     },
     // Live payments on other invoices that look like the same invoice.
     async duplicatePayments(invoice) {
-      const blocking = invoice.duplicateCleared ? ['same supplier and invoice number', 'identical document'] : ['same supplier and invoice number', 'same supplier, total and invoice date', 'identical document'];
+      const blocking = invoice.duplicateCleared
+        ? ['same supplier and invoice number', 'identical document']
+        : ['same supplier and invoice number', 'same supplier, total and invoice date', 'identical document'];
       const others = invoices.filter((i) => i.id !== invoice.id && sharedSignals(invoice.fingerprints, i.fingerprints).some((s) => blocking.includes(s)));
       return payments.filter((p) => others.some((o) => o.id === p.invoiceId) && ['queued', 'paid'].includes(p.status));
     },
@@ -187,7 +196,11 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       const p = payments.find((x) => x.id === paymentId && x.status === 'queued');
       if (!p) return null;
       Object.assign(p, { status: 'paid', paidOn: bank.date, bank, recordedBy: 'Bank reconciliation' });
-      moveInvoice(p.invoiceId, 'payment_pending', 'payment_completed', { actor: 'Bank reconciliation', action: 'payment_matched', reason: `Bank line ${bank.line} matches the payment.` });
+      moveInvoice(p.invoiceId, 'payment_pending', 'payment_completed', {
+        actor: 'Bank reconciliation',
+        action: 'payment_matched',
+        reason: `Bank line ${bank.line} matches the payment.`,
+      });
       return { ...p };
     },
     async unmarkPaid(paymentId, statementId) {

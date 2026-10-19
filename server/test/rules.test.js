@@ -90,11 +90,17 @@ function runChecks(input) {
   const checks = [...v.checks, dup, ...m.checks];
   return { checks, lineMatches: m.lineMatches, score: m.score, comparison: m.comparison, validation: v, status: statusFromChecks(checks) };
 }
-const failedIds = (input) => runChecks(input).checks.filter((c) => c.status === 'fail').map((c) => c.id);
+const failedIds = (input) =>
+  runChecks(input)
+    .checks.filter((c) => c.status === 'fail')
+    .map((c) => c.id);
 
 test('a correct invoice passes every check, scores 100% and is only eligible for review', () => {
   const r = runChecks(base());
-  assert.deepEqual(r.checks.filter((c) => c.status === 'fail'), []);
+  assert.deepEqual(
+    r.checks.filter((c) => c.status === 'fail'),
+    [],
+  );
   assert.equal(r.score.total, 100);
   assert.equal(r.score.eligible, true);
   assert.equal(r.status, 'under_review', 'eligible for approval review, not approved');
@@ -103,9 +109,15 @@ test('a correct invoice passes every check, scores 100% and is only eligible for
 });
 
 test('the score weights add up to 100 and every component is explained', () => {
-  assert.equal(Object.values(WEIGHTS).reduce((s, w) => s + w, 0), 100);
+  assert.equal(
+    Object.values(WEIGHTS).reduce((s, w) => s + w, 0),
+    100,
+  );
   const { score } = runChecks(base());
-  assert.deepEqual(score.components.map((c) => c.id), ['supplier', 'items', 'quantity', 'price', 'amounts', 'tax']);
+  assert.deepEqual(
+    score.components.map((c) => c.id),
+    ['supplier', 'items', 'quantity', 'price', 'amounts', 'tax'],
+  );
   for (const c of score.components) assert.ok(c.detail, c.id);
 });
 
@@ -113,7 +125,10 @@ test('invoiced more than received', () => {
   const input = base();
   input.received.PAPA480 = 18;
   const { checks, lineMatches, status } = runChecks(input);
-  assert.deepEqual(checks.filter((c) => c.status === 'fail').map((c) => c.id), ['quantity_match']);
+  assert.deepEqual(
+    checks.filter((c) => c.status === 'fail').map((c) => c.id),
+    ['quantity_match'],
+  );
   assert.match(checks.find((c) => c.id === 'quantity_match').detail, /invoiced 20, received 18/);
   assert.equal(lineMatches[0].qtyPayable, 18);
   assert.equal(status, 'on_hold');
@@ -133,7 +148,10 @@ test('quantity beyond what is left on the PO after earlier invoices', () => {
   const input = base();
   input.invoicedBefore = { PAPA480: 15 };
   const { checks, lineMatches } = runChecks(input);
-  assert.deepEqual(checks.filter((c) => c.status === 'fail').map((c) => c.id), ['quantity_match']);
+  assert.deepEqual(
+    checks.filter((c) => c.status === 'fail').map((c) => c.id),
+    ['quantity_match'],
+  );
   assert.equal(lineMatches[0].qtyRemaining, 5);
   assert.equal(lineMatches[0].qtyPayable, 5);
   assert.match(checks.find((c) => c.id === 'quantity_match').detail, /15 already invoiced/);
@@ -165,7 +183,10 @@ test('lines match by description when the invoice has no item codes', () => {
   const input = base();
   input.extracted.lines = input.extracted.lines.map((l) => ({ ...l, sku: null }));
   const r = runChecks(input);
-  assert.deepEqual(r.checks.filter((c) => c.status === 'fail'), []);
+  assert.deepEqual(
+    r.checks.filter((c) => c.status === 'fail'),
+    [],
+  );
   assert.ok(r.lineMatches.every((l) => l.matchedBy === 'description'));
 });
 
@@ -226,7 +247,9 @@ test('6b. a similar but different supplier name, with no ABN, is flagged for a p
     assert.equal(vendor, null, name);
     assert.equal(by, null, name);
     assert.equal(conflict?.name, 'Harbour Office Supplies Pty Ltd', name);
-    const known = validateInvoice({ extracted, extraction: base().extraction, text: '', vendor, vendorBy: by, vendorConflict: conflict, abr: null, policy }).checks.find((c) => c.id === 'supplier_known');
+    const known = validateInvoice({ extracted, extraction: base().extraction, text: '', vendor, vendorBy: by, vendorConflict: conflict, abr: null, policy }).checks.find(
+      (c) => c.id === 'supplier_known',
+    );
     assert.equal(known.status, 'fail', name);
     assert.match(known.detail, /similar to the approved supplier Harbour Office Supplies Pty Ltd, but it is not the same name/, name);
     assert.doesNotMatch(known.detail, /ABN on the invoice/, 'no ABN was printed, so none is quoted');
@@ -261,7 +284,17 @@ test('arithmetic is never "consistent" when the subtotal, line items or tax are 
   assert.equal(wrong.status, 'fail', 'a sum that disagrees is still a failure, not merely unverified');
 
   // The match score does not give the "sums add up" half-mark for an unverified result.
-  const r = matchToPo({ extracted: { ...base().extracted, subtotal: null }, vendor: vendors[0], po: purchaseOrders[0], received: null, invoicedBefore: {}, taxStatus: 'pass', arithmeticOk: false, arithmeticStatus: 'unverified', policy });
+  const r = matchToPo({
+    extracted: { ...base().extracted, subtotal: null },
+    vendor: vendors[0],
+    po: purchaseOrders[0],
+    received: null,
+    invoicedBefore: {},
+    taxStatus: 'pass',
+    arithmeticOk: false,
+    arithmeticStatus: 'unverified',
+    policy,
+  });
   assert.match(r.score.components.find((c) => c.id === 'amounts').detail, /could not be fully checked/);
   assert.equal(r.comparison.find((row) => row.field === 'Total').result, 'check');
 });
@@ -325,8 +358,14 @@ test('no purchase order: line checks are skipped and the score is low', () => {
   none.extracted.poNumber = null;
   none.po = null;
   const { checks, score } = runChecks(none);
-  assert.deepEqual(checks.filter((c) => c.status === 'fail').map((c) => c.id), ['po_found', 'match_score']);
-  assert.deepEqual(checks.filter((c) => c.status === 'skip').map((c) => c.id), ['price_match', 'quantity_match']);
+  assert.deepEqual(
+    checks.filter((c) => c.status === 'fail').map((c) => c.id),
+    ['po_found', 'match_score'],
+  );
+  assert.deepEqual(
+    checks.filter((c) => c.status === 'skip').map((c) => c.id),
+    ['price_match', 'quantity_match'],
+  );
   assert.ok(score.total < 85);
 });
 

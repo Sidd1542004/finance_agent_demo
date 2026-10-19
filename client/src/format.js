@@ -31,8 +31,7 @@ export const day = (value) => {
   return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : value || '—';
 };
 
-export const when = (iso) =>
-  iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+export const when = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '');
 
 // The invoice lifecycle. Approval is not payment: an approved invoice still has
 // to be scheduled and paid, and the agent never approves anything itself.

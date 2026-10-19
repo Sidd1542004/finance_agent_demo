@@ -39,7 +39,10 @@ export function createReconciliationAgent({ ledger, explain, save }) {
         state.lines = parseStatement(statement.rawText);
         await store(statement, state);
         const out = state.lines.filter((l) => l.amount < 0);
-        const dates = state.lines.map((l) => l.date).filter(Boolean).sort();
+        const dates = state.lines
+          .map((l) => l.date)
+          .filter(Boolean)
+          .sort();
         return {
           summary: `Read ${state.lines.length} line${state.lines.length === 1 ? '' : 's'}: ${out.length} money out (${money(sum(out, (l) => Math.abs(l.amount)))}) and ${state.lines.length - out.length} money in${dates.length ? `, dated ${day(dates[0])} to ${day(dates[dates.length - 1])}` : ''}.`,
         };
@@ -49,7 +52,11 @@ export function createReconciliationAgent({ ledger, explain, save }) {
       async decide(state) {
         const { statement } = state.input;
         const [payments, invoices] = await Promise.all([ledger.listPayments(), ledger.listInvoices()]);
-        const { lines, unpaid } = matchLines(state.lines, payments, invoices.filter((i) => i.status !== 'failed' && i.invoiceNumber));
+        const { lines, unpaid } = matchLines(
+          state.lines,
+          payments,
+          invoices.filter((i) => i.status !== 'failed' && i.invoiceNumber),
+        );
         state.lines = lines;
 
         // Optional: an AI note on each line a person will have to look at.
@@ -83,12 +90,20 @@ export function createReconciliationAgent({ ledger, explain, save }) {
           const paid = await ledger.markPaid(line.paymentId, { statementId: statement.id, line: line.n, date: line.date, description: line.description });
           if (paid) done += 1;
           else {
-            Object.assign(line, { status: 'exception', kind: 'changed', paymentId: null, reason: `The payment for invoice ${line.invoiceNumber} changed while the statement was being reconciled, so it was not marked as paid.` });
+            Object.assign(line, {
+              status: 'exception',
+              kind: 'changed',
+              paymentId: null,
+              reason: `The payment for invoice ${line.invoiceNumber} changed while the statement was being reconciled, so it was not marked as paid.`,
+            });
             requestEscalation(state, `Line ${line.n} (${line.description}, ${money(Math.abs(line.amount))}): ${line.reason}`);
           }
         }
         await store(statement, state);
-        const total = sum(state.lines.filter((l) => l.status === 'matched'), (l) => Math.abs(l.amount));
+        const total = sum(
+          state.lines.filter((l) => l.status === 'matched'),
+          (l) => Math.abs(l.amount),
+        );
         return { summary: done ? `Marked ${done} payment${done === 1 ? '' : 's'} as paid, ${money(total)} in total.` : 'No payments were marked as paid.' };
       },
 
@@ -102,7 +117,9 @@ export function createReconciliationAgent({ ledger, explain, save }) {
         const ok = paid.length === matched.length && cents(lineTotal) === cents(paidTotal) && matched.every((l) => paid.some((p) => p.id === l.paymentId && p.bank.line === l.n));
         if (!ok) {
           await ledger.revertStatement(statement.id);
-          throw new Error(`The payments marked as paid (${paid.length}, ${money(paidTotal)}) do not agree with the matched lines (${matched.length}, ${money(lineTotal)}). Nothing was left marked as paid.`);
+          throw new Error(
+            `The payments marked as paid (${paid.length}, ${money(paidTotal)}) do not agree with the matched lines (${matched.length}, ${money(lineTotal)}). Nothing was left marked as paid.`,
+          );
         }
         return { summary: `Confirmed ${paid.length} payment${paid.length === 1 ? ' is' : 's are'} marked as paid and the total agrees with the statement (${money(paidTotal)}).` };
       },

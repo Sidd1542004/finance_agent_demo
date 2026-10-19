@@ -42,7 +42,10 @@ export function labelNear(field, value, text) {
       const prevStart = t.lastIndexOf('\n', lineStart - 2) + 1;
       label = t.slice(prevStart, Math.max(prevStart, lineStart - 1));
     }
-    label = label.replace(/[$₹]|\b(AUD|INR)\b/g, '').replace(/\s+/g, ' ').trim();
+    label = label
+      .replace(/[$₹]|\b(AUD|INR)\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     // Keep the whole words nearest the value.
     if (label.length > MAX_LABEL) label = label.slice(-MAX_LABEL).replace(/^\S*\s+/, '');
     return /[A-Za-z]/.test(label) && !/\d{3,}/.test(label) ? label : null;
@@ -66,7 +69,10 @@ export function buildHints({ supplier, corrections, text, by, at }) {
     }));
 }
 
-const squash = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+const squash = (s) =>
+  String(s || '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
 
 /** The hints for whichever known supplier this invoice text names, by ABN, or by name. */
 export function hintsForText(hints, text) {
@@ -88,6 +94,8 @@ export function hintsForText(hints, text) {
 export function hintsPrompt(hints) {
   if (!hints?.length) return '';
   const name = hints.find((h) => h.vendorName)?.vendorName || 'this supplier';
-  const lines = hints.map((h) => `- ${h.field} (${EDITABLE_FIELDS[h.field]?.label || h.field}): ${h.label ? `printed next to "${h.label}"; ` : ''}an earlier correct value looked like "${h.example}".`);
+  const lines = hints.map(
+    (h) => `- ${h.field} (${EDITABLE_FIELDS[h.field]?.label || h.field}): ${h.label ? `printed next to "${h.label}"; ` : ''}an earlier correct value looked like "${h.example}".`,
+  );
   return `\n\nReviewers corrected earlier invoices from ${name}. Where to look and the format to expect (these are not this invoice's values; copy every value from the invoice text above, and use null if it is not there):\n${lines.join('\n')}`;
 }

@@ -49,91 +49,122 @@ api.get('/health', (req, res) => {
 });
 
 api.get('/samples', (req, res) => {
-  res.json(
-    sampleInvoices.map((s) => ({ id: s.id, title: s.title, hint: s.hint, vendorName: s.vendor.name, total: sampleTotals(s).total })),
-  );
+  res.json(sampleInvoices.map((s) => ({ id: s.id, title: s.title, hint: s.hint, vendorName: s.vendor.name, total: sampleTotals(s).total })));
 });
 
 // Suppliers, purchase orders and deliveries the agent checks against.
-api.get('/reference', wrap(async (req, res) => {
-  const [vendors, purchaseOrders, goodsReceipts] = await Promise.all([
-    Vendor.find().sort({ name: 1 }).lean(),
-    PurchaseOrder.find().sort({ poNumber: 1 }).lean(),
-    GoodsReceipt.find().sort({ poNumber: 1 }).lean(),
-  ]);
-  res.json({ vendors, purchaseOrders, goodsReceipts });
-}));
+api.get(
+  '/reference',
+  wrap(async (req, res) => {
+    const [vendors, purchaseOrders, goodsReceipts] = await Promise.all([
+      Vendor.find().sort({ name: 1 }).lean(),
+      PurchaseOrder.find().sort({ poNumber: 1 }).lean(),
+      GoodsReceipt.find().sort({ poNumber: 1 }).lean(),
+    ]);
+    res.json({ vendors, purchaseOrders, goodsReceipts });
+  }),
+);
 
-api.get('/invoices', wrap(async (req, res) => {
-  const invoices = await Invoice.find()
-    .select('status source createdAt extracted.vendorName extracted.invoiceNumber extracted.total extracted.currency decision checks.id checks.status approval.decision due match.score.total recovery.status')
-    .sort({ createdAt: -1 })
-    .limit(200)
-    .lean();
-  res.json(invoices);
-}));
+api.get(
+  '/invoices',
+  wrap(async (req, res) => {
+    const invoices = await Invoice.find()
+      .select(
+        'status source createdAt extracted.vendorName extracted.invoiceNumber extracted.total extracted.currency decision checks.id checks.status approval.decision due match.score.total recovery.status',
+      )
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+    res.json(invoices);
+  }),
+);
 
-api.get('/invoices/:id', wrap(async (req, res) => {
-  res.json(await getInvoiceDetail(requireId(req)));
-}));
+api.get(
+  '/invoices/:id',
+  wrap(async (req, res) => {
+    res.json(await getInvoiceDetail(requireId(req)));
+  }),
+);
 
 // Add an invoice (sample, pasted text or uploaded file) and run the agent on it.
-api.post('/invoices', work, upload.single('file'), wrap(async (req, res) => {
-  let source;
-  let rawText;
-  let reading = null; // a scan or photo already read by the vision reader
+api.post(
+  '/invoices',
+  work,
+  upload.single('file'),
+  wrap(async (req, res) => {
+    let source;
+    let rawText;
+    let reading = null; // a scan or photo already read by the vision reader
 
-  if (req.file) {
-    ({ source, rawText, reading = null } = await readUpload(req.file, { vision: visionReader }));
-  } else if (req.body?.sampleId) {
-    const sample = findSample(req.body.sampleId);
-    if (!sample) throw new HttpError(400, 'That sample does not exist.');
-    source = { kind: 'sample', sampleId: sample.id, filename: `${sample.invoiceNumber}.txt` };
-    rawText = renderInvoiceText(sample);
-  } else if (typeof req.body?.text === 'string') {
-    source = { kind: 'paste' };
-    rawText = req.body.text;
-  } else {
-    throw new HttpError(400, 'Send a file, some invoice text or a sample to process.');
-  }
+    if (req.file) {
+      ({ source, rawText, reading = null } = await readUpload(req.file, { vision: visionReader }));
+    } else if (req.body?.sampleId) {
+      const sample = findSample(req.body.sampleId);
+      if (!sample) throw new HttpError(400, 'That sample does not exist.');
+      source = { kind: 'sample', sampleId: sample.id, filename: `${sample.invoiceNumber}.txt` };
+      rawText = renderInvoiceText(sample);
+    } else if (typeof req.body?.text === 'string') {
+      source = { kind: 'paste' };
+      rawText = req.body.text;
+    } else {
+      throw new HttpError(400, 'Send a file, some invoice text or a sample to process.');
+    }
 
-  rawText = rawText.replace(/\u0000/g, '').trim();
-  if (!rawText) {
-    throw new HttpError(400, req.file ? NEEDS_OCR : 'The invoice text is empty.');
-  }
-  if (rawText.length > MAX_TEXT) throw new HttpError(400, 'That is too much text for one invoice.');
+    rawText = rawText.replace(/\u0000/g, '').trim();
+    if (!rawText) {
+      throw new HttpError(400, req.file ? NEEDS_OCR : 'The invoice text is empty.');
+    }
+    if (rawText.length > MAX_TEXT) throw new HttpError(400, 'That is too much text for one invoice.');
 
-  const invoice = await Invoice.create({ source, rawText });
-  await processInvoice(invoice, { reading });
-  res.status(201).json(await getInvoiceDetail(invoice._id));
-}));
+    const invoice = await Invoice.create({ source, rawText });
+    await processInvoice(invoice, { reading });
+    res.status(201).json(await getInvoiceDetail(invoice._id));
+  }),
+);
 
 // Run the agent again, for example after fixing the Groq key or receiving the missing goods.
-api.post('/invoices/:id/rerun', work, wrap(async (req, res) => {
-  res.json(await performInvoiceAction(requireId(req), 'rerun', { decidedBy: 'Reviewer', ...(req.body || {}) }));
-}));
+api.post(
+  '/invoices/:id/rerun',
+  work,
+  wrap(async (req, res) => {
+    res.json(await performInvoiceAction(requireId(req), 'rerun', { decidedBy: 'Reviewer', ...(req.body || {}) }));
+  }),
+);
 
 // Every person's action on an invoice. The backend checks the status, the
 // person's role and the required note; see agent/finance/lifecycle.js.
-api.post('/invoices/:id/actions/:action', workIfRerun, wrap(async (req, res) => {
-  res.json(await performInvoiceAction(requireId(req), req.params.action, req.body || {}));
-}));
+api.post(
+  '/invoices/:id/actions/:action',
+  workIfRerun,
+  wrap(async (req, res) => {
+    res.json(await performInvoiceAction(requireId(req), req.params.action, req.body || {}));
+  }),
+);
 
 // Earlier API: { decision: approve | approve_received | reject, decidedBy, note }.
-api.post('/invoices/:id/approval', wrap(async (req, res) => {
-  res.json(await applyHumanDecision(requireId(req), req.body || {}));
-}));
+api.post(
+  '/invoices/:id/approval',
+  wrap(async (req, res) => {
+    res.json(await applyHumanDecision(requireId(req), req.body || {}));
+  }),
+);
 
 // Overdue and due-soon invoices, and the cash needed.
-api.get('/payables', wrap(async (req, res) => {
-  res.json(await getPayables());
-}));
+api.get(
+  '/payables',
+  wrap(async (req, res) => {
+    res.json(await getPayables());
+  }),
+);
 
-api.post('/reset', wrap(async (req, res) => {
-  if (!config.demoMode) throw new HttpError(403, 'Reset is only available in demo mode.');
-  await resetEverything();
-  res.json({ ok: true });
-}));
+api.post(
+  '/reset',
+  wrap(async (req, res) => {
+    if (!config.demoMode) throw new HttpError(403, 'Reset is only available in demo mode.');
+    await resetEverything();
+    res.json({ ok: true });
+  }),
+);
 
 registerFinanceRoutes(api, { upload, work });
 

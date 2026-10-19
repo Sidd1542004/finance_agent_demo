@@ -40,7 +40,20 @@ export const fmtMoney = (n, currency = 'AUD') => {
   }
 };
 
-const CORRECTED_LABEL = { vendorName: 'supplier', abn: 'ABN', gstin: 'GSTIN', invoiceNumber: 'invoice number', invoiceDate: 'invoice date', dueDate: 'due date', poNumber: 'purchase order', currency: 'currency', subtotal: 'subtotal', gst: 'GST', total: 'total', lines: 'line items' };
+const CORRECTED_LABEL = {
+  vendorName: 'supplier',
+  abn: 'ABN',
+  gstin: 'GSTIN',
+  invoiceNumber: 'invoice number',
+  invoiceDate: 'invoice date',
+  dueDate: 'due date',
+  poNumber: 'purchase order',
+  currency: 'currency',
+  subtotal: 'subtotal',
+  gst: 'GST',
+  total: 'total',
+  lines: 'line items',
+};
 
 const near = (a, b, tol) => Math.abs(cents(a) - cents(b)) <= cents(tol);
 
@@ -51,7 +64,9 @@ export const GSTIN_PATTERN = /\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b/;
 
 // GSTIN check character (mod 36, alternating weights 1 and 2).
 export function isValidGstin(value) {
-  const g = String(value ?? '').trim().toUpperCase();
+  const g = String(value ?? '')
+    .trim()
+    .toUpperCase();
   if (!/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) return false;
   const state = Number(g.slice(0, 2));
   if (state < 1 || state > 38) return false;
@@ -116,7 +131,10 @@ export function checkArithmetic(e, { tolerance = 0.05 } = {}) {
 
   if (isNum(e.subtotal) && lines.length) {
     const ok = near(lineSum, e.subtotal, tolerance) || near(lineSum - discount + charges, e.subtotal, tolerance);
-    if (!ok) problems.push(`Line items add up to ${m(lineSum)}${discount || charges ? ` (${m(lineSum - discount + charges)} after discounts and charges)` : ''}, but the subtotal says ${m(e.subtotal)}.`);
+    if (!ok)
+      problems.push(
+        `Line items add up to ${m(lineSum)}${discount || charges ? ` (${m(lineSum - discount + charges)} after discounts and charges)` : ''}, but the subtotal says ${m(e.subtotal)}.`,
+      );
   }
   if (isNum(e.subtotal) && tax !== null && isNum(e.total)) {
     const ok = near(e.subtotal + tax, e.total, tolerance) || near(e.subtotal + tax - discount + charges, e.total, tolerance);
@@ -188,7 +206,14 @@ function australianTax({ e, vendor, abr, policy }) {
   // failure is still worth a reviewer's attention, and a pass is "unverified"
   // the same way an ABN is: the number is well formed, not looked up live.
   if (e.acn) {
-    add('supplier_acn', "Supplier's ACN", isValidAcn(e.acn) ? 'unverified' : 'fail', isValidAcn(e.acn) ? `ACN ${formatAcn(e.acn)} is a valid number (it passes the ASIC checksum), but it has not been checked against the company register.` : `ACN ${formatAcn(e.acn)} fails the ASIC checksum, so it is not a real ACN.`);
+    add(
+      'supplier_acn',
+      "Supplier's ACN",
+      isValidAcn(e.acn) ? 'unverified' : 'fail',
+      isValidAcn(e.acn)
+        ? `ACN ${formatAcn(e.acn)} is a valid number (it passes the ASIC checksum), but it has not been checked against the company register.`
+        : `ACN ${formatAcn(e.acn)} fails the ASIC checksum, so it is not a real ACN.`,
+    );
   }
 
   // 2. GST registration: may this supplier charge GST at all?
@@ -226,7 +251,12 @@ function australianTax({ e, vendor, abr, policy }) {
   } else {
     const expected = Math.round(e.subtotal * rate) / 100;
     const ok = near(e.gst, expected, policy.roundingTolerance);
-    add('tax_charged', 'GST charged correctly', ok ? 'pass' : 'fail', ok ? `GST ${m(e.gst)} is ${rate}% of the subtotal.` : `GST shown is ${m(e.gst)}, but ${rate}% of ${m(e.subtotal)} is ${m(expected)}.`);
+    add(
+      'tax_charged',
+      'GST charged correctly',
+      ok ? 'pass' : 'fail',
+      ok ? `GST ${m(e.gst)} is ${rate}% of the subtotal.` : `GST shown is ${m(e.gst)}, but ${rate}% of ${m(e.subtotal)} is ${m(expected)}.`,
+    );
   }
 
   return { identifier, registration: { registered, source }, checks };
@@ -288,11 +318,21 @@ function indianTax({ e, policy }) {
     add('supplier_tax_id', "Supplier's GSTIN", 'fail', `GSTIN ${e.gstin} is not a valid number (format or check character).`);
   } else {
     identifier = { type: 'GSTIN', value: e.gstin, format: 'valid', verification: 'unverified' };
-    add('supplier_tax_id', "Supplier's GSTIN", 'unverified', `GSTIN ${e.gstin} is a valid number (state code ${e.gstin.slice(0, 2)}), but it has not been checked on the GST portal.`);
+    add(
+      'supplier_tax_id',
+      "Supplier's GSTIN",
+      'unverified',
+      `GSTIN ${e.gstin} is a valid number (state code ${e.gstin.slice(0, 2)}), but it has not been checked on the GST portal.`,
+    );
   }
 
   // 2. Registration: a valid GSTIN means registered; nothing else to check offline.
-  add('gst_registration', 'GST registration', e.gstin && isValidGstin(e.gstin) ? 'pass' : 'unverified', e.gstin && isValidGstin(e.gstin) ? 'A valid GSTIN means the supplier is GST-registered (not verified online).' : 'GST registration could not be confirmed.');
+  add(
+    'gst_registration',
+    'GST registration',
+    e.gstin && isValidGstin(e.gstin) ? 'pass' : 'unverified',
+    e.gstin && isValidGstin(e.gstin) ? 'A valid GSTIN means the supplier is GST-registered (not verified online).' : 'GST registration could not be confirmed.',
+  );
 
   // 3. Tax charged: CGST + SGST (same state) or IGST (between states), never both.
   const lines = e.taxLines || [];
@@ -306,7 +346,8 @@ function indianTax({ e, policy }) {
   if (!lines.length) {
     if (!isNum(e.gst)) problems.push('The invoice does not show the GST charged (CGST, SGST or IGST).');
   } else {
-    if (igst.length && (cgst.length || sgst.length)) problems.push('The invoice charges IGST together with CGST/SGST. A supply is either within one state (CGST + SGST) or between states (IGST), not both.');
+    if (igst.length && (cgst.length || sgst.length))
+      problems.push('The invoice charges IGST together with CGST/SGST. A supply is either within one state (CGST + SGST) or between states (IGST), not both.');
     if (cgst.length && !sgst.length) problems.push('CGST is charged without SGST/UTGST.');
     if (sgst.length && !cgst.length) problems.push('SGST/UTGST is charged without CGST.');
     if (cgst.length && sgst.length && !near(sum(cgst), sum(sgst), tol)) problems.push(`CGST (${m(sum(cgst))}) and SGST (${m(sum(sgst))}) should be equal.`);
@@ -321,7 +362,12 @@ function indianTax({ e, policy }) {
     }
     if (isNum(e.gst) && !near(sum(lines), e.gst, tol)) problems.push(`The tax lines add up to ${m(sum(lines))}, but the tax total says ${m(e.gst)}.`);
   }
-  add('tax_charged', 'GST charged correctly', problems.length ? 'fail' : 'pass', problems.length ? problems.join(' ') : `${igst.length ? 'IGST' : 'CGST and SGST'} add up and match the stated rates.`);
+  add(
+    'tax_charged',
+    'GST charged correctly',
+    problems.length ? 'fail' : 'pass',
+    problems.length ? problems.join(' ') : `${igst.length ? 'IGST' : 'CGST and SGST'} add up and match the stated rates.`,
+  );
 
   return { identifier, registration: { registered: Boolean(e.gstin && isValidGstin(e.gstin)), source: 'GSTIN' }, checks };
 }
@@ -351,7 +397,12 @@ export function validateInvoice({ extracted: e, extraction, text, vendor, vendor
   if (!e.invoiceDate) missing.push('invoice date');
   if (!isNum(e.total)) missing.push('total');
   if (!(e.lines || []).length) missing.push('line items');
-  add('required_fields', 'Invoice has the required details', missing.length ? 'fail' : 'pass', missing.length ? `Could not find: ${missing.join(', ')}.` : 'Supplier, invoice number, date, line items and total are present.');
+  add(
+    'required_fields',
+    'Invoice has the required details',
+    missing.length ? 'fail' : 'pass',
+    missing.length ? `Could not find: ${missing.join(', ')}.` : 'Supplier, invoice number, date, line items and total are present.',
+  );
 
   const confidence = isNum(extraction?.confidence) ? extraction.confidence : 0;
   // Fields a reviewer corrected are not held against the reading: they were
@@ -371,7 +422,13 @@ export function validateInvoice({ extracted: e, extraction, text, vendor, vendor
   const sums = checkArithmetic(e, { tolerance: policy.roundingTolerance });
   const gaps = sums.length ? [] : arithmeticGaps(e);
   if (sums.length) add('arithmetic', 'Amounts add up', 'fail', sums.join(' '));
-  else if (gaps.length) add('arithmetic', 'Amounts add up', 'unverified', `Unable to verify the amounts: the invoice as read shows no ${listOf(gaps)}. Nothing that could be compared disagrees, but the sums are not confirmed. Check them against the invoice.`);
+  else if (gaps.length)
+    add(
+      'arithmetic',
+      'Amounts add up',
+      'unverified',
+      `Unable to verify the amounts: the invoice as read shows no ${listOf(gaps)}. Nothing that could be compared disagrees, but the sums are not confirmed. Check them against the invoice.`,
+    );
   else add('arithmetic', 'Amounts add up', 'pass', 'Line amounts, subtotal, tax and total are consistent.');
 
   const jurisdiction = detectJurisdiction(e, text);
@@ -404,9 +461,19 @@ export function validateInvoice({ extracted: e, extraction, text, vendor, vendor
         : `"${e.vendorName}" is similar to the approved supplier ${vendorConflict.name}, but it is not the same name and the invoice shows no ABN to confirm it (their ABN on file is ${formatAbn(vendorConflict.abn)}). Confirm it is the same business before approving.`,
     );
   } else if (!vendor) {
-    add('supplier_known', 'Supplier is on the approved list', 'fail', `${e.vendorName ? `"${e.vendorName}"` : 'The supplier'} is not on the approved supplier list${tax.identifier.value ? ` (no supplier has ${tax.identifier.type} ${tax.identifier.type === 'ABN' ? formatAbn(tax.identifier.value) : tax.identifier.value})` : ''}.`);
+    add(
+      'supplier_known',
+      'Supplier is on the approved list',
+      'fail',
+      `${e.vendorName ? `"${e.vendorName}"` : 'The supplier'} is not on the approved supplier list${tax.identifier.value ? ` (no supplier has ${tax.identifier.type} ${tax.identifier.type === 'ABN' ? formatAbn(tax.identifier.value) : tax.identifier.value})` : ''}.`,
+    );
   } else if (vendorBy === 'abn' && !e.vendorName) {
-    add('supplier_known', 'Supplier is on the approved list', 'unverified', `The ABN belongs to the approved supplier ${vendor.name}, but the supplier's name was not read from the invoice, so the name cannot be checked against the ABN.`);
+    add(
+      'supplier_known',
+      'Supplier is on the approved list',
+      'unverified',
+      `The ABN belongs to the approved supplier ${vendor.name}, but the supplier's name was not read from the invoice, so the name cannot be checked against the ABN.`,
+    );
   } else if (vendorBy === 'abn' && e.vendorName && !namesMatch(vendor.name, e.vendorName)) {
     add('supplier_known', 'Supplier is on the approved list', 'fail', `That ABN belongs to ${vendor.name}, but the invoice is from "${e.vendorName}".`);
   } else if (vendorBy === 'name') {

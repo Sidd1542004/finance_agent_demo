@@ -11,7 +11,9 @@ import { getPayables } from './invoices.js';
 export async function gatherDailySummary(now = new Date()) {
   const [payables, invoices, queries, statements] = await Promise.all([
     getPayables(),
-    Invoice.find({ status: { $in: EXCEPTION_STATUSES } }).select('status events extracted.invoiceNumber extracted.vendorName extracted.total extracted.currency decision.reasons').lean(),
+    Invoice.find({ status: { $in: EXCEPTION_STATUSES } })
+      .select('status events extracted.invoiceNumber extracted.vendorName extracted.total extracted.currency decision.reasons')
+      .lean(),
     VendorQuery.find({ status: 'needs_person' }).select('from subject createdAt supplier.name').sort({ createdAt: 1 }).lean(),
     BankStatement.find({ status: 'needs_person' }).select('source lines.n lines.date lines.amount lines.status').sort({ createdAt: 1 }).lean(),
   ]);

@@ -73,7 +73,13 @@ test('an invoice created at 2026-10-31T14:30:00Z is in the November report, not 
     const invoices = [];
     const ledger = createMemoryLedger({ vendors, purchaseOrders, goodsReceipts, invoices, queries: [], statements: [] });
     const agent = createInvoiceAgent({ ledger, extract: async (text) => extractWithRules(text), policy, save: async () => {}, today: () => todayIso(LATE_OCTOBER_UTC) });
-    const invoice = { id: 'inv-1', createdAt: LATE_OCTOBER_UTC, source: { kind: 'sample' }, rawText: renderInvoiceText(sampleInvoices.find((s) => s.id === 'clean')), status: 'received' };
+    const invoice = {
+      id: 'inv-1',
+      createdAt: LATE_OCTOBER_UTC,
+      source: { kind: 'sample' },
+      rawText: renderInvoiceText(sampleInvoices.find((s) => s.id === 'clean')),
+      status: 'received',
+    };
     invoices.push(invoice);
     await runAgent(agent, { invoice });
 
@@ -97,7 +103,14 @@ test('"today", due soon and overdue use the business date', () => {
     ];
     const s = payablesSummary(rows, today);
     assert.equal(s.today, '2026-11-01');
-    assert.deepEqual(s.overdue.map((r) => r.id), ['a'], 'due on 31 October is overdue on 1 November in Sydney');
-    assert.deepEqual(s.dueSoon.map((r) => r.id), ['b', 'c']);
+    assert.deepEqual(
+      s.overdue.map((r) => r.id),
+      ['a'],
+      'due on 31 October is overdue on 1 November in Sydney',
+    );
+    assert.deepEqual(
+      s.dueSoon.map((r) => r.id),
+      ['b', 'c'],
+    );
   });
 });

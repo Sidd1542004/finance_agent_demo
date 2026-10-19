@@ -72,7 +72,10 @@ test('a correction fixes a misread total, and the invoice is re-checked on the c
   assert.equal(invoice.status, 'under_review', 'eligible for approval review; still not approved');
   assert.equal(check(invoice, 'arithmetic').status, 'pass');
   assert.match(check(invoice, 'reader_confidence').detail, /total corrected by Priya N/);
-  assert.deepEqual(invoice.extraction.corrected.map((c) => [c.field, c.by]), [['total', 'Priya N']]);
+  assert.deepEqual(
+    invoice.extraction.corrected.map((c) => [c.field, c.by]),
+    [['total', 'Priya N']],
+  );
   assert.equal(invoice.approval ?? null, null, 'correcting a field approves nothing');
 
   assert.equal(invoice.corrections.length, 1);
@@ -194,14 +197,21 @@ test('edit fields: role, note, status and value rules', async () => {
   // Not once the invoice has been approved.
   const ok = await s.submit(sampleText('quantity-variance'));
   await s.act(ok, 'cancel', { note: 'Not needed.' });
-  await assert.rejects(s.act(ok, 'edit_fields', { note: 'Fix.', fields: { total: 1 } }), (err) => err.status === 409 && /Not allowed while the invoice is Cancelled/.test(err.message));
+  await assert.rejects(
+    s.act(ok, 'edit_fields', { note: 'Fix.', fields: { total: 1 } }),
+    (err) => err.status === 409 && /Not allowed while the invoice is Cancelled/.test(err.message),
+  );
 });
 
 test('correction helpers', () => {
   assert.deepEqual(correctionChanges({ total: 10, vendorName: 'A' }, { total: '10.00', vendorName: ' B ' }), [{ field: 'vendorName', from: 'A', to: 'B' }]);
   assert.deepEqual(correctionChanges({ poNumber: null }, { poNumber: 'po-2041' }), [{ field: 'poNumber', from: null, to: 'PO-2041' }]);
   assert.deepEqual(correctionChanges({ dueDate: '2026-10-14' }, { dueDate: '' }), [{ field: 'dueDate', from: '2026-10-14', to: null }], 'a field can be cleared');
-  const latest = latestCorrections([{ field: 'total', to: 1 }, { field: 'total', to: 2 }, { field: 'nope', to: 3 }]);
+  const latest = latestCorrections([
+    { field: 'total', to: 1 },
+    { field: 'total', to: 2 },
+    { field: 'nope', to: 3 },
+  ]);
   assert.deepEqual([...latest.keys()], ['total']);
   assert.equal(latest.get('total').to, 2);
   assert.equal(describeChange({ field: 'abn', from: null, to: '57600410275' }), 'ABN: blank → 57 600 410 275');

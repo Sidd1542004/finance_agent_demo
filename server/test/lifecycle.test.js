@@ -69,7 +69,10 @@ test('1. fully matching invoice: 100%, Under Review, nothing approved or paid', 
   assert.equal(invoice.status, 'under_review');
   assert.equal(invoice.approval, undefined);
   assert.equal(ledger.payments.length, 0);
-  assert.ok(invoice.match.comparison.every((r) => ['match', 'check'].includes(r.result)), 'every comparison row matches');
+  assert.ok(
+    invoice.match.comparison.every((r) => ['match', 'check'].includes(r.result)),
+    'every comparison row matches',
+  );
   assert.deepEqual(Object.keys(invoice.match.comparison[0]), ['field', 'invoice', 'po', 'difference', 'result']);
 });
 
@@ -77,7 +80,11 @@ test('1. fully matching invoice: 100%, Under Review, nothing approved or paid', 
 test('2. above 85% with no failed checks: eligible for approval review, still not approved', async () => {
   const { ledger, submit } = setup();
   // GST-free items from a GST-registered supplier: tax cannot be fully verified.
-  const { invoice } = await submit(variant('clean', (s) => { s.gst = 0; }));
+  const { invoice } = await submit(
+    variant('clean', (s) => {
+      s.gst = 0;
+    }),
+  );
   assert.ok(invoice.match.score.total >= 85 && invoice.match.score.total < 100, `score ${invoice.match.score.total}`);
   assert.deepEqual(failed(invoice), []);
   assert.equal(invoice.status, 'under_review');
@@ -106,7 +113,12 @@ test('3b. a high score never overrides a failed mandatory check', async () => {
 // 4 and 5. No purchase order quoted.
 test('4. no PO quoted, a likely PO exists: suggested with reasons, never linked automatically; a reviewer links it', async () => {
   const { submit, act } = setup();
-  const { invoice } = await submit(variant('clean', (s) => { s.poNumber = null; s.invoiceNumber = 'HOS-20001'; }));
+  const { invoice } = await submit(
+    variant('clean', (s) => {
+      s.poNumber = null;
+      s.invoiceNumber = 'HOS-20001';
+    }),
+  );
   assert.equal(invoice.status, 'needs_review');
   assert.equal(invoice.matchedPo, null);
   const [best] = invoice.match.suggestions;
@@ -130,9 +142,13 @@ test('5. no PO quoted and nothing similar: Needs Review, no suggestion', async (
 });
 
 // 6. Supplier mismatch.
-test('6. supplier mismatch: invoice quotes another supplier\'s PO', async () => {
+test("6. supplier mismatch: invoice quotes another supplier's PO", async () => {
   const { submit } = setup();
-  const { invoice } = await submit(variant('clean', (s) => { s.poNumber = 'PO-2042'; }));
+  const { invoice } = await submit(
+    variant('clean', (s) => {
+      s.poNumber = 'PO-2042';
+    }),
+  );
   assert.equal(check(invoice, 'po_found').status, 'fail');
   assert.match(check(invoice, 'po_found').detail, /not with this supplier/);
   assert.equal(invoice.match.comparison.find((r) => r.field === 'Supplier').result, 'mismatch');
@@ -200,7 +216,12 @@ test('7. a second invoice for the same PO lines: quantity beyond what remains', 
   const { submit, act } = setup();
   const first = await submit(renderInvoiceText(findSample('clean')));
   await act(first.invoice, 'approve');
-  const second = await submit(variant('clean', (s) => { s.invoiceNumber = 'HOS-10999'; s.invoiceDate = '20 Sep 2026'; }));
+  const second = await submit(
+    variant('clean', (s) => {
+      s.invoiceNumber = 'HOS-10999';
+      s.invoiceDate = '20 Sep 2026';
+    }),
+  );
   assert.equal(second.invoice.status, 'on_hold');
   assert.deepEqual(failed(second.invoice), ['quantity_match', 'match_score']);
   const line = second.invoice.lineMatches[0];
@@ -363,7 +384,11 @@ test('19b. an accidental rejection and an accidental cancellation can each be re
   assert.equal(rejected.invoice.reopened.priorDecision.type, 'rejection');
   assert.equal(rejected.invoice.rejection.note, 'Wrong invoice.', 'the rejection itself is kept in the record');
 
-  const cancelled = await submit(variant('clean', (s) => { s.invoiceNumber = 'HOS-20011'; }));
+  const cancelled = await submit(
+    variant('clean', (s) => {
+      s.invoiceNumber = 'HOS-20011';
+    }),
+  );
   await act(cancelled.invoice, 'cancel', { note: 'Thought this was a duplicate.' });
   await act(cancelled.invoice, 'reopen', { note: 'It was not a duplicate after all.' });
   assert.equal(cancelled.invoice.status, 'needs_review');
@@ -400,7 +425,11 @@ test('20. a payment that has already been made is never reopened as if it were r
   await rejects(act(invoice, 'reopen', { note: 'Paid the wrong supplier' }), 409, /Payment Completed/i);
   assert.equal(invoice.status, 'payment_completed', 'status is not changed by a refused reopen');
   assert.equal(ledger.payments[0].status, 'paid', 'the paid record is untouched');
-  assert.deepEqual(allowedActions(invoice, { payment: ledger.payments[0] }).map((a) => a.id), ['start_recovery'], 'reopen is not even offered once the payment is paid');
+  assert.deepEqual(
+    allowedActions(invoice, { payment: ledger.payments[0] }).map((a) => a.id),
+    ['start_recovery'],
+    'reopen is not even offered once the payment is paid',
+  );
 
   await act(invoice, 'start_recovery', { note: 'Paid to the wrong supplier.' });
   assert.equal(invoice.recovery.status, 'open');
@@ -422,7 +451,10 @@ test('14. invalid transitions are refused by the backend', async () => {
   await rejects(act(invoice, 'approve'), 409);
   // Rejected is not a dead end: "Reopen for review" is the only way back, so a
   // mistaken rejection is not permanent.
-  assert.deepEqual(allowedActions(invoice, {}).map((a) => a.id), ['reopen']);
+  assert.deepEqual(
+    allowedActions(invoice, {}).map((a) => a.id),
+    ['reopen'],
+  );
 });
 
 test('14b. the agent itself never approves: it cannot move an invoice past Under Review', async () => {
@@ -476,7 +508,7 @@ test('16. Australian invoice with no ABN: Needs Review with the withholding warn
   assert.equal(invoice.status, 'needs_review');
 });
 
-test('16b. the user\'s Australian invoice template (placeholders, no ABN, no PO) ends as Needs Review', async () => {
+test("16b. the user's Australian invoice template (placeholders, no ABN, no PO) ends as Needs Review", async () => {
   const pdf = await getDocumentProxy(new Uint8Array(fs.readFileSync(fixture('invoice_template_australia.pdf'))));
   const { text } = await extractText(pdf, { mergePages: true });
   const { ledger, submit } = setup();
@@ -513,7 +545,11 @@ test('16c. INV-000003 PDFs: every field read, supplier and customer kept apart, 
     assert.equal(check(invoice, 'tax_charged'), undefined, `${c.file}: no GST check on an unconfirmed regime`);
     assert.deepEqual([e.invoiceNumber, e.invoiceDate, e.dueDate, e.poNumber], ['INV-000003', '2026-10-15', '2026-10-15', c.po], c.file);
     assert.deepEqual([e.subtotal, e.gst, e.total], [120, 6, 126], c.file);
-    assert.deepEqual(e.lines.map((l) => [l.description, l.qty, l.unitPrice, l.amount]), [['Normal pipe', 1, 120, 120]], c.file);
+    assert.deepEqual(
+      e.lines.map((l) => [l.description, l.qty, l.unitPrice, l.amount]),
+      [['Normal pipe', 1, 120, 120]],
+      c.file,
+    );
     assert.equal(invoice.supplier, null, `${c.file}: never matched to an approved supplier, even when the customer is one`);
     assert.match(check(invoice, 'po_found').detail, c.poDetail, c.file);
     assert.equal(check(invoice, 'arithmetic').status, 'pass', c.file);
@@ -537,18 +573,24 @@ test('16d. unknown supplier on the real INV-000003 layout: a PO is only suggeste
 
   await act(invoice, 'link_po', { poNumber: 'PO-2045', note: 'Looks like it' });
   assert.equal(invoice.matchedPo, 'PO-2045');
-  assert.equal(check(invoice, 'po_found').status, 'fail', 'linking does not make it the supplier\'s PO');
+  assert.equal(check(invoice, 'po_found').status, 'fail', "linking does not make it the supplier's PO");
   await rejects(act(invoice, 'approve', { note: 'Approve anyway' }), 409, /raised with Southern Cross Pallets Pty Ltd.*Verify supplier ownership/);
   const approve = allowedActions(invoice, {}).find((a) => a.id === 'approve');
   assert.equal(approve.enabled, false, 'shown disabled, with the reason');
-  await act(invoice, 'reject', { note: 'Not our supplier\'s PO.' });
+  await act(invoice, 'reject', { note: "Not our supplier's PO." });
   assert.equal(invoice.status, 'rejected');
   assert.equal(ledger.payments.length, 0);
 });
 
 // ---------- PO references, supplier identification and tax regime ----------
 
-const HARBOUR_PO_0011 = { poNumber: 'PO-0011', vendorAbn: '57600410275', vendorName: 'Harbour Office Supplies Pty Ltd', raisedOn: '2026-10-01', lines: [{ sku: null, description: 'Normal pipe', qty: 1, unitPrice: 120 }] };
+const HARBOUR_PO_0011 = {
+  poNumber: 'PO-0011',
+  vendorAbn: '57600410275',
+  vendorName: 'Harbour Office Supplies Pty Ltd',
+  raisedOn: '2026-10-01',
+  lines: [{ sku: null, description: 'Normal pipe', qty: 1, unitPrice: 120 }],
+};
 
 test('16e. "PO-0011", "PO - 0011", "p.o. 0011" and "0011" resolve to the same unique PO; "PO-11" does not', () => {
   const pos = [...purchaseOrders, HARBOUR_PO_0011];
@@ -578,7 +620,11 @@ test('16f. a normalised PO reference that fits more than one PO is ambiguous: no
 
 test('16g. a known supplier\'s "Purchase order: 2041" resolves to PO-2041, and the printed reference is kept', async () => {
   const { submit } = setup();
-  const { invoice } = await submit(variant('clean', (s) => { s.poNumber = '2041'; }));
+  const { invoice } = await submit(
+    variant('clean', (s) => {
+      s.poNumber = '2041';
+    }),
+  );
   assert.equal(invoice.extracted.poNumber, '2041');
   assert.equal(invoice.matchedPo, 'PO-2041');
   assert.equal(invoice.match.poResolution.how, 'normalised');
@@ -587,7 +633,7 @@ test('16g. a known supplier\'s "Purchase order: 2041" resolves to PO-2041, and t
   assert.equal(invoice.status, 'under_review');
 });
 
-test('16h. a normalised PO does not bypass supplier ownership: someone else\'s PO-0011 is not this supplier\'s, and approval stays blocked', async () => {
+test("16h. a normalised PO does not bypass supplier ownership: someone else's PO-0011 is not this supplier's, and approval stays blocked", async () => {
   const { ledger, submit, act } = setup({ extraPos: [HARBOUR_PO_0011] });
   const { invoice } = await submit(await pdfText('INV-000003-po.pdf'));
   assert.equal(invoice.matchedPo, 'PO-0011', 'found by its number');
@@ -602,7 +648,7 @@ test('16h. a normalised PO does not bypass supplier ownership: someone else\'s P
   assert.equal(ledger.payments.length, 0);
 });
 
-test('16h-2. when another supplier\'s PO is linked, that is the reason given for blocking approval, ahead of duplicate or quantity problems', async () => {
+test("16h-2. when another supplier's PO is linked, that is the reason given for blocking approval, ahead of duplicate or quantity problems", async () => {
   const { submit, act } = setup();
   const text = (await pdfText('INV-000003-no-po.pdf'))
     .replace('1 Normal pipe 1.00 120.00 120.00', '1 Standard timber pallet 1200 x 1000 20 38.50 770.00')
@@ -613,7 +659,11 @@ test('16h-2. when another supplier\'s PO is linked, that is the reason given for
   const { invoice } = await submit(text); // the same invoice again: a possible duplicate
   await act(invoice, 'link_po', { poNumber: 'PO-2045', note: 'Suggested PO' });
   assert.ok(failed(invoice).includes('duplicate'));
-  await rejects(act(invoice, 'approve', { note: 'Approve anyway' }), 409, /^The linked purchase order PO-2045 was raised with Southern Cross Pallets Pty Ltd.*Verify supplier ownership/);
+  await rejects(
+    act(invoice, 'approve', { note: 'Approve anyway' }),
+    409,
+    /^The linked purchase order PO-2045 was raised with Southern Cross Pallets Pty Ltd.*Verify supplier ownership/,
+  );
   assert.match(allowedActions(invoice, {}).find((a) => a.id === 'approve').reason, /Verify supplier ownership/);
 });
 
@@ -640,11 +690,28 @@ test('16i. an AI reading with no supplier name and 97% confidence is not an iden
 // The answer Groq (openai/gpt-oss-120b) actually gave for INV-000003 1.pdf in
 // the round-2 upload test: no supplier, no customer, and 85% confidence.
 const RECORDED_GROQ_NO_SUPPLIER = {
-  vendorName: null, abn: null, acn: null, customerName: null, customerAbn: null, customerAcn: null, gstin: null,
-  invoiceNumber: 'INV-000003', invoiceDate: '2026-10-15', dueDate: '2026-10-15', poNumber: '0011', currency: 'AUD',
-  paymentTerms: 'Due on Receipt', lines: [{ sku: null, description: 'Normal pipe', qty: 1, unit: null, unitPrice: 120, amount: 120 }],
-  subtotal: 120, discount: null, charges: null, taxLines: [{ type: 'GST', rate: 5, amount: 6 }], gst: 6, total: 126,
-  confidence: 0.85, notes: 'Supplier name and ABN not identified.',
+  vendorName: null,
+  abn: null,
+  acn: null,
+  customerName: null,
+  customerAbn: null,
+  customerAcn: null,
+  gstin: null,
+  invoiceNumber: 'INV-000003',
+  invoiceDate: '2026-10-15',
+  dueDate: '2026-10-15',
+  poNumber: '0011',
+  currency: 'AUD',
+  paymentTerms: 'Due on Receipt',
+  lines: [{ sku: null, description: 'Normal pipe', qty: 1, unit: null, unitPrice: 120, amount: 120 }],
+  subtotal: 120,
+  discount: null,
+  charges: null,
+  taxLines: [{ type: 'GST', rate: 5, amount: 6 }],
+  gst: 6,
+  total: 126,
+  confidence: 0.85,
+  notes: 'Supplier name and ABN not identified.',
 };
 
 test('16i-2. the recorded Groq answer with no supplier name and 85% confidence: capped, not identified, sent to a person with the reasons', async () => {
@@ -679,7 +746,10 @@ test('16l. unknown tax rules: the reviewer is told whether a supplier ABN was fo
   const c = check(both.invoice, 'supplier_tax_id');
   assert.equal(both.invoice.validation.jurisdiction.code, 'unknown');
   assert.equal(c.status, 'unverified');
-  assert.match(c.detail, /ABN 50 110 219 460 is printed for the supplier and passes the ATO checksum\. The tax rules could not be identified, so no ABN or GST validation was carried out, and it was not checked against the Australian Business Register/);
+  assert.match(
+    c.detail,
+    /ABN 50 110 219 460 is printed for the supplier and passes the ATO checksum\. The tax rules could not be identified, so no ABN or GST validation was carried out, and it was not checked against the Australian Business Register/,
+  );
   assert.equal(both.invoice.validation.identifier.verification, 'not_checked');
   assert.equal(both.invoice.status, 'needs_review');
 });
@@ -828,7 +898,9 @@ test('17. Indian GST invoice: GSTIN and CGST/SGST rules, no ABN rules', async ()
   assert.match(check(invoice, 'tax_charged').detail, /CGST and SGST/);
   assert.equal(invoice.status, 'needs_review', 'unknown supplier and no PO still go to a person');
 
-  const bad = await submit(fs.readFileSync(fixture('indian-gst-invoice.txt'), 'utf8').replace('SGST @ 9%: 1,080.00', 'SGST @ 9%: 1,080.00\nIGST @ 18%: 2,160.00').replace('SGST/2026', 'SGT/2026/0418'));
+  const bad = await submit(
+    fs.readFileSync(fixture('indian-gst-invoice.txt'), 'utf8').replace('SGST @ 9%: 1,080.00', 'SGST @ 9%: 1,080.00\nIGST @ 18%: 2,160.00').replace('SGST/2026', 'SGT/2026/0418'),
+  );
   assert.match(check(bad.invoice, 'tax_charged').detail, /IGST together with CGST\/SGST/);
 });
 
@@ -848,8 +920,14 @@ test('18. due dates, overdue alerts and the cash needed', () => {
     ],
     '2026-10-12',
   );
-  assert.deepEqual(s.overdue.map((r) => r.invoiceNumber), ['A']);
-  assert.deepEqual(s.dueSoon.map((r) => r.invoiceNumber), ['C', 'B']);
+  assert.deepEqual(
+    s.overdue.map((r) => r.invoiceNumber),
+    ['A'],
+  );
+  assert.deepEqual(
+    s.dueSoon.map((r) => r.invoiceNumber),
+    ['C', 'B'],
+  );
   assert.equal(s.cash.approvedDue7, 250);
   assert.equal(s.cash.awaitingDecisionDue7, 50);
 });

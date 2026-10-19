@@ -56,11 +56,7 @@ export default function App() {
         <div className="topbar-row">
           <span className="brand-name">Finance Operations Agent</span>
           <div className="topbar-right">
-            {health && (
-              <span className={`reader reader-${health.reader.mode}`}>
-                {health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}
-              </span>
-            )}
+            {health && <span className={`reader reader-${health.reader.mode}`}>{health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}</span>}
             {health?.demoMode && (
               <>
                 <button className="btn btn-on-navy" onClick={loadDemo} disabled={Boolean(busy)}>

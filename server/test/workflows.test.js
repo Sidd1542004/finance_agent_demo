@@ -13,7 +13,17 @@ import { createReconciliationAgent } from '../src/agent/finance/reconciliationAg
 import { parseStatement, parseAmount, matchLines, refInDescription, vendorInDescription } from '../src/agent/finance/reconcileRules.js';
 import { explainLines } from '../src/agent/finance/reconcileNotes.js';
 import { createReportAgent } from '../src/agent/finance/reportAgent.js';
-import { buildFigures, checkFigures, compareMonths, previousMonth, templateCommentary, ungroundedNumbers, figuresToCsv, monthRange, isMonth } from '../src/agent/finance/reportFigures.js';
+import {
+  buildFigures,
+  checkFigures,
+  compareMonths,
+  previousMonth,
+  templateCommentary,
+  ungroundedNumbers,
+  figuresToCsv,
+  monthRange,
+  isMonth,
+} from '../src/agent/finance/reportFigures.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
 import { receivedOnly } from '../src/agent/finance/rules.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
@@ -100,7 +110,10 @@ for (const sample of sampleQueries) {
     assert.equal(result.error, null);
     if (sample.expect.outcome === 'auto_answered') {
       assert.equal(query.status, 'answered');
-      assert.deepEqual(setup.ledger.messages.map((m) => m.status), ['sent']);
+      assert.deepEqual(
+        setup.ledger.messages.map((m) => m.status),
+        ['sent'],
+      );
     } else {
       assert.equal(query.status, 'needs_person');
       assert.equal(setup.ledger.messages.length, 0, 'nothing may be sent for a held email');
@@ -122,7 +135,9 @@ test('an unknown sender gets no draft and no invoice details', async () => {
   const setup = await demoMonth();
   const { query } = await runQuery(setup, findSampleQuery('lookalike-sender'));
   assert.equal(query.draft, null);
-  assert.deepEqual(query.matchedInvoices, [{ invoiceNumber: 'HOS-10482', onFile: true, belongsToSender: false, status: null, total: null, dueDate: null, paymentStatus: null, paidOn: null }]);
+  assert.deepEqual(query.matchedInvoices, [
+    { invoiceNumber: 'HOS-10482', onFile: true, belongsToSender: false, status: null, total: null, dueDate: null, paymentStatus: null, paidOn: null },
+  ]);
 });
 
 test("a supplier cannot get the status of another supplier's invoice", async () => {
@@ -148,7 +163,8 @@ test('an AI reader that is talked into the wrong answer is still stopped by the 
   const setup = await demoMonth();
   const sample = findSampleQuery('bank-change');
   // The model wrongly says this is a plain status question, and invents an invoice number.
-  const read = (email) => readWithGroq(email, { apiKey: 'k', model: 'm', ...fakeGroq({ intent: 'payment_status', invoiceNumbers: ['HOS-10482', 'HOS-99999'], summary: 'x', confidence: 0.99 }) });
+  const read = (email) =>
+    readWithGroq(email, { apiKey: 'k', model: 'm', ...fakeGroq({ intent: 'payment_status', invoiceNumbers: ['HOS-10482', 'HOS-99999'], summary: 'x', confidence: 0.99 }) });
   const { query, result } = await runQuery(setup, sample, read);
   assert.equal(result.outcome, 'needs_person');
   assert.deepEqual(failedIds(query), ['no_bank_details', 'reader_confidence']);
@@ -159,7 +175,9 @@ test('an AI reader that is talked into the wrong answer is still stopped by the 
 
 test('if the reader fails, the email is flagged and nothing is sent', async () => {
   const setup = await demoMonth();
-  const { query, result } = await runQuery(setup, findSampleQuery('status-approved'), async () => { throw new Error('Groq rate limit reached.'); });
+  const { query, result } = await runQuery(setup, findSampleQuery('status-approved'), async () => {
+    throw new Error('Groq rate limit reached.');
+  });
   assert.equal(result.outcome, 'failed');
   assert.equal(query.status, 'failed');
   assert.equal(setup.ledger.messages.length, 0);
@@ -196,21 +214,41 @@ test('references and shortened supplier names in bank descriptions', () => {
 const pay = (id, invoiceNumber, vendorName, amount, extra = {}) => ({ id, invoiceNumber, vendorName, amount, status: 'queued', paidOn: null, bank: null, ...extra });
 
 test('matching rules, one case each', () => {
-  const payments = [pay('p1', 'HOS-10482', 'Harbour Office Supplies Pty Ltd', 1402.5), pay('p2', 'SCP-7731', 'Southern Cross Pallets Pty Ltd', 811.8), pay('p3', 'BG-2026-0951', 'Bluegum IT Services Pty Ltd', 924), pay('p4', 'HOS-10500', 'Harbour Office Supplies Pty Ltd', 300, { status: 'on_hold' })];
+  const payments = [
+    pay('p1', 'HOS-10482', 'Harbour Office Supplies Pty Ltd', 1402.5),
+    pay('p2', 'SCP-7731', 'Southern Cross Pallets Pty Ltd', 811.8),
+    pay('p3', 'BG-2026-0951', 'Bluegum IT Services Pty Ltd', 924),
+    pay('p4', 'HOS-10500', 'Harbour Office Supplies Pty Ltd', 300, { status: 'on_hold' }),
+  ];
   const lines = parseStatement(
-    ['Date,Description,Amount', '01/10/2026,HOS-10482 HARBOUR,-1402.50', '01/10/2026,SOUTHERN CROSS PALLETS,-811.80', '01/10/2026,TRANSFER 0091,-924.00', '01/10/2026,HOS-10482 HARBOUR,-1402.50', '01/10/2026,HOS-10500,-300.00', '01/10/2026,INTEREST,3.10'].join('\n'),
+    [
+      'Date,Description,Amount',
+      '01/10/2026,HOS-10482 HARBOUR,-1402.50',
+      '01/10/2026,SOUTHERN CROSS PALLETS,-811.80',
+      '01/10/2026,TRANSFER 0091,-924.00',
+      '01/10/2026,HOS-10482 HARBOUR,-1402.50',
+      '01/10/2026,HOS-10500,-300.00',
+      '01/10/2026,INTEREST,3.10',
+    ].join('\n'),
   );
   const { lines: out, unpaid } = matchLines(lines, payments, []);
-  assert.deepEqual(out.map((l) => [l.status, l.kind || l.method]), [
-    ['matched', 'invoice number and amount'],
-    ['matched', 'supplier name and amount'],
-    ['suggested', 'amount_only'],
-    ['exception', 'duplicate'],
-    ['exception', 'on_hold'],
-    ['skipped', null],
-  ]);
+  assert.deepEqual(
+    out.map((l) => [l.status, l.kind || l.method]),
+    [
+      ['matched', 'invoice number and amount'],
+      ['matched', 'supplier name and amount'],
+      ['suggested', 'amount_only'],
+      ['exception', 'duplicate'],
+      ['exception', 'on_hold'],
+      ['skipped', null],
+    ],
+  );
   assert.equal(out[2].candidate.paymentId, 'p3');
-  assert.deepEqual(unpaid.map((u) => u.invoiceNumber), ['BG-2026-0951'], 'a suggestion is not a payment until a person confirms it');
+  assert.deepEqual(
+    unpaid.map((u) => u.invoiceNumber),
+    ['BG-2026-0951'],
+    'a suggestion is not a payment until a person confirms it',
+  );
 });
 
 test('amount differences, ambiguity and already-paid invoices', () => {
@@ -221,7 +259,9 @@ test('amount differences, ambiguity and already-paid invoices', () => {
   const twins = [pay('a', 'SCP-1', 'Southern Cross Pallets Pty Ltd', 770), pay('b', 'SCP-2', 'Southern Cross Pallets Pty Ltd', 770)];
   assert.equal(matchLines(parseStatement('Date,Description,Amount\n01/10/2026,SOUTHERN CROSS PALLETS,-770.00'), twins, []).lines[0].kind, 'ambiguous');
 
-  const paid = [pay('p1', 'HOS-10482', 'Harbour Office Supplies Pty Ltd', 1402.5, { status: 'paid', paidOn: '2026-10-02', bank: { date: '2026-10-02', description: 'HOS-10482 HARBOUR' } })];
+  const paid = [
+    pay('p1', 'HOS-10482', 'Harbour Office Supplies Pty Ltd', 1402.5, { status: 'paid', paidOn: '2026-10-02', bank: { date: '2026-10-02', description: 'HOS-10482 HARBOUR' } }),
+  ];
   const again = matchLines(parseStatement('Date,Description,Amount\n02/10/2026,HOS-10482 HARBOUR,-1402.50\n09/10/2026,HOS-10482 HARBOUR,-1402.50'), paid, []);
   assert.match(again.lines[0].reason, /same bank line that already paid invoice HOS-10482 in an earlier statement/);
   assert.match(again.lines[1].reason, /already paid on 2 Oct 2026\. Possible double payment/);
@@ -240,20 +280,26 @@ test('the sample statement: two payments matched, three lines for a person, one 
   const { statement, result } = await runStatement(setup, sampleStatement.csv);
 
   assert.equal(result.outcome, 'needs_person');
-  assert.deepEqual(statement.lines.map((l) => [l.n, l.status, l.kind]), [
-    [1, 'matched', null],
-    [2, 'exception', 'duplicate'],
-    [3, 'unmatched', null],
-    [4, 'exception', 'not_approved'],
-    [5, 'matched', null],
-    [6, 'skipped', null],
-  ]);
+  assert.deepEqual(
+    statement.lines.map((l) => [l.n, l.status, l.kind]),
+    [
+      [1, 'matched', null],
+      [2, 'exception', 'duplicate'],
+      [3, 'unmatched', null],
+      [4, 'exception', 'not_approved'],
+      [5, 'matched', null],
+      [6, 'skipped', null],
+    ],
+  );
   assert.match(statement.lines[1].reason, /line 5 of this statement already pays/);
   assert.match(statement.lines[3].reason, /BG-2026-0914, which is not approved for payment \(it is under review\)/);
-  assert.deepEqual(setup.ledger.payments.map((p) => [p.invoiceNumber, p.status, p.paidOn]), [
-    ['HOS-10482', 'paid', '2026-10-02'],
-    ['SCP-7731', 'paid', '2026-10-06'],
-  ]);
+  assert.deepEqual(
+    setup.ledger.payments.map((p) => [p.invoiceNumber, p.status, p.paidOn]),
+    [
+      ['HOS-10482', 'paid', '2026-10-02'],
+      ['SCP-7731', 'paid', '2026-10-06'],
+    ],
+  );
   assert.equal(statement.decision.reasons.length, 3);
   assert.deepEqual(statement.unpaid, []);
 });
@@ -289,13 +335,28 @@ test('verify undoes everything if the payments marked as paid do not agree with 
 
 test('AI notes are attached to open lines only, and a failure does not stop the run', async () => {
   const setup = await demoMonth();
-  const explain = (lines) => explainLines(lines, { apiKey: 'k', model: 'm', ...fakeGroq({ notes: [{ n: 3, note: 'Monthly bank account fee.' }, { n: 1, note: 'should be ignored' }, { n: 99, note: 'x' }] }) });
+  const explain = (lines) =>
+    explainLines(lines, {
+      apiKey: 'k',
+      model: 'm',
+      ...fakeGroq({
+        notes: [
+          { n: 3, note: 'Monthly bank account fee.' },
+          { n: 1, note: 'should be ignored' },
+          { n: 99, note: 'x' },
+        ],
+      }),
+    });
   const { statement } = await runStatement(setup, sampleStatement.csv, { explain });
   assert.equal(statement.lines[2].aiNote, 'Monthly bank account fee.');
   assert.equal(statement.lines[0].aiNote, null);
 
   const setup2 = await demoMonth();
-  const broken = await runStatement(setup2, sampleStatement.csv, { explain: async () => { throw new Error('Groq rate limit reached.'); } });
+  const broken = await runStatement(setup2, sampleStatement.csv, {
+    explain: async () => {
+      throw new Error('Groq rate limit reached.');
+    },
+  });
   assert.equal(broken.result.outcome, 'needs_person');
   assert.equal(setup2.ledger.payments.filter((p) => p.status === 'paid').length, 2);
 });
@@ -330,14 +391,31 @@ test('the demo month report: figures, open items and commentary', async () => {
 
   assert.equal(result.outcome, 'open_items');
   // The clean invoice was sent twice: the copy is counted once, with the original, and listed on its own.
-  assert.deepEqual(f.invoices, { received: 7, valueReceived: 25711.66, clearedByAgent: 2, approvedByPerson: 2, waiting: 4, rejected: 1, cancelled: 0, failed: 0, inProgress: 0, clearedPct: 29, duplicateCopies: 1, duplicateCopiesWaiting: 1 });
+  assert.deepEqual(f.invoices, {
+    received: 7,
+    valueReceived: 25711.66,
+    clearedByAgent: 2,
+    approvedByPerson: 2,
+    waiting: 4,
+    rejected: 1,
+    cancelled: 0,
+    failed: 0,
+    inProgress: 0,
+    clearedPct: 29,
+    duplicateCopies: 1,
+    duplicateCopiesWaiting: 1,
+  });
   assert.deepEqual(f.payments, { approvedCount: 2, approvedValue: 2129.6, scheduledValue: 0, paidCount: 2, paidValue: 2129.6, outstandingCount: 0, outstandingValue: 0 });
   assert.deepEqual(f.queries, { received: 2, answeredByAgent: 1, answeredByPerson: 0, closedWithoutReply: 0, waiting: 1 });
   assert.deepEqual(f.bank, { statements: 1, linesMatched: 2, valueMatched: 2129.6, linesOpen: 3, linesDismissed: 0, linesRepeated: 0 });
   assert.deepEqual(f.heldReasons[0], { id: 'po_found', label: 'No matching purchase order', count: 2 });
   assert.ok(!f.heldReasons.some((r) => r.id === 'match_score'), 'a low score caused by another failure is not counted as its own reason');
   assert.equal(f.openItems.length, 7, 'four invoices, the duplicate copy, the supplier emails and the bank lines');
-  assert.ok(f.openItems.includes('A second copy of invoice HOS-10482 from Harbour Office Supplies Pty Ltd ($1,402.50), received 1 Oct 2026, is a possible duplicate of an invoice that is payment completed. It needs review before it can be approved or paid.'));
+  assert.ok(
+    f.openItems.includes(
+      'A second copy of invoice HOS-10482 from Harbour Office Supplies Pty Ltd ($1,402.50), received 1 Oct 2026, is a possible duplicate of an invoice that is payment completed. It needs review before it can be approved or paid.',
+    ),
+  );
   assert.deepEqual(checkFigures(f), []);
   assert.equal(report.commentary.method, 'standard');
   assert.deepEqual(ungroundedNumbers(report.commentary.text, f), []);
@@ -372,15 +450,26 @@ test('an empty month is ready to close; a future month is refused', async () => 
 
 test('AI commentary is kept when every number is in the figures, replaced when one is not', async () => {
   const setup = await demoMonth();
-  const good = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received worth $25,711.66. 4 are still waiting for a decision.' } });
+  const good = await runReport(setup, '2026-10', {
+    writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received worth $25,711.66. 4 are still waiting for a decision.' },
+  });
   assert.equal(good.report.commentary.method, 'groq');
 
-  const bad = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received, about $27,000 in total, up 12% on last month.' } });
+  const bad = await runReport(setup, '2026-10', {
+    writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received, about $27,000 in total, up 12% on last month.' },
+  });
   assert.equal(bad.report.commentary.method, 'standard');
   assert.match(bad.report.commentary.note, /not in the figures \(27000, 12\)/);
   assert.match(bad.report.commentary.text, /^In October 2026, 7 invoices/);
 
-  const down = await runReport(setup, '2026-10', { writer: { model: 'm', write: async () => { throw new Error('Groq rate limit reached.'); } } });
+  const down = await runReport(setup, '2026-10', {
+    writer: {
+      model: 'm',
+      write: async () => {
+        throw new Error('Groq rate limit reached.');
+      },
+    },
+  });
   assert.equal(down.report.commentary.method, 'standard');
   assert.match(down.report.commentary.note, /AI writer was not available/);
   assert.equal(down.result.outcome, 'open_items');
@@ -414,11 +503,20 @@ test('received quantity only: 10 of 12 pallets, GST recalculated', async () => {
 
 test('supplier replies say when only part of an invoice was approved or paid', () => {
   const inv = { invoiceNumber: 'SCP-7731', total: 811.8, status: 'payment_pending', dueDate: '2026-10-18' };
-  assert.equal(statusLine({ ...inv, payment: { status: 'queued', amount: 727.1 } }), 'Invoice SCP-7731 ($811.80): approved for $727.10, the quantity we have received, and scheduled for payment, due 18 Oct 2026.');
-  assert.equal(statusLine({ ...inv, payment: { status: 'paid', amount: 727.1, paidOn: '2026-10-06' } }), 'Invoice SCP-7731 ($811.80): $727.10 paid, for the quantity we have received on 6 Oct 2026.');
+  assert.equal(
+    statusLine({ ...inv, payment: { status: 'queued', amount: 727.1 } }),
+    'Invoice SCP-7731 ($811.80): approved for $727.10, the quantity we have received, and scheduled for payment, due 18 Oct 2026.',
+  );
+  assert.equal(
+    statusLine({ ...inv, payment: { status: 'paid', amount: 727.1, paidOn: '2026-10-06' } }),
+    'Invoice SCP-7731 ($811.80): $727.10 paid, for the quantity we have received on 6 Oct 2026.',
+  );
   assert.equal(statusLine({ ...inv, payment: { status: 'queued', amount: 811.8 } }), 'Invoice SCP-7731 ($811.80): approved and scheduled for payment, due 18 Oct 2026.');
   // Approved but not yet scheduled: approval is not payment, and the reply says so.
-  assert.equal(statusLine({ ...inv, status: 'approved', approvedAmount: 727.1, payment: null }), 'Invoice SCP-7731 ($811.80): approved for $727.10, the quantity we have received. Payment will be scheduled by the due date, 18 Oct 2026.');
+  assert.equal(
+    statusLine({ ...inv, status: 'approved', approvedAmount: 727.1, payment: null }),
+    'Invoice SCP-7731 ($811.80): approved for $727.10, the quantity we have received. Payment will be scheduled by the due date, 18 Oct 2026.',
+  );
 });
 
 // ---------- Month-on-month comparison ----------
@@ -503,7 +601,9 @@ test('the same statement reconciled twice: each bank line is counted once, and a
   let { report } = await runReport(setup, '2026-10');
   assert.equal(report.figures.bank.linesOpen, 3, 'lines 2, 3 and 4, not the 3 + 5 open entries across both runs');
   assert.equal(report.figures.bank.linesMatched, 2);
-  assert.deepEqual(bankItems(report), ['3 bank lines on bank-statement-october.csv need a decision (lines 2, 3 and 4). The same statement lines were reconciled 2 times this month; each bank line is counted once.']);
+  assert.deepEqual(bankItems(report), [
+    '3 bank lines on bank-statement-october.csv need a decision (lines 2, 3 and 4). The same statement lines were reconciled 2 times this month; each bank line is counted once.',
+  ]);
 
   // A person decides every open line on the second run. The first run is left as it was, for the audit trail.
   for (const l of second.lines.filter((x) => ['suggested', 'exception', 'unmatched'].includes(x.status))) decideLine(second, l.n);

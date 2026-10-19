@@ -13,7 +13,6 @@ export const STAGES = [
   ['escalate', 'Escalate'],
 ];
 
-
 const STEP_NOTE = { error: 'Failed', skipped: 'Skipped' };
 
 export function Rail({ steps, fresh }) {
@@ -49,7 +48,6 @@ export function Rail({ steps, fresh }) {
     </ol>
   );
 }
-
 
 export function CheckIcon({ status }) {
   const label = { pass: 'Passed', fail: 'Needs a person', skip: 'Not checked', unverified: 'Not verified' }[status];

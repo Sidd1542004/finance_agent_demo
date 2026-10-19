@@ -74,8 +74,15 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         invoice.dupKey = invoice.fingerprints.numberKey;
         invoice.due = dueInfo(extracted, today?.());
         await save(invoice);
-        const reader = extraction.method === 'groq-vision' ? `AI vision reader (${extraction.model}), from an image` : extraction.method === 'groq' ? `AI reader (${extraction.model})` : 'basic pattern reader';
-        const helped = extraction.hints?.count ? ` Given ${extraction.hints.count} reviewer hint${extraction.hints.count === 1 ? '' : 's'} for ${extraction.hints.supplier || 'this supplier'}; every value was still checked against the invoice text.` : '';
+        const reader =
+          extraction.method === 'groq-vision'
+            ? `AI vision reader (${extraction.model}), from an image`
+            : extraction.method === 'groq'
+              ? `AI reader (${extraction.model})`
+              : 'basic pattern reader';
+        const helped = extraction.hints?.count
+          ? ` Given ${extraction.hints.count} reviewer hint${extraction.hints.count === 1 ? '' : 's'} for ${extraction.hints.supplier || 'this supplier'}; every value was still checked against the invoice text.`
+          : '';
         const corrected = extraction.corrected?.length ? ` ${extraction.corrected.length} field${extraction.corrected.length === 1 ? '' : 's'} corrected by a reviewer.` : '';
         return {
           summary: `Read invoice ${extracted.invoiceNumber || '(no number)'} from ${extracted.vendorName || 'an unknown supplier'}: ${(extracted.lines || []).length} line item(s), total ${fmtMoney(extracted.total, extracted.currency || 'AUD')}. Read by the ${reader}.${helped}${corrected}`,
@@ -93,7 +100,16 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         let abrResult = null;
         if (abr && e.abn) abrResult = await abr(e.abn);
 
-        const validation = validateInvoice({ extracted: e, extraction: invoice.extraction, text: invoice.rawText, vendor, vendorBy: by, vendorConflict: conflict, abr: abrResult, policy });
+        const validation = validateInvoice({
+          extracted: e,
+          extraction: invoice.extraction,
+          text: invoice.rawText,
+          vendor,
+          vendorBy: by,
+          vendorConflict: conflict,
+          abr: abrResult,
+          policy,
+        });
 
         // Duplicates first: a suspected earlier copy must not also count as
         // having used up the purchase order.
@@ -218,7 +234,13 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         const reasons = state.escalation?.reasons || [];
         invoice.status = to;
         invoice.decision = { outcome: to, reasons };
-        pushEvent(invoice, { actor: 'Agent', action: 'processed', from, to, reason: reasons.length ? `${reasons.length} exception(s)` : `Match score ${invoice.match?.score?.total}%` });
+        pushEvent(invoice, {
+          actor: 'Agent',
+          action: 'processed',
+          from,
+          to,
+          reason: reasons.length ? `${reasons.length} exception(s)` : `Match score ${invoice.match?.score?.total}%`,
+        });
         await save(invoice);
         state.outcome = to;
         if (to === 'under_review') {

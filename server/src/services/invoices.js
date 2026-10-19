@@ -32,12 +32,16 @@ const agent = createInvoiceAgent({
 export async function processInvoice(invoice, { reading = null } = {}) {
   const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [] });
 
-  const result = await runAgent(agent, { invoice, reading }, {
-    onStep: async (_step, steps) => {
-      run.steps = [...steps];
-      await run.save();
+  const result = await runAgent(
+    agent,
+    { invoice, reading },
+    {
+      onStep: async (_step, steps) => {
+        run.steps = [...steps];
+        await run.save();
+      },
     },
-  });
+  );
 
   // If even the escalate stage failed, make sure the invoice is not left looking fine.
   if (!result.outcome) {
@@ -78,7 +82,11 @@ export async function getInvoiceDetail(id) {
   let linkablePos = [];
   if (AWAITING_DECISION.includes(invoice.status)) {
     const filter = invoice.supplier?.abn ? { vendorAbn: normaliseAbn(invoice.supplier.abn) } : {};
-    linkablePos = (await PurchaseOrder.find(filter).select('poNumber vendorName raisedOn').sort({ poNumber: 1 }).lean()).map((p) => ({ poNumber: p.poNumber, vendorName: p.vendorName, raisedOn: p.raisedOn }));
+    linkablePos = (await PurchaseOrder.find(filter).select('poNumber vendorName raisedOn').sort({ poNumber: 1 }).lean()).map((p) => ({
+      poNumber: p.poNumber,
+      vendorName: p.vendorName,
+      raisedOn: p.raisedOn,
+    }));
   }
   return { invoice, run, payment, po, receivedOnly: partial, actions: allowedActions(invoice, ctx), linkablePos, paymentMethods: PAYMENT_METHODS };
 }

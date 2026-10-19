@@ -69,7 +69,10 @@ test('the database gate shares one attempt, does not cache a failure, and seeds 
 test('the Vercel handler restores the original API path and keeps the query', () => {
   assert.equal(restorePath('/api?__path=invoices'), '/api/invoices');
   assert.equal(restorePath('/api?__path=invoices%2Fabc%2Factions%2Fapprove'), '/api/invoices/abc/actions/approve');
-  assert.equal(restorePath('/api?__path=invoices/abc/actions/approve&before=2026-10-01T00%3A00%3A00.000Z&limit=5'), '/api/invoices/abc/actions/approve?before=2026-10-01T00%3A00%3A00.000Z&limit=5');
+  assert.equal(
+    restorePath('/api?__path=invoices/abc/actions/approve&before=2026-10-01T00%3A00%3A00.000Z&limit=5'),
+    '/api/invoices/abc/actions/approve?before=2026-10-01T00%3A00%3A00.000Z&limit=5',
+  );
   assert.equal(restorePath('/api?limit=5&__path=reports'), '/api/reports?limit=5');
   assert.equal(restorePath('/api/health'), '/api/health', 'a request that was not rewritten is left alone');
 });
@@ -79,7 +82,12 @@ test('a wrong MONGODB_URI gives a 503 with a clear message, and the password nev
   // Run in an empty folder so no .env file is loaded.
   const cwd = mkdtempSync(path.join(tmpdir(), 'fa-deploy-'));
   const script = `
-    const { default: handler } = await import(${JSON.stringify(path.join(here, '../../api/index.js').replace(/\\/g, '/').replace(/^([A-Z]):/, 'file:///$1:'))});
+    const { default: handler } = await import(${JSON.stringify(
+      path
+        .join(here, '../../api/index.js')
+        .replace(/\\/g, '/')
+        .replace(/^([A-Z]):/, 'file:///$1:'),
+    )});
     const http = await import('node:http');
     const server = http.createServer(handler).listen(0, async () => {
       const res = await fetch('http://127.0.0.1:' + server.address().port + '/api?__path=health');

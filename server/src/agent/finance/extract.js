@@ -182,7 +182,10 @@ export function abnLabel(digits, text) {
 // and a person confirms it. A VAT-labelled number is kept as vatNumber.
 function guardAbns(extracted, text, corrected = new Map()) {
   const notes = [];
-  for (const [field, who] of [['abn', "supplier's"], ['customerAbn', "customer's"]]) {
+  for (const [field, who] of [
+    ['abn', "supplier's"],
+    ['customerAbn', "customer's"],
+  ]) {
     const value = extracted[field];
     if (!value || corrected.has(field)) continue;
     const label = abnLabel(value, text);
@@ -256,7 +259,12 @@ export function applyCorrections(reading, corrections, text) {
   for (const field of ['abn', 'customerAbn']) if (latest.has(field)) extracted.rejectedIds = (extracted.rejectedIds || []).filter((r) => r.field !== field);
   if (extracted.rejectedIds && !extracted.rejectedIds.length) delete extracted.rejectedIds;
   const x = reading.extraction || {};
-  return finish(extracted, text, { method: x.method, model: x.model, input: x.input, hints: x.hints, confidence: x.reader?.confidence ?? x.rawConfidence ?? x.confidence, notes: x.reader?.notes ?? null }, latest);
+  return finish(
+    extracted,
+    text,
+    { method: x.method, model: x.model, input: x.input, hints: x.hints, confidence: x.reader?.confidence ?? x.rawConfidence ?? x.confidence, notes: x.reader?.notes ?? null },
+    latest,
+  );
 }
 
 // ---------- Basic pattern reader (no AI) ----------
@@ -372,7 +380,15 @@ export function extractWithRules(text) {
     total: first(amountAtLineEnd('Total|Amount due|Balance due')),
   });
 
-  const wanted = [extracted.vendorName, extracted.abn || extracted.gstin, extracted.invoiceNumber, extracted.subtotal, extracted.gst, extracted.total, extracted.lines.length || null];
+  const wanted = [
+    extracted.vendorName,
+    extracted.abn || extracted.gstin,
+    extracted.invoiceNumber,
+    extracted.subtotal,
+    extracted.gst,
+    extracted.total,
+    extracted.lines.length || null,
+  ];
   const found = wanted.filter((v) => v !== null).length;
   const confidence = found === wanted.length ? 0.9 : (found / wanted.length) * 0.7;
 
@@ -474,7 +490,9 @@ export const MAX_VISION_IMAGES = 2;
  * @returns { transcription, reading: { extracted, extraction } }, the fields grounded against the transcription
  */
 export async function readInvoiceImages(images, { apiKey, model, fetchImpl } = {}) {
-  const parts = images.slice(0, MAX_VISION_IMAGES).map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mimetype};base64,${Buffer.from(img.data).toString('base64')}` } }));
+  const parts = images
+    .slice(0, MAX_VISION_IMAGES)
+    .map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mimetype};base64,${Buffer.from(img.data).toString('base64')}` } }));
   const raw = await groqChat({
     apiKey,
     model,
@@ -489,8 +507,12 @@ export async function readInvoiceImages(images, { apiKey, model, fetchImpl } = {
       ],
     },
   });
-  const transcription = (typeof raw.transcription === 'string' ? raw.transcription : '').replace(/\u0000/g, '').trim().slice(0, 200_000);
-  if (transcription.replace(/\[illegible\]/gi, '').trim().length < 40) throw new Error('No readable text was found in the image. Try a sharper scan or photo, or upload a PDF with a text layer.');
+  const transcription = (typeof raw.transcription === 'string' ? raw.transcription : '')
+    .replace(/\u0000/g, '')
+    .trim()
+    .slice(0, 200_000);
+  if (transcription.replace(/\[illegible\]/gi, '').trim().length < 40)
+    throw new Error('No readable text was found in the image. Try a sharper scan or photo, or upload a PDF with a text layer.');
   const fields = raw.invoice && typeof raw.invoice === 'object' && !Array.isArray(raw.invoice) ? raw.invoice : raw;
   const reading = finish(normalise(fields), transcription, { method: 'groq-vision', model, input: 'image', confidence: fields.confidence, notes: str(fields.notes) });
   return { transcription, reading };

@@ -12,6 +12,8 @@ export function createWorkLimiter({ windowMinutes, max }) {
     limit: max,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
-    message: { error: `Too many requests that run the agent: the limit is ${max} every ${windowMinutes} minute${windowMinutes === 1 ? '' : 's'}. Wait a few minutes and try again.` },
+    message: {
+      error: `Too many requests that run the agent: the limit is ${max} every ${windowMinutes} minute${windowMinutes === 1 ? '' : 's'}. Wait a few minutes and try again.`,
+    },
   });
 }

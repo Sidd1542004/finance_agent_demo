@@ -68,8 +68,8 @@ export default function ReportView({ onError }) {
               <>
                 <h1>Ask the agent for a month-end report</h1>
                 <p>
-                  The agent adds up the month from the records: what came in, what it approved on its own, what people decided, what has been
-                  paid and what is still open. Code calculates every figure. AI only writes the summary paragraph.
+                  The agent adds up the month from the records: what came in, what it approved on its own, what people decided, what has been paid and what is still open. Code
+                  calculates every figure. AI only writes the summary paragraph.
                 </p>
               </>
             ) : (
@@ -127,39 +127,36 @@ function ReportDetail({ data, fresh }) {
         <section className="panel">
           <div className="panel-head">
             <h2>Summary</h2>
-            
-<button
-  className="btn btn-outline"
-  type="button"
-  onClick={async () => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/reports/${report._id}/csv`
-      );
 
-      if (!response.ok) {
-        throw new Error(`CSV download failed: ${response.status}`);
-      }
+            <button
+              className="btn btn-outline"
+              type="button"
+              onClick={async () => {
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/reports/${report._id}/csv`);
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
+                  if (!response.ok) {
+                    throw new Error(`CSV download failed: ${response.status}`);
+                  }
 
-      link.href = url;
-      link.download = 'month-end-report.csv';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('CSV download error:', error);
-      alert('CSV download failed. Please check the browser console.');
-    }
-  }}
->
-  Download figures (CSV)
-</button>
+                  const blob = await response.blob();
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
 
+                  link.href = url;
+                  link.download = 'month-end-report.csv';
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                  URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('CSV download error:', error);
+                  alert('CSV download failed. Please check the browser console.');
+                }
+              }}
+            >
+              Download figures (CSV)
+            </button>
           </div>
           <p className="commentary">{c.text}</p>
           <p className="hint">
@@ -217,7 +214,11 @@ function ReportDetail({ data, fresh }) {
               ['Repeated lines from re-run statements (counted once)', f.bank.linesRepeated ?? 0],
             ]}
           />
-          <Figures title="Still to pay, by supplier" empty="Nothing is waiting to be paid." rows={f.outstandingBySupplier.map((s) => [`${s.vendorName}${s.earliestDue ? `, due ${day(s.earliestDue)}` : ''}`, money(s.value)])} />
+          <Figures
+            title="Still to pay, by supplier"
+            empty="Nothing is waiting to be paid."
+            rows={f.outstandingBySupplier.map((s) => [`${s.vendorName}${s.earliestDue ? `, due ${day(s.earliestDue)}` : ''}`, money(s.value)])}
+          />
           <Figures title="Why invoices needed a person" empty="No invoice needed a person." rows={f.heldReasons.map((r) => [r.label, r.count])} />
         </div>
       )}

@@ -15,7 +15,9 @@ function finish(raw, text, meta) {
   const seen = new Set();
   const dropped = [];
   for (const value of Array.isArray(raw?.invoiceNumbers) ? raw.invoiceNumbers : []) {
-    const ref = String(value ?? '').trim().toUpperCase();
+    const ref = String(value ?? '')
+      .trim()
+      .toUpperCase();
     if (!ref) continue;
     if (upper.includes(ref)) seen.add(ref);
     else dropped.push(ref);
@@ -30,7 +32,14 @@ function finish(raw, text, meta) {
   }
 
   return {
-    understood: { intent, invoiceNumbers: [...seen], summary: String(raw?.summary ?? '').trim().slice(0, 300) || null },
+    understood: {
+      intent,
+      invoiceNumbers: [...seen],
+      summary:
+        String(raw?.summary ?? '')
+          .trim()
+          .slice(0, 300) || null,
+    },
     reading: { method: meta.method, model: meta.model || null, confidence: Math.round(confidence * 100) / 100, notes: notes.filter(Boolean).join(' ') || null },
   };
 }

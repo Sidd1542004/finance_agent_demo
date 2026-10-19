@@ -921,7 +921,9 @@ textarea {
 }
 
 .lines tr.has-issue td:first-child {
-  box-shadow: -8px 0 0 var(--gold-wash), inset 3px 0 0 -0px transparent;
+  box-shadow:
+    -8px 0 0 var(--gold-wash),
+    inset 3px 0 0 -0px transparent;
 }
 
 .lines tfoot th {
@@ -1008,7 +1010,12 @@ textarea {
   padding: 14px;
   background: var(--bg-alt);
   border-radius: var(--r);
-  font: 12.5px/1.5 ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font:
+    12.5px/1.5 ui-monospace,
+    'SFMono-Regular',
+    Menlo,
+    Consolas,
+    monospace;
   overflow-x: auto;
   white-space: pre;
 }

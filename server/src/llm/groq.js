@@ -31,7 +31,17 @@ const retryable = (status) => status === 429 || (status >= 500 && status <= 599)
  * Send one chat request. `body` is the request body without the model.
  * @returns the parsed object from the message content
  */
-export async function groqChat({ apiKey, model, body, fetchImpl = fetch, timeoutMs = 30000, retries = RETRY.retries, budgetMs = RETRY.budgetMs, sleep = sleepFor, now = Date.now }) {
+export async function groqChat({
+  apiKey,
+  model,
+  body,
+  fetchImpl = fetch,
+  timeoutMs = 30000,
+  retries = RETRY.retries,
+  budgetMs = RETRY.budgetMs,
+  sleep = sleepFor,
+  now = Date.now,
+}) {
   if (!apiKey) throw new Error('GROQ_API_KEY is not set.');
 
   const deadline = now() + budgetMs;
@@ -60,7 +70,8 @@ export async function groqChat({ apiKey, model, body, fetchImpl = fetch, timeout
         /* body was not JSON */
       }
       if (res.status === 401) throw new Error('Groq rejected the API key. Check GROQ_API_KEY in server/.env.');
-      const text = res.status === 429 ? 'Groq rate limit reached. Wait a moment and process the invoice again.' : `Groq returned an error (${res.status})${message ? `: ${message}` : '.'}`;
+      const text =
+        res.status === 429 ? 'Groq rate limit reached. Wait a moment and process the invoice again.' : `Groq returned an error (${res.status})${message ? `: ${message}` : '.'}`;
       if (!retryable(res.status)) throw new Error(text);
       failure = text;
       wait = retryAfterMs(res.headers?.get?.('retry-after'));

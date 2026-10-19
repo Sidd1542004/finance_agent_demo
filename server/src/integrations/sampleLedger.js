@@ -20,7 +20,7 @@ const invoiceSummary = (d) => ({
   status: d.status,
   createdAt: d.createdAt,
   humanDecision: d.approval?.decision ?? null,
-  approvedAmount: d.approval?.amount ?? (d.approval ? d.extracted?.total ?? null : null),
+  approvedAmount: d.approval?.amount ?? (d.approval ? (d.extracted?.total ?? null) : null),
   agentOutcome: d.decision?.outcome ?? null,
   currency: d.extracted?.currency || 'AUD',
   failedChecks: (d.checks || []).filter((c) => c.status === 'fail').map((c) => ({ id: c.id, label: c.label })),
@@ -48,7 +48,19 @@ const inRange = ({ start, end } = {}) => (start && end ? { createdAt: { $gte: st
 const revertInvoice = (invoiceId) =>
   Invoice.updateOne(
     { _id: invoiceId, status: 'payment_completed' },
-    { $set: { status: 'payment_pending' }, $push: { events: { at: new Date().toISOString(), actor: 'Bank reconciliation', action: 'payment_unmatched', from: 'payment_completed', to: 'payment_pending', reason: 'The bank match was undone.' } } },
+    {
+      $set: { status: 'payment_pending' },
+      $push: {
+        events: {
+          at: new Date().toISOString(),
+          actor: 'Bank reconciliation',
+          action: 'payment_unmatched',
+          from: 'payment_completed',
+          to: 'payment_pending',
+          reason: 'The bank match was undone.',
+        },
+      },
+    },
   );
 
 export const sampleLedger = {
@@ -87,7 +99,7 @@ export const sampleLedger = {
     for (const d of docs) {
       for (const l of d.lineMatches || []) {
         if (!l.onPo || typeof l.qtyInvoiced !== 'number') continue;
-        const qty = d.approval?.decision === 'approve_received' ? l.qtyPayable ?? l.qtyInvoiced : l.qtyInvoiced;
+        const qty = d.approval?.decision === 'approve_received' ? (l.qtyPayable ?? l.qtyInvoiced) : l.qtyInvoiced;
         totals[skuKey(l.sku)] = (totals[skuKey(l.sku)] || 0) + qty;
       }
     }
@@ -104,7 +116,14 @@ export const sampleLedger = {
       .select('status createdAt extracted.invoiceNumber extracted.total fingerprints')
       .sort({ createdAt: 1 })
       .lean();
-    return docs.map((d) => ({ id: String(d._id), invoiceNumber: d.extracted?.invoiceNumber ?? null, total: d.extracted?.total ?? null, status: d.status, createdAt: d.createdAt, signals: sharedSignals(fingerprints, d.fingerprints) }));
+    return docs.map((d) => ({
+      id: String(d._id),
+      invoiceNumber: d.extracted?.invoiceNumber ?? null,
+      total: d.extracted?.total ?? null,
+      status: d.status,
+      createdAt: d.createdAt,
+      signals: sharedSignals(fingerprints, d.fingerprints),
+    }));
   },
 
   // ----- invoices -----
@@ -179,7 +198,9 @@ export const sampleLedger = {
     const keys = invoice.duplicateCleared ? ['numberKey', 'contentHash'] : ['numberKey', 'amountKey', 'contentHash'];
     const or = keys.filter((k) => fp[k]).map((k) => ({ [`fingerprints.${k}`]: fp[k] }));
     if (!or.length) return [];
-    const others = await Invoice.find({ $or: or, _id: { $ne: invoice.id } }).select('_id').lean();
+    const others = await Invoice.find({ $or: or, _id: { $ne: invoice.id } })
+      .select('_id')
+      .lean();
     if (!others.length) return [];
     return Payment.find({ invoiceId: { $in: others.map((o) => o._id) }, status: { $in: ['queued', 'paid'] } }).lean();
   },
@@ -228,19 +249,38 @@ export const sampleLedger = {
   async markPaid(paymentId, bank) {
     const doc = await Payment.findOneAndUpdate(
       { _id: paymentId, status: 'queued' },
-      { $set: { status: 'paid', paidOn: bank.date ?? null, bank, recordedBy: 'Bank reconciliation' }, $push: { history: { at: new Date().toISOString(), event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } } },
+      {
+        $set: { status: 'paid', paidOn: bank.date ?? null, bank, recordedBy: 'Bank reconciliation' },
+        $push: { history: { at: new Date().toISOString(), event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
+      },
       { new: true },
     ).lean();
     if (!doc) return null;
     await Invoice.updateOne(
       { _id: doc.invoiceId, status: 'payment_pending' },
-      { $set: { status: 'payment_completed' }, $push: { events: { at: new Date().toISOString(), actor: 'Bank reconciliation', action: 'payment_matched', from: 'payment_pending', to: 'payment_completed', reason: `Bank line ${bank.line} (${bank.description}) matches the payment.` } } },
+      {
+        $set: { status: 'payment_completed' },
+        $push: {
+          events: {
+            at: new Date().toISOString(),
+            actor: 'Bank reconciliation',
+            action: 'payment_matched',
+            from: 'payment_pending',
+            to: 'payment_completed',
+            reason: `Bank line ${bank.line} (${bank.description}) matches the payment.`,
+          },
+        },
+      },
     );
     return paymentSummary(doc);
   },
 
   async unmarkPaid(paymentId, statementId) {
-    const doc = await Payment.findOneAndUpdate({ _id: paymentId, status: 'paid', 'bank.statementId': statementId }, { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } }, { new: true }).lean();
+    const doc = await Payment.findOneAndUpdate(
+      { _id: paymentId, status: 'paid', 'bank.statementId': statementId },
+      { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } },
+      { new: true },
+    ).lean();
     if (doc) await revertInvoice(doc.invoiceId);
   },
 

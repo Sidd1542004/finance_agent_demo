@@ -133,7 +133,7 @@ export function correctionChanges(extracted, fields) {
   const changes = [];
   for (const [field, value] of Object.entries(fields)) {
     const to = cleanValue(field, value);
-    const from = field === 'lines' ? (current.lines || []).map((l) => Object.fromEntries([...LINE_FIELDS, 'unit'].map((k) => [k, l?.[k] ?? null]))) : current[field] ?? null;
+    const from = field === 'lines' ? (current.lines || []).map((l) => Object.fromEntries([...LINE_FIELDS, 'unit'].map((k) => [k, l?.[k] ?? null]))) : (current[field] ?? null);
     if (!same(field, from, to)) changes.push({ field, from, to });
   }
   if (!changes.length) throw bad('Nothing was changed.');

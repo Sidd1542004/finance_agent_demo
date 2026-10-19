@@ -99,7 +99,11 @@ test('demo mode (Load demo month, Reset) is on only when DEMO_MODE=true', () => 
   const demoMode = (value) => {
     const env = { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT };
     if (value !== undefined) env.DEMO_MODE = value;
-    return execFileSync(process.execPath, ['--input-type=module', '-e', `const { config } = await import(${JSON.stringify(configUrl)}); process.stdout.write(String(config.demoMode));`], { cwd, env }).toString();
+    return execFileSync(
+      process.execPath,
+      ['--input-type=module', '-e', `const { config } = await import(${JSON.stringify(configUrl)}); process.stdout.write(String(config.demoMode));`],
+      { cwd, env },
+    ).toString();
   };
   try {
     assert.equal(demoMode(undefined), 'false');

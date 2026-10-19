@@ -42,7 +42,10 @@ for (const sample of sampleInvoices) {
     assert.equal(ledger.payments.length, 0, 'the agent never creates a payment, whatever the score');
     assert.equal(invoice.approval, undefined, 'the agent never approves');
     assert.equal(invoice.decision.reasons.length, sample.expect.failed.length);
-    assert.ok(invoice.events.some((e) => e.actor === 'Agent' && e.from === 'received' && e.to === sample.expect.outcome), 'the status change is in the audit trail');
+    assert.ok(
+      invoice.events.some((e) => e.actor === 'Agent' && e.from === 'received' && e.to === sample.expect.outcome),
+      'the status change is in the audit trail',
+    );
   });
 }
 
@@ -61,7 +64,12 @@ test('the same invoice twice: the second is flagged as a duplicate for review', 
 
 test('a failed first attempt does not make the retry a duplicate', async () => {
   let fail = true;
-  const { submit } = setup({ extract: async (text) => { if (fail) throw new Error('Groq rate limit reached.'); return extractWithRules(text); } });
+  const { submit } = setup({
+    extract: async (text) => {
+      if (fail) throw new Error('Groq rate limit reached.');
+      return extractWithRules(text);
+    },
+  });
   const text = renderInvoiceText(findSample('clean'));
   const first = await submit(text);
   fail = false;
@@ -71,13 +79,20 @@ test('a failed first attempt does not make the retry a duplicate', async () => {
 });
 
 test('if the reader fails, the invoice is flagged and nothing is queued', async () => {
-  const { ledger, submit } = setup({ extract: async () => { throw new Error('Could not reach Groq (timed out).'); } });
+  const { ledger, submit } = setup({
+    extract: async () => {
+      throw new Error('Could not reach Groq (timed out).');
+    },
+  });
   const { invoice, result } = await submit(renderInvoiceText(findSample('clean')));
 
   assert.equal(result.outcome, 'failed');
   assert.equal(invoice.status, 'failed');
   assert.match(invoice.decision.reasons[0], /"understand" step: Could not reach Groq/);
-  assert.deepEqual(result.steps.map((s) => s.status), ['done', 'error', 'skipped', 'skipped', 'skipped', 'done']);
+  assert.deepEqual(
+    result.steps.map((s) => s.status),
+    ['done', 'error', 'skipped', 'skipped', 'skipped', 'done'],
+  );
   assert.equal(ledger.payments.length, 0);
 });
 
@@ -87,7 +102,13 @@ test('if the reader fails, the invoice is flagged and nothing is queued', async 
 // must flow through the whole six-step loop and land on "Could not process"
 // with a clear reason, exactly like any other reader failure, not crash.
 test('a Groq response that fails while reading the body ends as a clean "could not process", not a crash', async () => {
-  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => { throw new Error('read ECONNRESET'); } });
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => {
+      throw new Error('read ECONNRESET');
+    },
+  });
   const extract = (text) => extractWithGroq(text, { apiKey: 'k', model: 'openai/gpt-oss-120b', fetchImpl });
   const { ledger, submit } = setup({ extract });
 
@@ -96,7 +117,10 @@ test('a Groq response that fails while reading the body ends as a clean "could n
   assert.equal(result.outcome, 'failed');
   assert.equal(invoice.status, 'failed');
   assert.match(invoice.decision.reasons[0], /Could not read Groq's response \(read ECONNRESET\)/);
-  assert.deepEqual(result.steps.map((s) => s.status), ['done', 'error', 'skipped', 'skipped', 'skipped', 'done']);
+  assert.deepEqual(
+    result.steps.map((s) => s.status),
+    ['done', 'error', 'skipped', 'skipped', 'skipped', 'done'],
+  );
   assert.equal(ledger.payments.length, 0, 'nothing is ever queued for an invoice the reader could not read');
 });
 
@@ -116,7 +140,10 @@ test('verify finds a payment the agent should never have left and puts it on hol
   assert.equal(result.outcome, 'needs_review');
   assert.equal(invoice.status, 'needs_review');
   assert.match(invoice.decision.reasons.at(-1), /payment existed for an invoice that has not been approved/);
-  assert.deepEqual(ledger.payments.map((p) => p.status), ['on_hold']);
+  assert.deepEqual(
+    ledger.payments.map((p) => p.status),
+    ['on_hold'],
+  );
 });
 
 test('an AI reading with a made-up invoice number goes to a person', async () => {

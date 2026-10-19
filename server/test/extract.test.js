@@ -66,7 +66,8 @@ const fakeGroq = (payload, { status = 200 } = {}) => {
     return {
       ok: status >= 200 && status < 300,
       status,
-      json: async () => (status === 200 ? { choices: [{ message: { content: typeof payload === 'string' ? payload : JSON.stringify(payload) } }] } : { error: { message: 'nope' } }),
+      json: async () =>
+        status === 200 ? { choices: [{ message: { content: typeof payload === 'string' ? payload : JSON.stringify(payload) } }] } : { error: { message: 'nope' } },
     };
   };
   return { fetchImpl, calls };
@@ -126,7 +127,16 @@ test('Groq client: clear errors for a bad key, rate limit, bad JSON and no netwo
   await assert.rejects(() => groqJson({ ...args, fetchImpl: fakeGroq({}, { status: 429 }).fetchImpl }), /rate limit/);
   await assert.rejects(() => groqJson({ ...args, fetchImpl: fakeGroq({}, { status: 500 }).fetchImpl }), /error \(500\): nope/);
   await assert.rejects(() => groqJson({ ...args, fetchImpl: fakeGroq('not json at all').fetchImpl }), /not valid JSON/);
-  await assert.rejects(() => groqJson({ ...args, fetchImpl: async () => { throw new Error('getaddrinfo ENOTFOUND'); } }), /Could not reach Groq/);
+  await assert.rejects(
+    () =>
+      groqJson({
+        ...args,
+        fetchImpl: async () => {
+          throw new Error('getaddrinfo ENOTFOUND');
+        },
+      }),
+    /Could not reach Groq/,
+  );
 });
 
 // A slow/large reasoning model occasionally reports 200 OK but the connection
@@ -138,17 +148,16 @@ test('Groq client: a 200 response whose body cannot be read is a clean error, no
   const fetchImpl = async () => ({
     ok: true,
     status: 200,
-    json: async () => { throw new Error('read ECONNRESET'); },
+    json: async () => {
+      throw new Error('read ECONNRESET');
+    },
   });
-  await assert.rejects(
-    () => groqJson({ apiKey: 'k', model: 'm', system: 's', user: 'u', fetchImpl }),
-    /Could not read Groq's response \(read ECONNRESET\)/,
-  );
+  await assert.rejects(() => groqJson({ apiKey: 'k', model: 'm', system: 's', user: 'u', fetchImpl }), /Could not read Groq's response \(read ECONNRESET\)/);
 });
 
 // ---------- Australian supplier/customer tax detail extraction ----------
 
-test('1. the customer\'s ABN appears before the supplier\'s ABN: neither is mixed up', () => {
+test("1. the customer's ABN appears before the supplier's ABN: neither is mixed up", () => {
   const text = [
     'TAX INVOICE',
     '',
@@ -237,7 +246,11 @@ test('the basic pattern reader reads "Sub Total", numbered item rows and an unla
   ].join('\n');
   const { extracted, extraction } = extractWithRules(text);
   assert.equal(extracted.subtotal, 120);
-  assert.deepEqual(extracted.lines.map((l) => [l.description, l.qty, l.unitPrice, l.amount]), [['Normal pipe', 1, 120, 120]], 'the row number is not part of the description');
+  assert.deepEqual(
+    extracted.lines.map((l) => [l.description, l.qty, l.unitPrice, l.amount]),
+    [['Normal pipe', 1, 120, 120]],
+    'the row number is not part of the description',
+  );
   assert.equal(extracted.poNumber, 'PO - 0011', 'kept as printed; resolved to a PO record only when matching');
   assert.equal(extracted.customerAbn, null, '"abn" in the customer\'s name is not an ABN');
   assert.doesNotMatch(extraction.notes || '', /purchase order number/, 'grounded in the text');
@@ -246,7 +259,7 @@ test('the basic pattern reader reads "Sub Total", numbered item rows and an unla
 test('a bare "PO-2041" is read, and a labelled PO still wins', () => {
   assert.equal(extractWithRules('Australia org\nPO-2041\nTotal $1.00').extracted.poNumber, 'PO-2041');
   assert.equal(extractWithRules('Purchase order: PO-2044\nRef PO-2041\nTotal $1.00').extracted.poNumber, 'PO-2044');
-  assert.equal(normalise({ poNumber: 'po - 0011' }).poNumber, 'PO - 0011', 'the AI reader\'s reference is kept as printed');
+  assert.equal(normalise({ poNumber: 'po - 0011' }).poNumber, 'PO - 0011', "the AI reader's reference is kept as printed");
 });
 
 // ---------- ABN labels, VAT numbers and the supplier's name (both readers) ----------
@@ -278,7 +291,7 @@ const inv3Answer = (overrides = {}) => ({
   ...overrides,
 });
 
-test('a number labelled VAT is never the supplier\'s ABN, even though it passes the ABN checksum (AI and pattern readers)', async () => {
+test("a number labelled VAT is never the supplier's ABN, even though it passes the ABN checksum (AI and pattern readers)", async () => {
   const { fetchImpl } = fakeGroq(inv3Answer());
   const ai = await extractWithGroq(INV3, { apiKey: 'k', model: 'm', fetchImpl });
   assert.equal(ai.extracted.abn, null);
@@ -344,7 +357,7 @@ test('ABN label placements seen on real invoices are accepted; anything ambiguou
   assert.equal(abnLabel('50110219460', 'ABN 150110219460'), '', 'part of a longer number is not this ABN');
 });
 
-test('AI reader: the customer\'s ABN printed before the supplier\'s ABN: both kept, neither mixed up', async () => {
+test("AI reader: the customer's ABN printed before the supplier's ABN: both kept, neither mixed up", async () => {
   const text = 'Bill to: Harbour Office Supplies Pty Ltd\nABN: 57 600 410 275\n\nSupplier: Australia org\nABN: 50 110 219 460\nInvoice # INV-000003\nTotal $126.00';
   const { fetchImpl } = fakeGroq(inv3Answer({ customerAbn: '57600410275' }));
   const { extracted } = await extractWithGroq(text, { apiKey: 'k', model: 'm', fetchImpl });

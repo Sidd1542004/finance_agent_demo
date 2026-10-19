@@ -38,7 +38,20 @@ export const GoodsReceipt = model(
 // ----- What the agent works on -----
 
 // Invoice statuses: see agent/finance/lifecycle.js for the allowed moves.
-export const INVOICE_STATUSES = ['received', 'processing', 'under_review', 'needs_review', 'on_hold', 'approved', 'payment_pending', 'payment_completed', 'payment_failed', 'rejected', 'cancelled', 'failed'];
+export const INVOICE_STATUSES = [
+  'received',
+  'processing',
+  'under_review',
+  'needs_review',
+  'on_hold',
+  'approved',
+  'payment_pending',
+  'payment_completed',
+  'payment_failed',
+  'rejected',
+  'cancelled',
+  'failed',
+];
 
 const invoiceSchema = new Schema(
   {

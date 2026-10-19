@@ -16,7 +16,10 @@ export default function QueriesView({ onError }) {
   const [samples, setSamples] = useState([]);
 
   useEffect(() => {
-    api.querySamples().then(setSamples).catch((err) => onError(err.message));
+    api
+      .querySamples()
+      .then(setSamples)
+      .catch((err) => onError(err.message));
   }, [onError]);
 
   const process = (call) =>
@@ -48,10 +51,21 @@ export default function QueriesView({ onError }) {
   return (
     <div className="layout">
       <aside className="side">
-        <AddEmail samples={samples} busy={busy === 'process'} disabled={Boolean(busy)} onSample={(id) => process(() => api.processQuerySample(id))} onEmail={(email) => process(() => api.processQuery(email))} />
+        <AddEmail
+          samples={samples}
+          busy={busy === 'process'}
+          disabled={Boolean(busy)}
+          onSample={(id) => process(() => api.processQuerySample(id))}
+          onEmail={(email) => process(() => api.processQuery(email))}
+        />
         <section className="card">
           <h2>Emails</h2>
-          <RecordList rows={rows} selectedId={records.selectedId} onSelect={records.select} empty="No emails yet. Process a sample above. The samples refer to the demo month, so load that first." />
+          <RecordList
+            rows={rows}
+            selectedId={records.selectedId}
+            onSelect={records.select}
+            empty="No emails yet. Process a sample above. The samples refer to the demo month, so load that first."
+          />
         </section>
       </aside>
 
@@ -71,8 +85,8 @@ export default function QueriesView({ onError }) {
               <>
                 <h1>Give the agent a supplier email</h1>
                 <p>
-                  The agent works out which invoices the supplier is asking about, looks them up, and replies with the status from the accounts
-                  records. Anything about bank details, a dispute or an address it does not recognise goes to a person instead.
+                  The agent works out which invoices the supplier is asking about, looks them up, and replies with the status from the accounts records. Anything about bank
+                  details, a dispute or an address it does not recognise goes to a person instead.
                 </p>
               </>
             ) : (
@@ -280,7 +294,11 @@ function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
             </div>
           </div>
           <div className="decision-actions">
-            <button className="btn btn-primary" disabled={working || !name.trim() || !reply.trim()} onClick={() => onResolve({ action: 'send', decidedBy: name, body: reply, note })}>
+            <button
+              className="btn btn-primary"
+              disabled={working || !name.trim() || !reply.trim()}
+              onClick={() => onResolve({ action: 'send', decidedBy: name, body: reply, note })}
+            >
               Send reply
             </button>
             <button className="btn btn-danger" disabled={working || !name.trim() || !note.trim()} onClick={() => onResolve({ action: 'close', decidedBy: name, note })}>

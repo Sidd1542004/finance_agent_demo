@@ -1,7 +1,11 @@
 import 'dotenv/config';
 import { businessTimeZone } from './agent/finance/timeZone.js';
 
-const list = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+const list = (value) =>
+  String(value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 const num = (value, fallback) => {
   if (value === undefined || value === '') return fallback;
@@ -36,7 +40,10 @@ export const config = {
   companyName: process.env.COMPANY_NAME || 'Meridian Logistics Pty Ltd',
 
   // Demo mode enables the "Load demo month" and "Reset" buttons. Only when DEMO_MODE=true.
-  demoMode: String(process.env.DEMO_MODE || '').trim().toLowerCase() === 'true',
+  demoMode:
+    String(process.env.DEMO_MODE || '')
+      .trim()
+      .toLowerCase() === 'true',
 
   // Optional daily summary email (GET /api/cron/daily-summary, called by a Vercel cron job).
   alerts: {

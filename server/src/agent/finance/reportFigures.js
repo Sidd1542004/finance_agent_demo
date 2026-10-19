@@ -61,7 +61,11 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const OPEN_LINE = ['suggested', 'exception', 'unmatched'];
 const LINE_RANK = { matched: 4, confirmed: 4, dismissed: 3, skipped: 2, suggested: 1, exception: 1, unmatched: 1 };
 const listNumbers = (ns) => (ns.length === 1 ? String(ns[0]) : `${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`);
-const lineKey = (l) => `${l.date ?? ''}|${String(l.description ?? '').toUpperCase().replace(/\s+/g, ' ').trim()}|${cents(l.amount || 0)}`;
+const lineKey = (l) =>
+  `${l.date ?? ''}|${String(l.description ?? '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim()}|${cents(l.amount || 0)}`;
 
 export function currentBankLines(statements) {
   const byKey = new Map();
@@ -217,8 +221,15 @@ export function buildFigures({ month, invoices: received, payments, queries, sta
     `A ${many ? 'further' : 'second'} copy of invoice ${c.invoice.invoiceNumber || '(no number)'} from ${c.invoice.vendorName || 'an unknown supplier'} (${money(c.invoice.total)}), received ${day(localIso(c.invoice.createdAt))}, is a possible duplicate of an invoice that is ${(STATUS_LABEL[of.status] || of.status).toLowerCase()}. It needs review before it can be approved or paid.`;
 
   const openItems = [
-    ...waiting.map((i) => withCopies(i, `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} (${money(i.total)}) ${i.status === 'under_review' ? 'is waiting for approval' : i.status === 'on_hold' ? 'is on hold' : 'needs review'}.`)),
-    ...inStatus(['approved']).map((i) => withCopies(i, `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} is approved but its payment is not scheduled.`)),
+    ...waiting.map((i) =>
+      withCopies(
+        i,
+        `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} (${money(i.total)}) ${i.status === 'under_review' ? 'is waiting for approval' : i.status === 'on_hold' ? 'is on hold' : 'needs review'}.`,
+      ),
+    ),
+    ...inStatus(['approved']).map((i) =>
+      withCopies(i, `Invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} is approved but its payment is not scheduled.`),
+    ),
     ...inStatus(['payment_failed']).map((i) => withCopies(i, `The payment for invoice ${i.invoiceNumber || '(no number)'} from ${i.vendorName || 'an unknown supplier'} failed.`)),
     ...invoices.filter((i) => copiesOf.has(i.id) && !listed.has(i.id)).flatMap((i) => copiesOf.get(i.id).map((c, _n, all) => copyItem(c, i, all.length > 1))),
     ...(failed.length ? [`${plural(failed.length, 'invoice')} could not be processed.`] : []),
@@ -278,7 +289,9 @@ export function buildFigures({ month, invoices: received, payments, queries, sta
     openItems,
     // For the consistency check only.
     scheduledInvoices: inStatus(['payment_pending', 'payment_completed']).length,
-    livePayments: invoices.filter((i) => ['payment_pending', 'payment_completed'].includes(i.status) && pay.some((p) => p.invoiceId === i.id && ['queued', 'paid'].includes(p.status))).length,
+    livePayments: invoices.filter(
+      (i) => ['payment_pending', 'payment_completed'].includes(i.status) && pay.some((p) => p.invoiceId === i.id && ['queued', 'paid'].includes(p.status)),
+    ).length,
   };
 }
 
@@ -311,9 +324,11 @@ export function checkFigures(f) {
   const problems = [];
   const i = f.invoices;
   const p = f.payments;
-  if (i.received !== i.approvedByPerson + i.waiting + i.rejected + i.cancelled + i.failed + i.inProgress) problems.push('Invoice counts by status do not add up to the number received.');
+  if (i.received !== i.approvedByPerson + i.waiting + i.rejected + i.cancelled + i.failed + i.inProgress)
+    problems.push('Invoice counts by status do not add up to the number received.');
   if (cents(p.approvedValue) !== cents(p.paidValue) + cents(p.outstandingValue)) problems.push('Paid plus outstanding does not equal the value approved.');
-  if (cents(f.outstandingBySupplier.reduce((s, x) => s + x.value, 0)) !== cents(p.outstandingValue)) problems.push('Outstanding by supplier does not add up to the outstanding total.');
+  if (cents(f.outstandingBySupplier.reduce((s, x) => s + x.value, 0)) !== cents(p.outstandingValue))
+    problems.push('Outstanding by supplier does not add up to the outstanding total.');
   if (f.scheduledInvoices !== f.livePayments) problems.push(`${f.scheduledInvoices} invoices are Payment Pending or Payment Completed, but ${f.livePayments} have a live payment.`);
   return problems;
 }
@@ -330,8 +345,12 @@ export function templateCommentary(f) {
   );
   out.push(`${money(p.approvedValue)} has been approved: ${money(p.paidValue)} is paid and ${money(p.outstandingValue)} is still to pay.`);
   if (f.heldReasons.length) out.push(`The most common reason an invoice needed a person was "${f.heldReasons[0].label}" (${f.heldReasons[0].count}).`);
-  if (i.duplicateCopies) out.push(`${plural(i.duplicateCopies, 'possible duplicate copy', 'possible duplicate copies')} of invoices already counted ${i.duplicateCopies === 1 ? 'was' : 'were'} received and not counted again.`);
-  if (f.queries.received) out.push(`${plural(f.queries.received, 'supplier email was', 'supplier emails were')} received and the agent answered ${f.queries.answeredByAgent} without a person.`);
+  if (i.duplicateCopies)
+    out.push(
+      `${plural(i.duplicateCopies, 'possible duplicate copy', 'possible duplicate copies')} of invoices already counted ${i.duplicateCopies === 1 ? 'was' : 'were'} received and not counted again.`,
+    );
+  if (f.queries.received)
+    out.push(`${plural(f.queries.received, 'supplier email was', 'supplier emails were')} received and the agent answered ${f.queries.answeredByAgent} without a person.`);
   const c = f.comparison;
   if (c?.hasData) {
     const row = (id) => c.rows.find((r) => r.id === id);
@@ -339,7 +358,10 @@ export function templateCommentary(f) {
     const parts = ['received', 'valueReceived', 'paidValue'].map((id) => row(id)).map((r) => `${r.label.toLowerCase()} went from ${fmt(r, r.previous)} to ${fmt(r, r.current)}`);
     out.push(`Compared with ${c.label}, ${parts.join(', ')}.`);
   }
-  if (f.bank.statements) out.push(`Bank reconciliation matched ${plural(f.bank.linesMatched, 'line')} (${money(f.bank.valueMatched)}); ${f.bank.linesOpen} still ${f.bank.linesOpen === 1 ? 'needs' : 'need'} a decision.`);
+  if (f.bank.statements)
+    out.push(
+      `Bank reconciliation matched ${plural(f.bank.linesMatched, 'line')} (${money(f.bank.valueMatched)}); ${f.bank.linesOpen} still ${f.bank.linesOpen === 1 ? 'needs' : 'need'} a decision.`,
+    );
   return out.join(' ');
 }
 

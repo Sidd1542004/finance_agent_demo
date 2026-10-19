@@ -118,7 +118,10 @@ test('the fields are grounded against the transcription', async () => {
 test('a vision answer with no readable text is a clear error', async () => {
   const { png } = await scannedInvoice();
   const v = fakeVision({ transcription: '[illegible] [illegible]' });
-  await assert.rejects(readUpload(file('blurry.png', 'image/png', png), { vision: v.reader }), (err) => err.status === 422 && /could not be read by the AI vision reader: No readable text was found in the image/.test(err.message));
+  await assert.rejects(
+    readUpload(file('blurry.png', 'image/png', png), { vision: v.reader }),
+    (err) => err.status === 422 && /could not be read by the AI vision reader: No readable text was found in the image/.test(err.message),
+  );
 });
 
 test('a scanned PDF (no text layer): its first page is rendered and read by the vision model', async () => {
@@ -137,7 +140,15 @@ test('a scanned PDF (no text layer): its first page is rendered and read by the 
   assert.ok(v.requests[0].messages[1].content[1].image_url.url.startsWith('data:image/png;base64,'));
 
   // If the pages cannot be rendered on this server, the clear "needs OCR" message, with why.
-  await assert.rejects(readUpload(file('scan.pdf', 'application/pdf', pdf), { vision: v.reader, renderPages: async () => { throw new Error('no canvas'); } }), (err) => err.status === 400 && err.message.startsWith(NEEDS_OCR) && /could not be turned into images/.test(err.message));
+  await assert.rejects(
+    readUpload(file('scan.pdf', 'application/pdf', pdf), {
+      vision: v.reader,
+      renderPages: async () => {
+        throw new Error('no canvas');
+      },
+    }),
+    (err) => err.status === 400 && err.message.startsWith(NEEDS_OCR) && /could not be turned into images/.test(err.message),
+  );
 });
 
 test('without a Groq key: the same clear messages as before for scans and images', async () => {
@@ -163,7 +174,11 @@ test('an invoice read from an image always goes to Needs Review, even when every
   await runAgent(agent, { invoice, reading });
 
   const failed = invoice.checks.filter((c) => c.status === 'fail');
-  assert.deepEqual(failed.map((c) => c.id), ['read_from_image'], 'the same invoice as text would be clean');
+  assert.deepEqual(
+    failed.map((c) => c.id),
+    ['read_from_image'],
+    'the same invoice as text would be clean',
+  );
   assert.equal(failed[0].label, 'Read from an image: confirm the key fields');
   assert.equal(failed[0].severity, 'review');
   assert.equal(invoice.status, 'needs_review');

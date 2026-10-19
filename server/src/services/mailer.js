@@ -26,7 +26,12 @@ export function createMailer({ resendApiKey, smtp = {}, from }, { fetchImpl = fe
         } catch {
           /* not JSON */
         }
-        if (!res.ok) throw new Error(res.status === 401 || res.status === 403 ? `Resend refused the request (${res.status}). Check RESEND_API_KEY and that ALERT_FROM uses a verified domain.` : `Resend returned an error (${res.status})${data?.message ? `: ${data.message}` : '.'}`);
+        if (!res.ok)
+          throw new Error(
+            res.status === 401 || res.status === 403
+              ? `Resend refused the request (${res.status}). Check RESEND_API_KEY and that ALERT_FROM uses a verified domain.`
+              : `Resend returned an error (${res.status})${data?.message ? `: ${data.message}` : '.'}`,
+          );
         return { id: data?.id ?? null };
       },
     };

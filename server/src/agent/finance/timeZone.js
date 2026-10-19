@@ -33,7 +33,19 @@ export function businessTimeZone() {
 const formatters = new Map();
 function partsFormatter(tz) {
   if (!formatters.has(tz)) {
-    formatters.set(tz, new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }));
+    formatters.set(
+      tz,
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      }),
+    );
   }
   return formatters.get(tz);
 }

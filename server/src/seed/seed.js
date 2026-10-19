@@ -37,6 +37,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
   await resetEverything();
-  console.log(`Sample data loaded: ${vendors.length} suppliers, ${purchaseOrders.length} purchase orders, ${goodsReceipts.length} goods receipts. Invoices, supplier emails, bank statements and reports cleared.`);
+  console.log(
+    `Sample data loaded: ${vendors.length} suppliers, ${purchaseOrders.length} purchase orders, ${goodsReceipts.length} goods receipts. Invoices, supplier emails, bank statements and reports cleared.`,
+  );
   await mongoose.disconnect();
 }

@@ -16,33 +16,54 @@ const agentWith = (overrides = {}) => {
 };
 
 test('runs the six stages in order and records each one', async () => {
-  const { agent, calls } = agentWith({ escalate: (state) => { state.outcome = 'done'; return { status: 'skipped', summary: 'nothing to escalate' }; } });
+  const { agent, calls } = agentWith({
+    escalate: (state) => {
+      state.outcome = 'done';
+      return { status: 'skipped', summary: 'nothing to escalate' };
+    },
+  });
   const seen = [];
   const result = await runAgent(agent, { id: 1 }, { onStep: (step) => seen.push(step.stage) });
 
   assert.deepEqual(calls, STAGES);
   assert.deepEqual(seen, STAGES);
-  assert.deepEqual(result.steps.map((s) => s.status), ['done', 'done', 'done', 'done', 'done', 'skipped']);
+  assert.deepEqual(
+    result.steps.map((s) => s.status),
+    ['done', 'done', 'done', 'done', 'done', 'skipped'],
+  );
   assert.equal(result.outcome, 'done');
   assert.equal(result.error, null);
 });
 
 test('a failure skips the remaining work but still escalates', async () => {
   const { agent, calls } = agentWith({
-    understand: () => { throw new Error('could not read it'); },
-    escalate: (state) => { state.outcome = state.error ? 'failed' : 'done'; return { summary: 'flagged' }; },
+    understand: () => {
+      throw new Error('could not read it');
+    },
+    escalate: (state) => {
+      state.outcome = state.error ? 'failed' : 'done';
+      return { summary: 'flagged' };
+    },
   });
   const result = await runAgent(agent, {});
 
   assert.deepEqual(calls, ['receive', 'understand', 'escalate'], 'decide, act and verify must not run');
-  assert.deepEqual(result.steps.map((s) => s.status), ['done', 'error', 'skipped', 'skipped', 'skipped', 'done']);
+  assert.deepEqual(
+    result.steps.map((s) => s.status),
+    ['done', 'error', 'skipped', 'skipped', 'skipped', 'done'],
+  );
   assert.deepEqual(result.error, { stage: 'understand', message: 'could not read it' });
   assert.equal(result.outcome, 'failed');
 });
 
 test('escalation reasons collect without repeats', async () => {
   const { agent } = agentWith({
-    decide: (state) => { requestEscalation(state, 'too big'); requestEscalation(state, 'too big'); requestEscalation(state, 'unknown supplier'); return {}; },
+    decide: (state) => {
+      requestEscalation(state, 'too big');
+      requestEscalation(state, 'too big');
+      requestEscalation(state, 'unknown supplier');
+      return {};
+    },
   });
   const result = await runAgent(agent, {});
   assert.deepEqual(result.escalation.reasons, ['too big', 'unknown supplier']);
@@ -56,7 +77,11 @@ test('an agent with a missing stage is refused before anything runs', async () =
 });
 
 test('if escalate itself fails there is no outcome, so the caller can flag it', async () => {
-  const { agent } = agentWith({ escalate: () => { throw new Error('queue is down'); } });
+  const { agent } = agentWith({
+    escalate: () => {
+      throw new Error('queue is down');
+    },
+  });
   const result = await runAgent(agent, {});
   assert.equal(result.outcome, null);
   assert.equal(result.error.stage, 'escalate');

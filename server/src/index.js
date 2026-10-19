@@ -34,15 +34,15 @@ if (fs.existsSync(path.join(clientDist, 'index.html'))) {
 try {
   await ensureDatabase();
 } catch (err) {
-  console.error(`\nCould not connect to MongoDB at ${safeUri(config.mongoUri)}\n${redactSecrets(err?.message)}\n\nStart MongoDB, or set MONGODB_URI in server/.env (a free MongoDB Atlas cluster works).\n`);
+  console.error(
+    `\nCould not connect to MongoDB at ${safeUri(config.mongoUri)}\n${redactSecrets(err?.message)}\n\nStart MongoDB, or set MONGODB_URI in server/.env (a free MongoDB Atlas cluster works).\n`,
+  );
   process.exit(1);
 }
 
 app.listen(config.port, () => {
   console.log(`Finance Operations Agent API on http://localhost:${config.port}`);
   console.log(
-    extractor.mode === 'groq'
-      ? `Invoice reader: Groq (${extractor.model})`
-      : 'Invoice reader: basic pattern reader. Set GROQ_API_KEY in server/.env to use the AI reader.',
+    extractor.mode === 'groq' ? `Invoice reader: Groq (${extractor.model})` : 'Invoice reader: basic pattern reader. Set GROQ_API_KEY in server/.env to use the AI reader.',
   );
 });

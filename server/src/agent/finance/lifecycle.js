@@ -124,7 +124,14 @@ export const ACTIONS = {
   // instead of leaving it approved, rejected or cancelled by mistake. Refused
   // once the payment has actually gone out (see blockedReason) - that needs
   // the separate, explicit recovery workflow instead.
-  reopen: { label: 'Reopen for review', from: ['approved', 'payment_pending', 'payment_failed', 'rejected', 'cancelled'], to: 'needs_review', note: 'required', role: 'approver', confirm: true },
+  reopen: {
+    label: 'Reopen for review',
+    from: ['approved', 'payment_pending', 'payment_failed', 'rejected', 'cancelled'],
+    to: 'needs_review',
+    note: 'required',
+    role: 'approver',
+    confirm: true,
+  },
   start_recovery: { label: 'Start recovery', from: ['payment_completed'], to: null, note: 'required', role: 'approver', confirm: true },
   close_recovery: { label: 'Close recovery', from: ['payment_completed'], to: null, note: 'required', role: 'approver' },
 };

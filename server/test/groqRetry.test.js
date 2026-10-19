@@ -20,7 +20,18 @@ function harness(responses) {
     if (next instanceof Error) throw next;
     return next;
   };
-  const args = { apiKey: 'k', model: 'm', system: 's', user: 'u', fetchImpl, now: () => t, sleep: async (ms) => { waits.push(ms); t += ms; } };
+  const args = {
+    apiKey: 'k',
+    model: 'm',
+    system: 's',
+    user: 'u',
+    fetchImpl,
+    now: () => t,
+    sleep: async (ms) => {
+      waits.push(ms);
+      t += ms;
+    },
+  };
   return { args, waits, calls };
 }
 
@@ -88,9 +99,14 @@ test('retries stop when they would not fit in the time budget', async () => {
   let t = 0;
   const calls = [];
   const args = {
-    apiKey: 'k', model: 'm', system: 's', user: 'u',
+    apiKey: 'k',
+    model: 'm',
+    system: 's',
+    user: 'u',
     now: () => t,
-    sleep: async (ms) => { t += ms; },
+    sleep: async (ms) => {
+      t += ms;
+    },
     fetchImpl: async (url, init) => {
       calls.push(init);
       t += 20000;

@@ -63,10 +63,39 @@ export const purchaseOrders = [
 
 // Everything was delivered in full except PO-2042, where 10 of 12 pallets arrived.
 export const goodsReceipts = [
-  { poNumber: 'PO-2041', receivedOn: '2026-09-11', lines: [{ sku: 'PAP-A4-80', qty: 20 }, { sku: 'TON-HP-58A', qty: 5 }, { sku: 'PEN-BLK-50', qty: 4 }] },
-  { poNumber: 'PO-2042', receivedOn: '2026-09-17', lines: [{ sku: 'PAL-STD-1200', qty: 10 }, { sku: 'WRAP-500', qty: 30 }] },
-  { poNumber: 'PO-2043', receivedOn: '2026-09-24', lines: [{ sku: 'LAP-14-I5', qty: 10 }, { sku: 'DOCK-USBC', qty: 10 }] },
-  { poNumber: 'PO-2044', receivedOn: '2026-09-25', lines: [{ sku: 'CHR-ERG-01', qty: 6 }, { sku: 'DSK-SIT-16', qty: 2 }] },
+  {
+    poNumber: 'PO-2041',
+    receivedOn: '2026-09-11',
+    lines: [
+      { sku: 'PAP-A4-80', qty: 20 },
+      { sku: 'TON-HP-58A', qty: 5 },
+      { sku: 'PEN-BLK-50', qty: 4 },
+    ],
+  },
+  {
+    poNumber: 'PO-2042',
+    receivedOn: '2026-09-17',
+    lines: [
+      { sku: 'PAL-STD-1200', qty: 10 },
+      { sku: 'WRAP-500', qty: 30 },
+    ],
+  },
+  {
+    poNumber: 'PO-2043',
+    receivedOn: '2026-09-24',
+    lines: [
+      { sku: 'LAP-14-I5', qty: 10 },
+      { sku: 'DOCK-USBC', qty: 10 },
+    ],
+  },
+  {
+    poNumber: 'PO-2044',
+    receivedOn: '2026-09-25',
+    lines: [
+      { sku: 'CHR-ERG-01', qty: 6 },
+      { sku: 'DSK-SIT-16', qty: 2 },
+    ],
+  },
   { poNumber: 'PO-2045', receivedOn: '2026-09-30', lines: [{ sku: 'PAL-STD-1200', qty: 20 }] },
 ];
 
