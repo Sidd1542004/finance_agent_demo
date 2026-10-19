@@ -13,9 +13,12 @@
     "build": "npm run build --prefix client",
     "start": "npm run start --prefix server",
     "seed": "npm run seed --prefix server",
-    "test": "npm test --prefix server"
+    "test": "npm test --prefix server",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "prettier": "^3.9.10"
   }
 }
