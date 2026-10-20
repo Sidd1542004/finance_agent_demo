@@ -23,27 +23,15 @@ test('safeUri keeps protocol, host and path only', () => {
   assert.equal(safeUri('not a uri with secret'), '(not a valid connection string)');
 });
 
-
 test('redactSecrets removes credentials from URLs and the password from any text', () => {
-  const uri =
-    'mongodb+srv://test-user:dummy-password@example.invalid/db';
+  const uri = 'mongodb+srv://test-user:dummy-password@example.invalid/db';
 
-  assert.equal(
-    redactSecrets(
-      'failed for mongodb+srv://finance:dummy-password@cluster0.abc.mongodb.net/db',
-      uri
-    ),
-    'failed for mongodb+srv://***@cluster0.abc.mongodb.net/db'
-  );
+  assert.equal(redactSecrets('failed for mongodb+srv://finance:dummy-password@cluster0.abc.mongodb.net/db', uri), 'failed for mongodb+srv://***@cluster0.abc.mongodb.net/db');
 
-  assert.equal(
-    redactSecrets('bad auth: password dummy-password rejected', uri),
-    'bad auth: password *** rejected'
-  );
+  assert.equal(redactSecrets('bad auth: password dummy-password rejected', uri), 'bad auth: password *** rejected');
 
   assert.equal(redactSecrets('nothing to hide', uri), 'nothing to hide');
 });
-
 
 test('the database gate shares one attempt, does not cache a failure, and seeds once', async () => {
   let connected = false;
