@@ -24,7 +24,8 @@ test('safeUri keeps protocol, host and path only', () => {
 });
 
 test('redactSecrets removes credentials from URLs and the password from any text', () => {
-  const uri = 'mongodb+srv://finance:Hunter2%21x@cluster0.abc.mongodb.net/db';
+  const uri =
+  'mongodb+srv://test-user:dummy-password@example.invalid/db';
   assert.equal(redactSecrets('failed for mongodb+srv://finance:Hunter2%21x@cluster0.abc.mongodb.net/db', uri), 'failed for mongodb+srv://***@cluster0.abc.mongodb.net/db');
   assert.equal(redactSecrets('bad auth: password Hunter2!x rejected', uri), 'bad auth: password *** rejected');
   assert.equal(redactSecrets('nothing to hide', uri), 'nothing to hide');
