@@ -7,6 +7,8 @@
 
 import { skuKey } from '../agent/finance/matching.js';
 import { sharedSignals } from '../agent/finance/duplicates.js';
+import { hintsForText } from '../agent/finance/supplierHints.js';
+import { auditEntry } from '../agent/finance/audit.js';
 
 const INACTIVE = ['rejected', 'cancelled', 'failed'];
 
@@ -20,10 +22,12 @@ const summary = (d) => ({
   status: d.status,
   createdAt: d.createdAt,
   humanDecision: d.approval?.decision ?? null,
-  approvedAmount: d.approval?.amount ?? (d.approval ? d.extracted?.total ?? null : null),
+  approvedAmount: d.approval?.amount ?? (d.approval ? (d.extracted?.total ?? null) : null),
   agentOutcome: d.decision?.outcome ?? null,
   currency: d.extracted?.currency || 'AUD',
   failedChecks: (d.checks || []).filter((c) => c.status === 'fail').map((c) => ({ id: c.id, label: c.label })),
+  // Earlier, live invoices this one may be a copy of, while its duplicate check is failing.
+  duplicateOf: (d.checks || []).some((c) => c.id === 'duplicate' && c.status === 'fail') ? (d.match?.duplicates || []).map((c) => String(c.id)) : [],
 });
 
 const between = (list, { start, end } = {}) => list.filter((x) => (!start || x.createdAt >= start) && (!end || x.createdAt < end));
@@ -32,19 +36,41 @@ const event = (e) => ({ at: new Date().toISOString(), ...e });
 export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsReceipts = [], invoices = [], queries = [], statements = [] } = {}) {
   const payments = [];
   const messages = [];
+  const hints = [];
+  // The audit log: entries are frozen when added and never changed or removed.
+  const auditEvents = [];
   let nextId = 1;
+  const audit = (entry) => {
+    const e = auditEntry(entry);
+    auditEvents.push(Object.freeze({ ...e, at: e.at.toISOString() }));
+  };
+  const auditPayment = (p, from, h) =>
+    audit({ subjectKind: 'payment', subjectId: p.id, actor: h?.by || 'System', action: h?.event || 'changed', from, to: p.status, detail: h?.detail || null });
+  const auditInvoice = (id, e) =>
+    audit({ subjectKind: 'invoice', subjectId: id, ...e, ...(e.changes?.length ? { detail: [e.detail, `Changes: ${JSON.stringify(e.changes)}`].filter(Boolean).join(' ') } : {}) });
   const inv = (id) => invoices.find((i) => i.id === id) || null;
   const moveInvoice = (invoiceId, from, to, e) => {
     const i = inv(invoiceId);
     if (!i || i.status !== from) return;
     i.status = to;
     (i.events ||= []).push(event({ from, to, ...e }));
+    auditInvoice(invoiceId, { from, to, ...e });
   };
 
   return {
     payments,
     invoices,
     messages,
+    hints,
+    auditEvents,
+
+    // ----- the audit log (append only) -----
+    async recordAudit(entry) {
+      audit(entry);
+    },
+    async listAudit({ subjectId, limit = 200 } = {}) {
+      return subjectId ? auditEvents.filter((e) => e.subjectId === String(subjectId)).slice(0, limit) : [...auditEvents].reverse().slice(0, limit);
+    },
 
     // ----- suppliers, purchase orders, deliveries -----
     async listVendors() {
@@ -73,7 +99,7 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       for (const d of invoices.filter((i) => i.matchedPo === poNumber && i.id !== excludeId && !skip.includes(i.id) && i.createdAt < before && !INACTIVE.includes(i.status))) {
         for (const l of d.lineMatches || []) {
           if (!l.onPo || typeof l.qtyInvoiced !== 'number') continue;
-          const qty = d.approval?.decision === 'approve_received' ? l.qtyPayable ?? l.qtyInvoiced : l.qtyInvoiced;
+          const qty = d.approval?.decision === 'approve_received' ? (l.qtyPayable ?? l.qtyInvoiced) : l.qtyInvoiced;
           totals[skuKey(l.sku)] = (totals[skuKey(l.sku)] || 0) + qty;
         }
       }
@@ -84,7 +110,14 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     async findDuplicateCandidates({ fingerprints, excludeId, before }) {
       return invoices
         .filter((i) => i.id !== excludeId && i.createdAt < before && sharedSignals(fingerprints, i.fingerprints).length)
-        .map((i) => ({ id: i.id, invoiceNumber: i.extracted?.invoiceNumber ?? null, total: i.extracted?.total ?? null, status: i.status, createdAt: i.createdAt, signals: sharedSignals(fingerprints, i.fingerprints) }));
+        .map((i) => ({
+          id: i.id,
+          invoiceNumber: i.extracted?.invoiceNumber ?? null,
+          total: i.extracted?.total ?? null,
+          status: i.status,
+          createdAt: i.createdAt,
+          signals: sharedSignals(fingerprints, i.fingerprints),
+        }));
     },
     async listInvoices(range) {
       return between(invoices, range).map(summary);
@@ -108,14 +141,20 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       const i = inv(id);
       if (!i || i.status !== from) return null;
       Object.assign(i, set);
-      if (e) (i.events ||= []).push(event(e));
+      if (e) {
+        (i.events ||= []).push(event(e));
+        auditInvoice(id, e);
+      }
       return i;
     },
     async updateInvoice(id, set, e) {
       const i = inv(id);
       if (!i) return null;
       Object.assign(i, set);
-      if (e) (i.events ||= []).push(event(e));
+      if (e) {
+        (i.events ||= []).push(event(e));
+        auditInvoice(id, e);
+      }
       return i;
     },
     async getPayment(invoiceId) {
@@ -129,39 +168,62 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       }
       const created = { id: `pay-${nextId++}`, status: 'queued', paidOn: null, bank: null, history: [], attempts: 1, simulated: true, ...payment };
       payments.push(created);
+      auditPayment(created, null, { event: 'scheduled', by: payment.scheduledBy });
       return created;
     },
     // Change the payment only if its status is one of `from`. Returns null if not.
     async updatePayment(id, from, set, history) {
       const p = payments.find((x) => x.id === id);
       if (!p || !from.includes(p.status)) return null;
+      const before = p.status;
       Object.assign(p, set);
       if (history) (p.history ||= []).push(event(history));
+      auditPayment(p, before, history);
       return p;
     },
     // Live payments on other invoices that look like the same invoice.
     async duplicatePayments(invoice) {
-      const blocking = invoice.duplicateCleared ? ['same supplier and invoice number', 'identical document'] : ['same supplier and invoice number', 'same supplier, total and invoice date', 'identical document'];
+      const blocking = invoice.duplicateCleared
+        ? ['same supplier and invoice number', 'identical document']
+        : ['same supplier and invoice number', 'same supplier, total and invoice date', 'identical document'];
       const others = invoices.filter((i) => i.id !== invoice.id && sharedSignals(invoice.fingerprints, i.fingerprints).some((s) => blocking.includes(s)));
       return payments.filter((p) => others.some((o) => o.id === p.invoiceId) && ['queued', 'paid'].includes(p.status));
+    },
+
+    // ----- supplier hints (see agent/finance/supplierHints.js) -----
+    async saveSupplierHints(list) {
+      for (const h of list) {
+        const i = hints.findIndex((x) => x.vendorAbn === h.vendorAbn && x.field === h.field);
+        if (i >= 0) hints[i] = { ...h };
+        else hints.push({ ...h });
+      }
+    },
+    async supplierHintsFor(text) {
+      return hintsForText(hints, text);
     },
 
     // ----- payment queue (used by tests and the bank reconciliation agent) -----
     async queuePayment(payment) {
       const existing = payments.find((p) => p.invoiceId === payment.invoiceId);
       if (existing) {
+        const before = existing.status;
         Object.assign(existing, { status: 'queued', approvedBy: payment.approvedBy, amount: payment.amount, invoiceTotal: payment.invoiceTotal ?? null });
+        auditPayment(existing, before, { event: 'queued', by: payment.approvedBy });
         return existing;
       }
       const created = { id: `pay-${nextId++}`, ...payment, status: 'queued', paidOn: null, bank: null, history: [] };
       payments.push(created);
+      auditPayment(created, null, { event: 'queued', by: payment.approvedBy });
       return created;
     },
     async findPayments(invoiceId) {
       return payments.filter((p) => p.invoiceId === invoiceId);
     },
     async holdPayments(invoiceId) {
-      for (const p of payments.filter((x) => x.invoiceId === invoiceId && x.status === 'queued')) p.status = 'on_hold';
+      for (const p of payments.filter((x) => x.invoiceId === invoiceId && x.status === 'queued')) {
+        p.status = 'on_hold';
+        auditPayment(p, 'queued', { event: 'held', by: 'Agent' });
+      }
     },
     async listPayments() {
       return payments.map((p) => ({ ...p }));
@@ -170,18 +232,25 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       const p = payments.find((x) => x.id === paymentId && x.status === 'queued');
       if (!p) return null;
       Object.assign(p, { status: 'paid', paidOn: bank.date, bank, recordedBy: 'Bank reconciliation' });
-      moveInvoice(p.invoiceId, 'payment_pending', 'payment_completed', { actor: 'Bank reconciliation', action: 'payment_matched', reason: `Bank line ${bank.line} matches the payment.` });
+      auditPayment(p, 'queued', { event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line} of statement ${bank.statementId}.` });
+      moveInvoice(p.invoiceId, 'payment_pending', 'payment_completed', {
+        actor: 'Bank reconciliation',
+        action: 'payment_matched',
+        reason: `Bank line ${bank.line} matches the payment.`,
+      });
       return { ...p };
     },
     async unmarkPaid(paymentId, statementId) {
       const p = payments.find((x) => x.id === paymentId && x.status === 'paid' && x.bank?.statementId === statementId);
       if (!p) return;
       Object.assign(p, { status: 'queued', paidOn: null, bank: null, recordedBy: null });
+      auditPayment(p, 'paid', { event: 'unmatched', by: 'Bank reconciliation' });
       moveInvoice(p.invoiceId, 'payment_completed', 'payment_pending', { actor: 'Bank reconciliation', action: 'payment_unmatched', reason: 'The bank match was undone.' });
     },
     async revertStatement(statementId) {
       for (const p of payments.filter((x) => x.status === 'paid' && x.bank?.statementId === statementId)) {
         Object.assign(p, { status: 'queued', paidOn: null, bank: null, recordedBy: null });
+        auditPayment(p, 'paid', { event: 'unmatched', by: 'Bank reconciliation' });
         moveInvoice(p.invoiceId, 'payment_completed', 'payment_pending', { actor: 'Bank reconciliation', action: 'payment_unmatched', reason: 'The bank match was undone.' });
       }
     },

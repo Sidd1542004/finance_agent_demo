@@ -8,9 +8,15 @@
 //   approved / payment_pending -> rejected (approval reversed, payment stopped)
 //   payment_failed -> payment_pending (retry) | cancelled
 //   payment_completed: final. A recovery can be opened; the payment is kept.
+//   approved / payment_pending / payment_failed / rejected / cancelled -> needs_review
+//     ("Reopen for review": undoes an accidental decision. Cancels a queued
+//     payment first; refused once the payment is actually paid - a recovery
+//     must be opened for that instead.)
 //
 // "under_review" means ELIGIBLE FOR APPROVAL REVIEW: it scored at or above the
 // threshold with no exceptions. It is never approved without a person.
+
+import { namesEqual } from './rules.js';
 
 export const STATUS_LABEL = {
   received: 'Received',
@@ -39,12 +45,12 @@ export const TRANSITIONS = {
   needs_review: ['approved', 'rejected', 'cancelled', 'on_hold', 'processing'],
   on_hold: ['approved', 'rejected', 'cancelled', 'processing'],
   failed: ['processing', 'rejected', 'cancelled'],
-  approved: ['payment_pending', 'rejected', 'cancelled'],
-  payment_pending: ['payment_completed', 'payment_failed', 'rejected', 'cancelled'],
-  payment_failed: ['payment_pending', 'cancelled'],
+  approved: ['payment_pending', 'rejected', 'cancelled', 'needs_review'],
+  payment_pending: ['payment_completed', 'payment_failed', 'rejected', 'cancelled', 'needs_review'],
+  payment_failed: ['payment_pending', 'cancelled', 'needs_review'],
   payment_completed: [],
-  rejected: [],
-  cancelled: [],
+  rejected: ['needs_review'],
+  cancelled: ['needs_review'],
 };
 
 export const canTransition = (from, to) => (TRANSITIONS[from] || []).includes(to);
@@ -59,6 +65,28 @@ export const APPROVAL_BLOCKERS = {
 };
 
 export const failedChecks = (invoice) => (invoice?.checks || []).filter((c) => c.status === 'fail');
+
+export const SUPPLIER_UNIDENTIFIED = 'Approval blocked: supplier could not be identified. Identify and verify the supplier before approving this invoice.';
+
+// No supplier name was read from the invoice, or the only name read is the
+// customer's. Nothing else stands in for it: not the customer's name, a
+// similar or suggested supplier, a VAT number, a purchase order, or an ABN
+// match. A missing ABN on its own is a separate check and does not apply here.
+export function supplierIdentityBlock(invoice) {
+  const e = invoice?.extracted || {};
+  const name = String(e.vendorName ?? '').trim();
+  if (!name || (e.customerName && namesEqual(name, e.customerName))) return SUPPLIER_UNIDENTIFIED;
+  return null;
+}
+
+// A purchase order is linked but the PO check fails: the PO was raised with a
+// different supplier, or the invoice's supplier is not confirmed. Paying
+// against someone else's PO is never approved, with or without a note.
+export function poOwnershipBlock(invoice) {
+  const po = invoice?.match?.po;
+  if (!po || !failedChecks(invoice).some((c) => c.id === 'po_found')) return null;
+  return `The linked purchase order ${po.poNumber} was raised with ${po.vendorName}, and this invoice's supplier is not confirmed as ${po.vendorName}. Verify supplier ownership first: correct the supplier, or reject the invoice and ask for one against the right purchase order.`;
+}
 
 // Where the agent leaves an invoice, from its checks.
 export function statusFromChecks(checks) {
@@ -84,11 +112,26 @@ export const ACTIONS = {
   link_po: { label: 'Link purchase order', from: AWAITING_DECISION, to: null, note: 'optional', role: 'reviewer' },
   clear_duplicate: { label: 'Not a duplicate', from: AWAITING_DECISION, to: null, note: 'required', role: 'approver', confirm: true },
   rerun: { label: 'Process again', from: [...AWAITING_DECISION, 'failed'], to: null, note: 'optional', role: 'reviewer' },
+  // Correct fields the reader got wrong. The agent then checks the invoice
+  // again on the corrected values; nothing is approved by correcting it.
+  edit_fields: { label: 'Edit fields', from: [...AWAITING_DECISION, 'failed'], to: null, note: 'required', role: 'reviewer' },
   schedule_payment: { label: 'Schedule payment', from: ['approved', 'payment_failed'], to: 'payment_pending', note: 'optional', role: 'payer', confirm: true },
   record_payment: { label: 'Record payment', from: ['payment_pending'], to: 'payment_completed', note: 'optional', role: 'payer', confirm: true },
   payment_failed: { label: 'Mark payment failed', from: ['payment_pending'], to: 'payment_failed', note: 'required', role: 'payer' },
   reverse_approval: { label: 'Reverse approval', from: ['approved', 'payment_pending'], to: 'rejected', note: 'required', role: 'approver', confirm: true },
   cancel: { label: 'Cancel invoice', from: [...AWAITING_DECISION, 'failed', 'approved', 'payment_failed'], to: 'cancelled', note: 'required', role: 'approver', confirm: true },
+  // Undo an accidental decision: puts the invoice back in front of a person,
+  // instead of leaving it approved, rejected or cancelled by mistake. Refused
+  // once the payment has actually gone out (see blockedReason) - that needs
+  // the separate, explicit recovery workflow instead.
+  reopen: {
+    label: 'Reopen for review',
+    from: ['approved', 'payment_pending', 'payment_failed', 'rejected', 'cancelled'],
+    to: 'needs_review',
+    note: 'required',
+    role: 'approver',
+    confirm: true,
+  },
   start_recovery: { label: 'Start recovery', from: ['payment_completed'], to: null, note: 'required', role: 'approver', confirm: true },
   close_recovery: { label: 'Close recovery', from: ['payment_completed'], to: null, note: 'required', role: 'approver' },
 };
@@ -116,12 +159,17 @@ export function blockedReason(invoice, actionId, ctx = {}) {
 
   switch (actionId) {
     case 'approve': {
+      // Who is being paid comes first, then whose purchase order it is.
+      if (supplierIdentityBlock(invoice)) return supplierIdentityBlock(invoice);
+      if (poOwnershipBlock(invoice)) return poOwnershipBlock(invoice);
       const b = failedIds.find((id) => APPROVAL_BLOCKERS[id]);
       if (b) return APPROVAL_BLOCKERS[b];
       if (typeof invoice.extracted?.total !== 'number') return 'The invoice has no total to approve.';
       return null;
     }
     case 'approve_received': {
+      if (supplierIdentityBlock(invoice)) return supplierIdentityBlock(invoice);
+      if (poOwnershipBlock(invoice)) return poOwnershipBlock(invoice);
       if (!failedIds.includes('quantity_match')) return 'Only for invoices that bill more than was received.';
       if (!ctx.receivedOnly) return 'There is nothing that can be paid for at the received quantity.';
       const other = failedIds.find((id) => id !== 'quantity_match' && APPROVAL_BLOCKERS[id]);
@@ -135,6 +183,11 @@ export function blockedReason(invoice, actionId, ctx = {}) {
       return recovery?.status === 'open' ? null : 'There is no open recovery.';
     case 'record_payment':
       return ctx.payment?.status === 'queued' ? null : 'There is no pending payment to record.';
+    case 'reopen':
+      // Money that has actually gone out (or been recorded as paid) is never
+      // undone by this action: a recovery must be opened instead, so nobody
+      // can claim an external payment was reversed when it was not.
+      return ctx.payment?.status === 'paid' ? 'This invoice has already been paid. Start a recovery instead; reopening never claims a payment was reversed.' : null;
     default:
       return null;
   }
@@ -157,7 +210,7 @@ export function allowedActions(invoice, ctx = {}) {
         role: a.role,
       };
     })
-    .filter((x) => x.enabled || ['approve', 'approve_received', 'clear_duplicate'].includes(x.id));
+    .filter((x) => x.enabled || ['approve', 'approve_received', 'clear_duplicate', 'reopen'].includes(x.id));
 }
 
 /**

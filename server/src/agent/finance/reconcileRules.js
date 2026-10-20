@@ -90,7 +90,10 @@ export function parseStatement(text) {
 
 // ---------- Matching ----------
 
-const norm = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const norm = (s) =>
+  String(s ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
 
 // "HOS10482" in the description counts as invoice HOS-10482.
 export function refInDescription(description, invoiceNumber) {
@@ -99,7 +102,12 @@ export function refInDescription(description, invoiceNumber) {
 }
 
 const NOISE = new Set(['pty', 'ltd', 'limited', 'and', 'the', 'co', 'company']);
-const words = (s) => String(s ?? '').toLowerCase().replace(/&/g, ' ').split(/[^a-z0-9]+/).filter((w) => w && !NOISE.has(w));
+const words = (s) =>
+  String(s ?? '')
+    .toLowerCase()
+    .replace(/&/g, ' ')
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !NOISE.has(w));
 
 // Banks shorten names ("HARBOUR OFFICE SUP"), so a word in the description may
 // be the start of a word in the supplier's name. Two words must agree.
@@ -129,7 +137,19 @@ const sameAmount = (line, payment) => cents(Math.abs(line.amount)) === cents(pay
 export function matchLines(lines, allPayments, invoices) {
   let payments = allPayments;
   const taken = new Map(); // payment id -> line number that pays it
-  const out = lines.map((l) => ({ ...l, status: null, method: null, kind: null, paymentId: null, invoiceNumber: null, vendorName: null, candidate: null, reason: null, aiNote: null, resolution: null }));
+  const out = lines.map((l) => ({
+    ...l,
+    status: null,
+    method: null,
+    kind: null,
+    paymentId: null,
+    invoiceNumber: null,
+    vendorName: null,
+    candidate: null,
+    reason: null,
+    aiNote: null,
+    resolution: null,
+  }));
   const brief = (p) => ({ paymentId: p.id, invoiceNumber: p.invoiceNumber, vendorName: p.vendorName, amount: p.amount });
   const set = (line, fields) => Object.assign(line, fields);
 
@@ -160,12 +180,23 @@ export function matchLines(lines, allPayments, invoices) {
       if (p.status === 'paid' || taken.has(p.id)) {
         set(line, { ...who, status: 'exception', kind: 'duplicate', reason: alreadyPaid(line, p) });
       } else if (p.status !== 'queued') {
-        set(line, { ...who, status: 'exception', kind: 'on_hold', reason: `The payment for invoice ${p.invoiceNumber} is ${p.status === 'failed' ? 'marked as failed' : 'on hold'}, but the bank shows money going out.` });
+        set(line, {
+          ...who,
+          status: 'exception',
+          kind: 'on_hold',
+          reason: `The payment for invoice ${p.invoiceNumber} is ${p.status === 'failed' ? 'marked as failed' : 'on hold'}, but the bank shows money going out.`,
+        });
       } else if (sameAmount(line, p)) {
         taken.set(p.id, line.n);
         set(line, { ...who, status: 'matched', method: 'invoice number and amount', paymentId: p.id, reason: `Quotes invoice ${p.invoiceNumber} and the amount matches.` });
       } else {
-        set(line, { ...who, status: 'exception', kind: 'amount_differs', candidate: brief(p), reason: `The bank shows ${money(Math.abs(line.amount))}, but invoice ${p.invoiceNumber} was approved for ${money(p.amount)}.` });
+        set(line, {
+          ...who,
+          status: 'exception',
+          kind: 'amount_differs',
+          candidate: brief(p),
+          reason: `The bank shows ${money(Math.abs(line.amount))}, but invoice ${p.invoiceNumber} was approved for ${money(p.amount)}.`,
+        });
       }
       continue;
     }
@@ -191,9 +222,21 @@ export function matchLines(lines, allPayments, invoices) {
     if (open.length === 1) {
       const p = open[0];
       taken.set(p.id, line.n);
-      set(line, { status: 'matched', method: 'supplier name and amount', paymentId: p.id, invoiceNumber: p.invoiceNumber, vendorName: p.vendorName, reason: `Names ${p.vendorName} and the amount matches invoice ${p.invoiceNumber}.` });
+      set(line, {
+        status: 'matched',
+        method: 'supplier name and amount',
+        paymentId: p.id,
+        invoiceNumber: p.invoiceNumber,
+        vendorName: p.vendorName,
+        reason: `Names ${p.vendorName} and the amount matches invoice ${p.invoiceNumber}.`,
+      });
     } else if (open.length > 1) {
-      set(line, { status: 'exception', kind: 'ambiguous', vendorName: open[0].vendorName, reason: `${open.length} approved payments to ${open[0].vendorName} are for this amount (${open.map((p) => p.invoiceNumber).join(', ')}), so the agent cannot tell which one this is.` });
+      set(line, {
+        status: 'exception',
+        kind: 'ambiguous',
+        vendorName: open[0].vendorName,
+        reason: `${open.length} approved payments to ${open[0].vendorName} are for this amount (${open.map((p) => p.invoiceNumber).join(', ')}), so the agent cannot tell which one this is.`,
+      });
     } else if (fits.length) {
       const p = fits.find((x) => taken.has(x.id)) || fits[0];
       set(line, { status: 'exception', kind: 'duplicate', invoiceNumber: p.invoiceNumber, vendorName: p.vendorName, reason: alreadyPaid(line, p) });
@@ -205,7 +248,12 @@ export function matchLines(lines, allPayments, invoices) {
     const open = payments.filter((p) => p.status === 'queued' && !taken.has(p.id) && sameAmount(line, p));
     if (open.length === 1) {
       const p = open[0];
-      set(line, { status: 'suggested', kind: 'amount_only', candidate: brief(p), reason: `Same amount as the approved payment to ${p.vendorName} for invoice ${p.invoiceNumber}, but the description does not name them.` });
+      set(line, {
+        status: 'suggested',
+        kind: 'amount_only',
+        candidate: brief(p),
+        reason: `Same amount as the approved payment to ${p.vendorName} for invoice ${p.invoiceNumber}, but the description does not name them.`,
+      });
     } else {
       set(line, { status: 'unmatched', reason: 'No approved payment matches this line.' });
     }

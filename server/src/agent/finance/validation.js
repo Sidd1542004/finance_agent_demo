@@ -13,7 +13,7 @@
 // Purchase order matching lives in matching.js, duplicates in duplicates.js.
 // Plain functions, no database and no AI.
 
-import { cents, isNum, isValidAbn, normaliseAbn, formatAbn, namesMatch } from './rules.js';
+import { cents, isNum, isValidAbn, normaliseAbn, formatAbn, isValidAcn, formatAcn, namesMatch, namesEqual } from './rules.js';
 
 // Every check has a severity that says where a failure sends the invoice:
 //   review - Needs Review: data, identity or tax details a person must confirm
@@ -25,6 +25,7 @@ export const SEVERITY = {
   arithmetic: 'review',
   jurisdiction: 'review',
   supplier_tax_id: 'review',
+  supplier_acn: 'review',
   supplier_known: 'review',
   gst_registration: 'review',
   tax_charged: 'hold',
@@ -39,6 +40,21 @@ export const fmtMoney = (n, currency = 'AUD') => {
   }
 };
 
+const CORRECTED_LABEL = {
+  vendorName: 'supplier',
+  abn: 'ABN',
+  gstin: 'GSTIN',
+  invoiceNumber: 'invoice number',
+  invoiceDate: 'invoice date',
+  dueDate: 'due date',
+  poNumber: 'purchase order',
+  currency: 'currency',
+  subtotal: 'subtotal',
+  gst: 'GST',
+  total: 'total',
+  lines: 'line items',
+};
+
 const near = (a, b, tol) => Math.abs(cents(a) - cents(b)) <= cents(tol);
 
 // ---------- Indian GSTIN ----------
@@ -48,7 +64,9 @@ export const GSTIN_PATTERN = /\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b/;
 
 // GSTIN check character (mod 36, alternating weights 1 and 2).
 export function isValidGstin(value) {
-  const g = String(value ?? '').trim().toUpperCase();
+  const g = String(value ?? '')
+    .trim()
+    .toUpperCase();
   if (!/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) return false;
   const state = Number(g.slice(0, 2));
   if (state < 1 || state > 38) return false;
@@ -77,9 +95,15 @@ export function detectJurisdiction(extracted, text = '') {
   if (extracted.currency === 'INR' || /₹|\bINR\b/.test(t)) india.push('Indian rupees');
   if (extracted.abn) au.push('an ABN');
   else if (/\bA\.?B\.?N\b/.test(t)) au.push('an ABN label');
-  if (extracted.currency === 'AUD' || /\bAUD\b|A\$/.test(t)) au.push('Australian dollars');
+  // Printed on the invoice, not a currency a reader inferred from a bare "$".
+  if (/\bAUD\b|A\$/.test(t)) au.push('Australian dollars');
   if (/\bGST\s*\(?\s*10\s*%/i.test(t)) au.push('GST at 10%');
   if (AU_STATE.test(t)) au.push('an Australian address');
+  // The word "Australia" in an address is not evidence of the tax regime on its
+  // own. Tax labelled VAT is not Australian GST: with it, the regime is for a
+  // person to confirm, never assumed (upper-case only, so an item called a "vat" is ignored).
+  const vat = /\bVAT\b/.test(t) || Boolean(extracted.vatNumber) || (extracted.taxLines || []).some((l) => l.type === 'VAT');
+  if (vat) return { code: 'unknown', reasons: [...au, ...india, 'tax labelled VAT'], vat: true };
   if (india.length > au.length) return { code: 'IN', reasons: india };
   if (au.length > india.length) return { code: 'AU', reasons: au };
   if (au.length && india.length) return { code: 'unknown', reasons: [...au, ...india] };
@@ -107,7 +131,10 @@ export function checkArithmetic(e, { tolerance = 0.05 } = {}) {
 
   if (isNum(e.subtotal) && lines.length) {
     const ok = near(lineSum, e.subtotal, tolerance) || near(lineSum - discount + charges, e.subtotal, tolerance);
-    if (!ok) problems.push(`Line items add up to ${m(lineSum)}${discount || charges ? ` (${m(lineSum - discount + charges)} after discounts and charges)` : ''}, but the subtotal says ${m(e.subtotal)}.`);
+    if (!ok)
+      problems.push(
+        `Line items add up to ${m(lineSum)}${discount || charges ? ` (${m(lineSum - discount + charges)} after discounts and charges)` : ''}, but the subtotal says ${m(e.subtotal)}.`,
+      );
   }
   if (isNum(e.subtotal) && tax !== null && isNum(e.total)) {
     const ok = near(e.subtotal + tax, e.total, tolerance) || near(e.subtotal + tax - discount + charges, e.total, tolerance);
@@ -119,6 +146,19 @@ export function checkArithmetic(e, { tolerance = 0.05 } = {}) {
   }
   return problems;
 }
+
+// What the invoice does not show that is needed to confirm its sums. With any
+// of these missing, "nothing disagrees" is not the same as "consistent".
+export function arithmeticGaps(e) {
+  const gaps = [];
+  if (!(e.lines || []).length) gaps.push('line items');
+  if (!isNum(e.subtotal)) gaps.push('subtotal');
+  // No tax figure is only fine when nothing separates the subtotal from the total.
+  if (!isNum(e.gst) && !(isNum(e.subtotal) && isNum(e.total) && cents(e.subtotal) === cents(e.total))) gaps.push('tax amount');
+  return gaps;
+}
+
+const listOf = (items) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items[0]);
 
 // ---------- Tax ----------
 
@@ -134,7 +174,14 @@ function australianTax({ e, vendor, abr, policy }) {
   let identifier;
   if (!e.abn) {
     identifier = { type: 'ABN', value: null, format: 'missing', verification: 'not_checked' };
-    checks.push({ id: 'supplier_tax_id', label: "Supplier's ABN", status: 'fail', severity: policy.missingAbn === 'hold' ? 'hold' : 'review', detail: "The invoice does not show the supplier's ABN. A tax invoice must show it before the GST credit can be claimed, and paying a supplier with no ABN can require no-ABN withholding. Confirm the ABN with the supplier before approving." });
+    const notAbn = (e.rejectedIds || []).find((r) => r.field === 'abn');
+    checks.push({
+      id: 'supplier_tax_id',
+      label: "Supplier's ABN",
+      status: 'fail',
+      severity: policy.missingAbn === 'hold' ? 'hold' : 'review',
+      detail: `The invoice does not show the supplier's ABN.${notAbn ? ` The number ${notAbn.value} is printed ${notAbn.label ? `labelled "${notAbn.label}"` : 'with no label'}, not as an ABN, so it was not used as one even though its digits pass the ABN checksum.` : ''} A tax invoice must show it before the GST credit can be claimed, and paying a supplier with no ABN can require no-ABN withholding. Confirm the ABN with the supplier before approving.`,
+    });
   } else if (!isValidAbn(e.abn)) {
     identifier = { type: 'ABN', value: e.abn, format: 'invalid', verification: 'not_checked' };
     add('supplier_tax_id', "Supplier's ABN", 'fail', `ABN ${formatAbn(e.abn)} fails the ATO checksum, so it is not a real ABN.`);
@@ -151,6 +198,21 @@ function australianTax({ e, vendor, abr, policy }) {
       "Supplier's ABN",
       'unverified',
       `ABN ${formatAbn(e.abn)} is a valid number (it passes the ATO checksum), but it has not been checked against the Australian Business Register${abr?.status === 'error' ? ` (the lookup failed: ${abr.message})` : ', because no ABR lookup is configured'}.`,
+    );
+  }
+
+  // 1b. The ACN, only when the invoice prints one: not mandatory on a tax
+  // invoice (the ABN is), so its absence is not a check failure. A checksum
+  // failure is still worth a reviewer's attention, and a pass is "unverified"
+  // the same way an ABN is: the number is well formed, not looked up live.
+  if (e.acn) {
+    add(
+      'supplier_acn',
+      "Supplier's ACN",
+      isValidAcn(e.acn) ? 'unverified' : 'fail',
+      isValidAcn(e.acn)
+        ? `ACN ${formatAcn(e.acn)} is a valid number (it passes the ASIC checksum), but it has not been checked against the company register.`
+        : `ACN ${formatAcn(e.acn)} fails the ASIC checksum, so it is not a real ACN.`,
     );
   }
 
@@ -189,10 +251,55 @@ function australianTax({ e, vendor, abr, policy }) {
   } else {
     const expected = Math.round(e.subtotal * rate) / 100;
     const ok = near(e.gst, expected, policy.roundingTolerance);
-    add('tax_charged', 'GST charged correctly', ok ? 'pass' : 'fail', ok ? `GST ${m(e.gst)} is ${rate}% of the subtotal.` : `GST shown is ${m(e.gst)}, but ${rate}% of ${m(e.subtotal)} is ${m(expected)}.`);
+    add(
+      'tax_charged',
+      'GST charged correctly',
+      ok ? 'pass' : 'fail',
+      ok ? `GST ${m(e.gst)} is ${rate}% of the subtotal.` : `GST shown is ${m(e.gst)}, but ${rate}% of ${m(e.subtotal)} is ${m(expected)}.`,
+    );
   }
 
   return { identifier, registration: { registered, source }, checks };
+}
+
+// The tax rules could not be identified, so no ABN (or GST) rules were applied.
+// A reviewer is still told plainly whether a supplier ABN was found, without
+// suggesting it was validated: only the checksum is reported, and nothing is
+// said to be verified.
+function undeterminedTaxId(e) {
+  const none = { registration: { registered: null, source: null } };
+  const notApplied = 'The tax rules could not be identified, so no ABN or GST validation was carried out';
+  if (e.gstin) return { ...none, identifier: { type: 'GSTIN', value: e.gstin, format: isValidGstin(e.gstin) ? 'valid' : 'invalid', verification: 'not_checked' }, checks: [] };
+  if (!e.abn) {
+    const notAbn = (e.rejectedIds || []).find((r) => r.field === 'abn');
+    return {
+      ...none,
+      identifier: { type: 'ABN', value: null, format: 'missing', verification: 'not_checked' },
+      checks: [
+        {
+          id: 'supplier_tax_id',
+          label: "Supplier's ABN",
+          status: 'fail',
+          severity: 'review',
+          detail: `Supplier ABN missing: no ABN is printed for the supplier.${notAbn ? ` The number ${notAbn.value} is printed ${notAbn.label ? `labelled "${notAbn.label}"` : 'with no label'}, not as an ABN, so it was not used as one.` : e.vatNumber ? ` The number ${e.vatNumber} is printed labelled "VAT", not as an ABN, so it was not used as one.` : ''} ${notApplied}. If this is an Australian tax invoice, confirm the supplier's ABN before approving.`,
+        },
+      ],
+    };
+  }
+  const valid = isValidAbn(e.abn);
+  return {
+    ...none,
+    identifier: { type: 'ABN', value: e.abn, format: valid ? 'valid' : 'invalid', verification: 'not_checked' },
+    checks: [
+      {
+        id: 'supplier_tax_id',
+        label: "Supplier's ABN",
+        status: valid ? 'unverified' : 'fail',
+        severity: 'review',
+        detail: `ABN ${formatAbn(e.abn)} is printed for the supplier and ${valid ? 'passes' : 'fails'} the ATO checksum. ${notApplied}, and it was not checked against the Australian Business Register.`,
+      },
+    ],
+  };
 }
 
 function indianTax({ e, policy }) {
@@ -211,11 +318,21 @@ function indianTax({ e, policy }) {
     add('supplier_tax_id', "Supplier's GSTIN", 'fail', `GSTIN ${e.gstin} is not a valid number (format or check character).`);
   } else {
     identifier = { type: 'GSTIN', value: e.gstin, format: 'valid', verification: 'unverified' };
-    add('supplier_tax_id', "Supplier's GSTIN", 'unverified', `GSTIN ${e.gstin} is a valid number (state code ${e.gstin.slice(0, 2)}), but it has not been checked on the GST portal.`);
+    add(
+      'supplier_tax_id',
+      "Supplier's GSTIN",
+      'unverified',
+      `GSTIN ${e.gstin} is a valid number (state code ${e.gstin.slice(0, 2)}), but it has not been checked on the GST portal.`,
+    );
   }
 
   // 2. Registration: a valid GSTIN means registered; nothing else to check offline.
-  add('gst_registration', 'GST registration', e.gstin && isValidGstin(e.gstin) ? 'pass' : 'unverified', e.gstin && isValidGstin(e.gstin) ? 'A valid GSTIN means the supplier is GST-registered (not verified online).' : 'GST registration could not be confirmed.');
+  add(
+    'gst_registration',
+    'GST registration',
+    e.gstin && isValidGstin(e.gstin) ? 'pass' : 'unverified',
+    e.gstin && isValidGstin(e.gstin) ? 'A valid GSTIN means the supplier is GST-registered (not verified online).' : 'GST registration could not be confirmed.',
+  );
 
   // 3. Tax charged: CGST + SGST (same state) or IGST (between states), never both.
   const lines = e.taxLines || [];
@@ -229,7 +346,8 @@ function indianTax({ e, policy }) {
   if (!lines.length) {
     if (!isNum(e.gst)) problems.push('The invoice does not show the GST charged (CGST, SGST or IGST).');
   } else {
-    if (igst.length && (cgst.length || sgst.length)) problems.push('The invoice charges IGST together with CGST/SGST. A supply is either within one state (CGST + SGST) or between states (IGST), not both.');
+    if (igst.length && (cgst.length || sgst.length))
+      problems.push('The invoice charges IGST together with CGST/SGST. A supply is either within one state (CGST + SGST) or between states (IGST), not both.');
     if (cgst.length && !sgst.length) problems.push('CGST is charged without SGST/UTGST.');
     if (sgst.length && !cgst.length) problems.push('SGST/UTGST is charged without CGST.');
     if (cgst.length && sgst.length && !near(sum(cgst), sum(sgst), tol)) problems.push(`CGST (${m(sum(cgst))}) and SGST (${m(sum(sgst))}) should be equal.`);
@@ -244,7 +362,12 @@ function indianTax({ e, policy }) {
     }
     if (isNum(e.gst) && !near(sum(lines), e.gst, tol)) problems.push(`The tax lines add up to ${m(sum(lines))}, but the tax total says ${m(e.gst)}.`);
   }
-  add('tax_charged', 'GST charged correctly', problems.length ? 'fail' : 'pass', problems.length ? problems.join(' ') : `${igst.length ? 'IGST' : 'CGST and SGST'} add up and match the stated rates.`);
+  add(
+    'tax_charged',
+    'GST charged correctly',
+    problems.length ? 'fail' : 'pass',
+    problems.length ? problems.join(' ') : `${igst.length ? 'IGST' : 'CGST and SGST'} add up and match the stated rates.`,
+  );
 
   return { identifier, registration: { registered: Boolean(e.gstin && isValidGstin(e.gstin)), source: 'GSTIN' }, checks };
 }
@@ -257,10 +380,12 @@ function indianTax({ e, policy }) {
  * @param text       the invoice text, used to identify the jurisdiction
  * @param vendor     the approved supplier record, if one was identified
  * @param vendorBy   how the supplier was identified: 'abn' | 'name' | null
+ * @param vendorConflict  a different approved supplier whose name matches, when the
+ *                        invoice's ABN does not match any approved supplier (see identifyVendor)
  * @param abr        result of an Australian Business Register lookup, or null
  * @returns { jurisdiction, identifier, registration, checks }
  */
-export function validateInvoice({ extracted: e, extraction, text, vendor, vendorBy, abr = null, policy }) {
+export function validateInvoice({ extracted: e, extraction, text, vendor, vendorBy, vendorConflict = null, abr = null, policy }) {
   const checks = [];
   const add = (id, label, status, detail) => checks.push({ id, label, status, detail, severity: SEVERITY[id] });
   const pct = (x) => `${Math.round(x * 100)}%`;
@@ -272,37 +397,83 @@ export function validateInvoice({ extracted: e, extraction, text, vendor, vendor
   if (!e.invoiceDate) missing.push('invoice date');
   if (!isNum(e.total)) missing.push('total');
   if (!(e.lines || []).length) missing.push('line items');
-  add('required_fields', 'Invoice has the required details', missing.length ? 'fail' : 'pass', missing.length ? `Could not find: ${missing.join(', ')}.` : 'Supplier, invoice number, date, line items and total are present.');
+  add(
+    'required_fields',
+    'Invoice has the required details',
+    missing.length ? 'fail' : 'pass',
+    missing.length ? `Could not find: ${missing.join(', ')}.` : 'Supplier, invoice number, date, line items and total are present.',
+  );
 
   const confidence = isNum(extraction?.confidence) ? extraction.confidence : 0;
+  // Fields a reviewer corrected are not held against the reading: they were
+  // confirmed by a person (see extract.js applyCorrections).
+  const byPerson = new Map();
+  for (const c of extraction?.corrected || []) byPerson.set(c.by, [...(byPerson.get(c.by) || []), c.field]);
+  const corrected = byPerson.size ? ` ${[...byPerson].map(([by, fields]) => `${listOf(fields.map((f) => CORRECTED_LABEL[f] || f))} corrected by ${by}`).join('; ')}.` : '';
   add(
     'reader_confidence',
     'Invoice was read with enough confidence',
     confidence >= policy.minConfidence ? 'pass' : 'fail',
-    confidence >= policy.minConfidence ? `Reader confidence ${pct(confidence)} (minimum ${pct(policy.minConfidence)}).` : `Reader confidence ${pct(confidence)} is below the ${pct(policy.minConfidence)} minimum.${extraction?.notes ? ` ${extraction.notes}` : ''}`,
+    confidence >= policy.minConfidence
+      ? `Reader confidence ${pct(confidence)} (minimum ${pct(policy.minConfidence)}).${corrected}`
+      : `Reader confidence ${pct(confidence)} is below the ${pct(policy.minConfidence)} minimum.${extraction?.notes ? ` ${extraction.notes}` : ''}`,
   );
 
   const sums = checkArithmetic(e, { tolerance: policy.roundingTolerance });
-  add('arithmetic', 'Amounts add up', sums.length ? 'fail' : 'pass', sums.length ? sums.join(' ') : 'Line amounts, subtotal, tax and total are consistent.');
+  const gaps = sums.length ? [] : arithmeticGaps(e);
+  if (sums.length) add('arithmetic', 'Amounts add up', 'fail', sums.join(' '));
+  else if (gaps.length)
+    add(
+      'arithmetic',
+      'Amounts add up',
+      'unverified',
+      `Unable to verify the amounts: the invoice as read shows no ${listOf(gaps)}. Nothing that could be compared disagrees, but the sums are not confirmed. Check them against the invoice.`,
+    );
+  else add('arithmetic', 'Amounts add up', 'pass', 'Line amounts, subtotal, tax and total are consistent.');
 
   const jurisdiction = detectJurisdiction(e, text);
   let tax;
   if (jurisdiction.code === 'AU') tax = australianTax({ e, vendor, abr, policy });
   else if (jurisdiction.code === 'IN') tax = indianTax({ e, policy });
-  else tax = { identifier: { type: null, value: e.abn || e.gstin || null, format: 'unknown', verification: 'not_checked' }, registration: { registered: null, source: null }, checks: [] };
+  else tax = undeterminedTaxId(e);
+  const taxRate = isNum(e.gst) && isNum(e.subtotal) && e.subtotal > 0 ? Math.round((e.gst / e.subtotal) * 1000) / 10 : null;
   add(
     'jurisdiction',
     'Tax rules identified',
     jurisdiction.code === 'unknown' ? 'fail' : 'pass',
     jurisdiction.code === 'unknown'
-      ? `Could not tell which country's tax rules apply${jurisdiction.reasons.length ? ` (the invoice shows ${jurisdiction.reasons.join(' and ')})` : ''}. A person should confirm the tax treatment.`
+      ? `Could not tell which country's tax rules apply${jurisdiction.reasons.length ? ` (the invoice shows ${jurisdiction.reasons.join(' and ')})` : ''}. A person should confirm the tax treatment.${jurisdiction.vat ? ` Tax labelled VAT${taxRate !== null ? ` at ${taxRate}%` : ''} is not Australian GST, so the ${policy.gstRatePct}% GST check was not applied and no ABN rules were assumed.` : ''}`
       : `${jurisdiction.code === 'AU' ? 'Australian' : 'Indian'} GST rules applied, because the invoice shows ${jurisdiction.reasons.join(', ')}.`,
   );
   checks.push(...tax.checks);
 
   // Supplier: one we know? Identified by tax ID where possible, by name otherwise.
-  if (!vendor) {
-    add('supplier_known', 'Supplier is on the approved list', 'fail', `${e.vendorName ? `"${e.vendorName}"` : 'The supplier'} is not on the approved supplier list${tax.identifier.value ? ` (no supplier has ${tax.identifier.type} ${tax.identifier.type === 'ABN' ? formatAbn(tax.identifier.value) : tax.identifier.value})` : ''}.`);
+  if (!vendor && vendorConflict) {
+    // The name on the invoice matches an approved supplier, but the printed
+    // ABN belongs to nobody we know. This is never resolved by guessing which
+    // one is right: a person must confirm it before the invoice can be matched.
+    add(
+      'supplier_known',
+      'Supplier is on the approved list',
+      'fail',
+      e.abn
+        ? `The name "${e.vendorName}" matches the approved supplier ${vendorConflict.name}, but the ABN on the invoice (${formatAbn(e.abn)}) is not theirs (their ABN on file is ${formatAbn(vendorConflict.abn)}). The name and the ABN do not agree: confirm which is correct before approving.`
+        : `"${e.vendorName}" is similar to the approved supplier ${vendorConflict.name}, but it is not the same name and the invoice shows no ABN to confirm it (their ABN on file is ${formatAbn(vendorConflict.abn)}). Confirm it is the same business before approving.`,
+    );
+  } else if (!vendor) {
+    add(
+      'supplier_known',
+      'Supplier is on the approved list',
+      'fail',
+      `${e.vendorName ? `"${e.vendorName}"` : 'The supplier'} is not on the approved supplier list${tax.identifier.value ? ` (no supplier has ${tax.identifier.type} ${tax.identifier.type === 'ABN' ? formatAbn(tax.identifier.value) : tax.identifier.value})` : ''}.`,
+    );
+  } else if (vendorBy === 'abn' && !e.vendorName) {
+    add(
+      'supplier_known',
+      'Supplier is on the approved list',
+      'unverified',
+      `The ABN belongs to the approved supplier ${vendor.name}, but the supplier's name was not read from the invoice, so the name cannot be checked against the ABN.`,
+    );
   } else if (vendorBy === 'abn' && e.vendorName && !namesMatch(vendor.name, e.vendorName)) {
     add('supplier_known', 'Supplier is on the approved list', 'fail', `That ABN belongs to ${vendor.name}, but the invoice is from "${e.vendorName}".`);
   } else if (vendorBy === 'name') {
@@ -315,14 +486,25 @@ export function validateInvoice({ extracted: e, extraction, text, vendor, vendor
 }
 
 // Find the supplier record: by ABN first, then by exact-ish name when the invoice shows no ABN.
+// When the invoice's ABN matches nobody, but its name matches a *different*
+// approved supplier, that is reported as a conflict rather than treated as
+// an unknown supplier or silently matched by name: fuzzy name matching is
+// supporting evidence, never proof, when a printed ABN disagrees with it.
 export function identifyVendor(extracted, vendors) {
   if (extracted.abn) {
     const v = vendors.find((x) => normaliseAbn(x.abn) === extracted.abn);
-    return v ? { vendor: v, by: 'abn' } : { vendor: null, by: null };
+    if (v) return { vendor: v, by: 'abn', conflict: null };
+    const byName = extracted.vendorName ? vendors.find((x) => namesMatch(x.name, extracted.vendorName)) : null;
+    return { vendor: null, by: null, conflict: byName || null };
   }
   if (extracted.vendorName) {
-    const v = vendors.find((x) => namesMatch(x.name, extracted.vendorName));
-    if (v) return { vendor: v, by: 'name' };
+    // With no ABN, only the same name identifies the supplier. A merely similar
+    // name ("Harbour Pty Ltd" for "Harbour Office Supplies Pty Ltd") may be a
+    // different business: it is reported for a person to confirm, not matched.
+    const v = vendors.find((x) => namesEqual(x.name, extracted.vendorName));
+    if (v) return { vendor: v, by: 'name', conflict: null };
+    const similar = vendors.find((x) => namesMatch(x.name, extracted.vendorName));
+    if (similar) return { vendor: null, by: null, conflict: similar };
   }
-  return { vendor: null, by: null };
+  return { vendor: null, by: null, conflict: null };
 }

@@ -38,12 +38,26 @@ export const GoodsReceipt = model(
 // ----- What the agent works on -----
 
 // Invoice statuses: see agent/finance/lifecycle.js for the allowed moves.
-export const INVOICE_STATUSES = ['received', 'processing', 'under_review', 'needs_review', 'on_hold', 'approved', 'payment_pending', 'payment_completed', 'payment_failed', 'rejected', 'cancelled', 'failed'];
+export const INVOICE_STATUSES = [
+  'received',
+  'processing',
+  'under_review',
+  'needs_review',
+  'on_hold',
+  'approved',
+  'payment_pending',
+  'payment_completed',
+  'payment_failed',
+  'rejected',
+  'cancelled',
+  'failed',
+];
 
 const invoiceSchema = new Schema(
   {
-    source: { kind: { type: String, enum: ['sample', 'upload', 'paste'], required: true }, filename: String, sampleId: String },
-    rawText: { type: String, required: true },
+    // scan: { from: 'image' | 'pdf', pages, model } when read from a scan or photo by the vision reader.
+    source: { kind: { type: String, enum: ['sample', 'upload', 'paste'], required: true }, filename: String, sampleId: String, scan: { type: Mixed, default: undefined } },
+    rawText: { type: String, required: true }, // for a scan or photo: the vision reader's transcription
     status: { type: String, enum: INVOICE_STATUSES, default: 'received', index: true },
     extracted: { type: Mixed, default: null }, // fields read from the invoice
     extraction: { type: Mixed, default: null }, // which reader, confidence, notes
@@ -70,12 +84,68 @@ const invoiceSchema = new Schema(
     rejection: { type: Mixed, default: null }, // { decidedBy, note, decidedAt }
     hold: { type: Mixed, default: null }, // placed on hold by a person: { decidedBy, note, decidedAt }
     cancellation: { type: Mixed, default: null }, // { decidedBy, note, at, from }
+    reopened: { type: Mixed, default: null }, // accidental decision undone: { decidedBy, note, at, from, priorDecision }
     recovery: { type: Mixed, default: null }, // money already paid being recovered: { status, opened, closed }
+    corrections: { type: [Mixed], default: [] }, // fields a reviewer corrected: { field, from, to, by, note, at }. Append only.
     events: { type: [Mixed], default: [] }, // status history: { at, actor, action, from, to, reason }. Append only.
   },
   { timestamps: true, minimize: false },
 );
 export const Invoice = model('Invoice', invoiceSchema);
+
+// What reviewers' corrections taught the reader about one supplier's invoices:
+// per field, the label printed near the value and an example of the format.
+// Never a whole invoice. See agent/finance/supplierHints.js.
+export const SupplierHint = model(
+  'SupplierHint',
+  new Schema(
+    {
+      vendorAbn: { type: String, required: true },
+      vendorName: String,
+      field: { type: String, required: true },
+      label: { type: String, default: null },
+      example: { type: String, required: true },
+      updatedBy: String,
+      updatedAt: String,
+    },
+    { timestamps: false },
+  ).index({ vendorAbn: 1, field: 1 }, { unique: true }),
+);
+
+// ----- The audit log -----
+
+// Every status change of an invoice, payment, supplier email, bank line or
+// report (see agent/finance/audit.js). Append only: updates and deletes are
+// refused here, so no code path (and no route) can rewrite the history.
+const auditSchema = new Schema(
+  {
+    subjectKind: { type: String, enum: ['invoice', 'payment', 'query', 'statement', 'bank_line', 'report', 'system'], required: true },
+    subjectId: { type: String, required: true },
+    actor: { type: String, required: true },
+    action: { type: String, required: true },
+    from: { type: String, default: null },
+    to: { type: String, default: null },
+    reason: { type: String, default: null },
+    detail: { type: String, default: null },
+    at: { type: Date, required: true },
+  },
+  { versionKey: false },
+);
+auditSchema.index({ subjectId: 1, at: 1 });
+auditSchema.index({ at: -1 });
+export const APPEND_ONLY = 'The audit log is append only: entries cannot be changed or deleted.';
+const refuse = () => {
+  throw new Error(APPEND_ONLY);
+};
+for (const op of ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'findOneAndDelete', 'replaceOne', 'deleteOne', 'deleteMany']) {
+  auditSchema.pre(op, { document: false, query: true }, refuse);
+}
+auditSchema.pre('deleteOne', { document: true, query: false }, refuse);
+auditSchema.pre('save', function auditInsertOnly() {
+  if (!this.isNew) throw new Error(APPEND_ONLY);
+});
+auditSchema.pre('bulkWrite', refuse);
+export const AuditEvent = model('AuditEvent', auditSchema);
 
 // One record per agent run: the audit trail of the six stages.
 export const AgentRun = model(

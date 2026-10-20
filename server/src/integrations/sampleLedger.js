@@ -5,7 +5,9 @@
 // another file that exports the same functions and pass it to the agents
 // instead. Nothing in the agents or the rules needs to change.
 
-import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, Payment, OutboxMessage, VendorQuery, BankStatement } from '../models/index.js';
+import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, Payment, OutboxMessage, VendorQuery, BankStatement, SupplierHint, AuditEvent } from '../models/index.js';
+import { auditEntry } from '../agent/finance/audit.js';
+import { hintsForText } from '../agent/finance/supplierHints.js';
 import { skuKey } from '../agent/finance/matching.js';
 import { sharedSignals } from '../agent/finance/duplicates.js';
 
@@ -19,10 +21,12 @@ const invoiceSummary = (d) => ({
   status: d.status,
   createdAt: d.createdAt,
   humanDecision: d.approval?.decision ?? null,
-  approvedAmount: d.approval?.amount ?? (d.approval ? d.extracted?.total ?? null : null),
+  approvedAmount: d.approval?.amount ?? (d.approval ? (d.extracted?.total ?? null) : null),
   agentOutcome: d.decision?.outcome ?? null,
   currency: d.extracted?.currency || 'AUD',
   failedChecks: (d.checks || []).filter((c) => c.status === 'fail').map((c) => ({ id: c.id, label: c.label })),
+  // Earlier, live invoices this one may be a copy of, while its duplicate check is failing.
+  duplicateOf: (d.checks || []).some((c) => c.id === 'duplicate' && c.status === 'fail') ? (d.match?.duplicates || []).map((c) => String(c.id)) : [],
 });
 
 const INACTIVE = ['rejected', 'cancelled', 'failed'];
@@ -42,13 +46,39 @@ const paymentSummary = (p) => ({
 
 const inRange = ({ start, end } = {}) => (start && end ? { createdAt: { $gte: start, $lt: end } } : {});
 
-const revertInvoice = (invoiceId) =>
-  Invoice.updateOne(
+// Append one entry to the audit log. Entries are only ever inserted.
+const audit = (entry) => AuditEvent.create(auditEntry(entry));
+
+// A payment's own history entry, mirrored in the audit log with its status change.
+const auditPayment = (p, from, history) =>
+  audit({ subjectKind: 'payment', subjectId: p._id, actor: history?.by || 'System', action: history?.event || 'changed', from, to: p.status, detail: history?.detail || null });
+
+async function revertInvoice(invoiceId) {
+  const event = { actor: 'Bank reconciliation', action: 'payment_unmatched', from: 'payment_completed', to: 'payment_pending', reason: 'The bank match was undone.' };
+  const done = await Invoice.updateOne(
     { _id: invoiceId, status: 'payment_completed' },
-    { $set: { status: 'payment_pending' }, $push: { events: { at: new Date().toISOString(), actor: 'Bank reconciliation', action: 'payment_unmatched', from: 'payment_completed', to: 'payment_pending', reason: 'The bank match was undone.' } } },
+    { $set: { status: 'payment_pending' }, $push: { events: { at: new Date().toISOString(), ...event } } },
   );
+  if (done.modifiedCount) await audit({ subjectKind: 'invoice', subjectId: invoiceId, ...event });
+}
+
+// The before and after values of corrected fields, as text for the log.
+const auditChanges = (event) => (event?.changes?.length ? { detail: [event.detail, `Changes: ${JSON.stringify(event.changes)}`].filter(Boolean).join(' ') } : {});
 
 export const sampleLedger = {
+  // ----- the audit log (append only) -----
+  recordAudit: (entry) => audit(entry),
+
+  recordAudits: (entries) => (entries.length ? AuditEvent.insertMany(entries.map(auditEntry)) : null),
+
+  listAudit: ({ subjectId, limit = 200 } = {}) =>
+    subjectId
+      ? AuditEvent.find({ subjectId: String(subjectId) })
+          .sort({ at: 1, _id: 1 })
+          .limit(limit)
+          .lean()
+      : AuditEvent.find().sort({ at: -1, _id: -1 }).limit(limit).lean(),
+
   // ----- suppliers, purchase orders, deliveries -----
   listVendors: () => Vendor.find().lean(),
 
@@ -84,7 +114,7 @@ export const sampleLedger = {
     for (const d of docs) {
       for (const l of d.lineMatches || []) {
         if (!l.onPo || typeof l.qtyInvoiced !== 'number') continue;
-        const qty = d.approval?.decision === 'approve_received' ? l.qtyPayable ?? l.qtyInvoiced : l.qtyInvoiced;
+        const qty = d.approval?.decision === 'approve_received' ? (l.qtyPayable ?? l.qtyInvoiced) : l.qtyInvoiced;
         totals[skuKey(l.sku)] = (totals[skuKey(l.sku)] || 0) + qty;
       }
     }
@@ -101,7 +131,14 @@ export const sampleLedger = {
       .select('status createdAt extracted.invoiceNumber extracted.total fingerprints')
       .sort({ createdAt: 1 })
       .lean();
-    return docs.map((d) => ({ id: String(d._id), invoiceNumber: d.extracted?.invoiceNumber ?? null, total: d.extracted?.total ?? null, status: d.status, createdAt: d.createdAt, signals: sharedSignals(fingerprints, d.fingerprints) }));
+    return docs.map((d) => ({
+      id: String(d._id),
+      invoiceNumber: d.extracted?.invoiceNumber ?? null,
+      total: d.extracted?.total ?? null,
+      status: d.status,
+      createdAt: d.createdAt,
+      signals: sharedSignals(fingerprints, d.fingerprints),
+    }));
   },
 
   // ----- invoices -----
@@ -138,6 +175,7 @@ export const sampleLedger = {
     const update = { $set: set };
     if (event) update.$push = { events: { at: new Date().toISOString(), ...event } };
     const d = await Invoice.findOneAndUpdate({ _id: id, status: from }, update, { new: true }).lean();
+    if (d && event) await this.recordAudit({ subjectKind: 'invoice', subjectId: id, ...event, ...auditChanges(event) });
     return d ? { ...d, id: String(d._id) } : null;
   },
 
@@ -145,6 +183,7 @@ export const sampleLedger = {
     const update = { $set: set };
     if (event) update.$push = { events: { at: new Date().toISOString(), ...event } };
     const d = await Invoice.findByIdAndUpdate(id, update, { new: true }).lean();
+    if (d && event) await this.recordAudit({ subjectKind: 'invoice', subjectId: id, ...event, ...auditChanges(event) });
     return d ? { ...d, id: String(d._id) } : null;
   },
 
@@ -155,15 +194,22 @@ export const sampleLedger = {
 
   // The unique index on invoiceId refuses a second payment for the same invoice.
   async createPayment(payment) {
-    const p = (await Payment.create({ ...payment, history: [{ at: new Date().toISOString(), event: 'scheduled', by: payment.scheduledBy }] })).toObject();
+    const history = { at: new Date().toISOString(), event: 'scheduled', by: payment.scheduledBy };
+    const p = (await Payment.create({ ...payment, history: [history] })).toObject();
+    await auditPayment(p, null, { ...history, detail: `${p.amount} by ${p.method || 'EFT'}, for ${p.scheduledFor || 'no date'}. Simulated.` });
     return { ...p, id: String(p._id), invoiceId: String(p.invoiceId) };
   },
 
   async updatePayment(id, from, set, history) {
+    const entry = history ? { at: new Date().toISOString(), ...history } : null;
     const update = { $set: set };
-    if (history) update.$push = { history: { at: new Date().toISOString(), ...history } };
-    const p = await Payment.findOneAndUpdate({ _id: id, status: { $in: from } }, update, { new: true }).lean();
-    return p ? { ...p, id: String(p._id), invoiceId: String(p.invoiceId) } : null;
+    if (entry) update.$push = { history: entry };
+    // The record before the change, so the log shows the status it moved from.
+    const before = await Payment.findOneAndUpdate({ _id: id, status: { $in: from } }, update, { new: false }).lean();
+    if (!before) return null;
+    const p = { ...before, ...set, history: entry ? [...(before.history || []), entry] : before.history };
+    await auditPayment(p, before.status, entry);
+    return { ...p, id: String(p._id), invoiceId: String(p.invoiceId) };
   },
 
   // Live payments on other invoices that look like the same invoice
@@ -176,9 +222,24 @@ export const sampleLedger = {
     const keys = invoice.duplicateCleared ? ['numberKey', 'contentHash'] : ['numberKey', 'amountKey', 'contentHash'];
     const or = keys.filter((k) => fp[k]).map((k) => ({ [`fingerprints.${k}`]: fp[k] }));
     if (!or.length) return [];
-    const others = await Invoice.find({ $or: or, _id: { $ne: invoice.id } }).select('_id').lean();
+    const others = await Invoice.find({ $or: or, _id: { $ne: invoice.id } })
+      .select('_id')
+      .lean();
     if (!others.length) return [];
     return Payment.find({ invoiceId: { $in: others.map((o) => o._id) }, status: { $in: ['queued', 'paid'] } }).lean();
+  },
+
+  // ----- what reviewers' corrections taught the reader, per supplier -----
+
+  // One hint per supplier and field; a newer correction replaces the older hint.
+  async saveSupplierHints(hints) {
+    for (const h of hints) {
+      await SupplierHint.updateOne({ vendorAbn: h.vendorAbn, field: h.field }, { $set: h }, { upsert: true });
+    }
+  },
+
+  async supplierHintsFor(text) {
+    return hintsForText(await SupplierHint.find().select('-_id -__v').lean(), text);
   },
 
   // ----- payment queue -----
@@ -186,21 +247,33 @@ export const sampleLedger = {
   // Safe to call twice: the unique index on invoiceId allows one entry per invoice.
   async queuePayment(payment) {
     try {
-      return (await Payment.create({ ...payment, status: 'queued' })).toObject();
+      const p = (await Payment.create({ ...payment, status: 'queued' })).toObject();
+      await auditPayment(p, null, { event: 'queued', by: payment.approvedBy });
+      return p;
     } catch (err) {
       if (err?.code !== 11000) throw err;
-      return Payment.findOneAndUpdate(
+      const before = await Payment.findOneAndUpdate(
         { invoiceId: payment.invoiceId, status: { $ne: 'paid' } },
         { $set: { status: 'queued', approvedBy: payment.approvedBy, amount: payment.amount } },
-        { new: true },
+        { new: false },
       ).lean();
+      if (!before) return null;
+      const p = { ...before, status: 'queued', approvedBy: payment.approvedBy, amount: payment.amount };
+      await auditPayment(p, before.status, { event: 'queued', by: payment.approvedBy });
+      return p;
     }
   },
 
   findPayments: (invoiceId) => Payment.find({ invoiceId }).lean(),
 
   // Only payments that have not gone out can be put on hold.
-  holdPayments: (invoiceId) => Payment.updateMany({ invoiceId, status: 'queued' }, { $set: { status: 'on_hold' } }),
+  async holdPayments(invoiceId) {
+    const held = await Payment.find({ invoiceId, status: 'queued' }).select('_id').lean();
+    for (const { _id } of held) {
+      const p = await Payment.findOneAndUpdate({ _id, status: 'queued' }, { $set: { status: 'on_hold' } }, { new: true }).lean();
+      if (p) await auditPayment(p, 'queued', { event: 'held', by: 'Agent', detail: 'A payment existed for an invoice that has not been approved.' });
+    }
+  },
 
   async listPayments() {
     return (await Payment.find().sort({ createdAt: 1 }).lean()).map(paymentSummary);
@@ -212,28 +285,53 @@ export const sampleLedger = {
   async markPaid(paymentId, bank) {
     const doc = await Payment.findOneAndUpdate(
       { _id: paymentId, status: 'queued' },
-      { $set: { status: 'paid', paidOn: bank.date ?? null, bank, recordedBy: 'Bank reconciliation' }, $push: { history: { at: new Date().toISOString(), event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } } },
+      {
+        $set: { status: 'paid', paidOn: bank.date ?? null, bank, recordedBy: 'Bank reconciliation' },
+        $push: { history: { at: new Date().toISOString(), event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
+      },
       { new: true },
     ).lean();
     if (!doc) return null;
-    await Invoice.updateOne(
+    await auditPayment(doc, 'queued', { event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line} of statement ${bank.statementId}.` });
+    const event = {
+      actor: 'Bank reconciliation',
+      action: 'payment_matched',
+      from: 'payment_pending',
+      to: 'payment_completed',
+      reason: `Bank line ${bank.line} (${bank.description}) matches the payment.`,
+    };
+    const moved = await Invoice.updateOne(
       { _id: doc.invoiceId, status: 'payment_pending' },
-      { $set: { status: 'payment_completed' }, $push: { events: { at: new Date().toISOString(), actor: 'Bank reconciliation', action: 'payment_matched', from: 'payment_pending', to: 'payment_completed', reason: `Bank line ${bank.line} (${bank.description}) matches the payment.` } } },
+      { $set: { status: 'payment_completed' }, $push: { events: { at: new Date().toISOString(), ...event } } },
     );
+    if (moved.modifiedCount) await audit({ subjectKind: 'invoice', subjectId: doc.invoiceId, ...event, reason: `Bank line ${bank.line} matches the payment.` });
     return paymentSummary(doc);
   },
 
   async unmarkPaid(paymentId, statementId) {
-    const doc = await Payment.findOneAndUpdate({ _id: paymentId, status: 'paid', 'bank.statementId': statementId }, { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } }, { new: true }).lean();
-    if (doc) await revertInvoice(doc.invoiceId);
+    const doc = await Payment.findOneAndUpdate(
+      { _id: paymentId, status: 'paid', 'bank.statementId': statementId },
+      { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } },
+      { new: true },
+    ).lean();
+    if (!doc) return;
+    await auditPayment(doc, 'paid', { event: 'unmatched', by: 'Bank reconciliation', detail: 'The bank match was undone.' });
+    await revertInvoice(doc.invoiceId);
   },
 
   // Undo everything one statement marked as paid.
   async revertStatement(statementId) {
-    const docs = await Payment.find({ status: 'paid', 'bank.statementId': statementId }).select('invoiceId').lean();
-    if (!docs.length) return;
-    await Payment.updateMany({ status: 'paid', 'bank.statementId': statementId }, { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } });
-    for (const d of docs) await revertInvoice(d.invoiceId);
+    const docs = await Payment.find({ status: 'paid', 'bank.statementId': statementId }).select('_id invoiceId').lean();
+    for (const d of docs) {
+      const p = await Payment.findOneAndUpdate(
+        { _id: d._id, status: 'paid', 'bank.statementId': statementId },
+        { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } },
+        { new: true },
+      ).lean();
+      if (!p) continue;
+      await auditPayment(p, 'paid', { event: 'unmatched', by: 'Bank reconciliation', detail: 'The statement could not be reconciled, so its matches were undone.' });
+      await revertInvoice(d.invoiceId);
+    }
   },
 
   // ----- outbox (replies to suppliers). Sample only: nothing is emailed. -----

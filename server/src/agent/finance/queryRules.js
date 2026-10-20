@@ -44,13 +44,21 @@ export const mentionsBankDetails = (text) => BANK_DETAILS.test(String(text ?? ''
 
 // Several invoices can share a number (a duplicate submission). Pick the one
 // that belongs to this supplier and is furthest along.
-const RANK = { payment_completed: 0, payment_pending: 1, approved: 2, under_review: 3, needs_review: 3, on_hold: 3, payment_failed: 4, rejected: 5, cancelled: 5, received: 6, processing: 6 };
+const RANK = {
+  payment_completed: 0,
+  payment_pending: 1,
+  approved: 2,
+  under_review: 3,
+  needs_review: 3,
+  on_hold: 3,
+  payment_failed: 4,
+  rejected: 5,
+  cancelled: 5,
+  received: 6,
+  processing: 6,
+};
 export function pickInvoice(candidates, vendorAbn) {
-  return (
-    (candidates || [])
-      .filter((c) => c.abn === vendorAbn && c.status !== 'failed')
-      .sort((a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9))[0] || null
-  );
+  return (candidates || []).filter((c) => c.abn === vendorAbn && c.status !== 'failed').sort((a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9))[0] || null;
 }
 
 // Statuses the agent may tell a supplier about on its own.
@@ -130,7 +138,9 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
     'request_type',
     'It is a payment status question',
     understood.intent === 'payment_status' ? 'pass' : 'fail',
-    understood.intent === 'payment_status' ? 'The supplier is asking about the status of a payment.' : `The email reads as ${INTENT_LABEL[understood.intent] || INTENT_LABEL.other}.`,
+    understood.intent === 'payment_status'
+      ? 'The supplier is asking about the status of a payment.'
+      : `The email reads as ${INTENT_LABEL[understood.intent] || INTENT_LABEL.other}.`,
   );
 
   const bank = mentionsBankDetails(text);
@@ -153,18 +163,19 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
 
   const named = understood.invoiceNumbers || [];
   if (named.length === 0) add('invoice_named', 'Email names the invoice', 'fail', 'The email does not give an invoice number.');
-  else if (named.length > 5) add('invoice_named', 'Email names the invoice', 'fail', `The email lists ${named.length} invoices, which is more than the 5 the agent answers at once.`);
+  else if (named.length > 5)
+    add('invoice_named', 'Email names the invoice', 'fail', `The email lists ${named.length} invoices, which is more than the 5 the agent answers at once.`);
   else add('invoice_named', 'Email names the invoice', 'pass', `Invoice${named.length === 1 ? '' : 's'} mentioned: ${named.join(', ')}.`);
 
   const missing = items.filter((i) => !i.invoice).map((i) => i.invoiceNumber);
   if (!vendor || named.length === 0) {
-    add('invoice_found', "Invoice is on file for this supplier", 'skip', 'Not checked because the sender or the invoice is not identified.');
+    add('invoice_found', 'Invoice is on file for this supplier', 'skip', 'Not checked because the sender or the invoice is not identified.');
     add('status_shareable', 'Status can be shared without review', 'skip', 'Not checked because the sender or the invoice is not identified.');
   } else if (missing.length) {
-    add('invoice_found', "Invoice is on file for this supplier", 'fail', `Not on file for ${vendor.name}: ${missing.join(', ')}.`);
+    add('invoice_found', 'Invoice is on file for this supplier', 'fail', `Not on file for ${vendor.name}: ${missing.join(', ')}.`);
     add('status_shareable', 'Status can be shared without review', 'skip', 'Not checked because an invoice was not found.');
   } else {
-    add('invoice_found', "Invoice is on file for this supplier", 'pass', `Found ${items.length === 1 ? 'the invoice' : `all ${items.length} invoices`} for ${vendor.name}.`);
+    add('invoice_found', 'Invoice is on file for this supplier', 'pass', `Found ${items.length === 1 ? 'the invoice' : `all ${items.length} invoices`} for ${vendor.name}.`);
     const blocked = items.filter((i) => !shareable(i.invoice));
     add(
       'status_shareable',
@@ -172,7 +183,10 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
       blocked.length ? 'fail' : 'pass',
       blocked.length
         ? blocked
-            .map((i) => `${i.invoiceNumber} is ${i.invoice.status === 'rejected' ? 'rejected' : i.invoice.payment?.status === 'on_hold' ? 'approved but its payment is on hold' : 'not in a state the agent can report'}, so a person should reply.`)
+            .map(
+              (i) =>
+                `${i.invoiceNumber} is ${i.invoice.status === 'rejected' ? 'rejected' : i.invoice.payment?.status === 'on_hold' ? 'approved but its payment is on hold' : 'not in a state the agent can report'}, so a person should reply.`,
+            )
             .join(' ')
         : 'Every invoice is either approved, paid or under review.',
     );

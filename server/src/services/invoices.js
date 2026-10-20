@@ -4,7 +4,7 @@
 
 import { runAgent } from '../agent/core/loop.js';
 import { createInvoiceAgent } from '../agent/finance/invoiceAgent.js';
-import { createExtractor } from '../agent/finance/extract.js';
+import { createExtractor, createVisionReader } from '../agent/finance/extract.js';
 import { createAbrLookup } from '../agent/finance/abr.js';
 import { receivedOnly, normaliseAbn } from '../agent/finance/rules.js';
 import { allowedActions, ActionError, AWAITING_DECISION } from '../agent/finance/lifecycle.js';
@@ -12,10 +12,11 @@ import { payablesSummary, todayIso } from '../agent/finance/due.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { Invoice, AgentRun, Payment, PurchaseOrder } from '../models/index.js';
 import { config } from '../config.js';
-import { HttpError } from './runs.js';
+import { HttpError, recordAudit } from './runs.js';
 import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 
 export const extractor = createExtractor(config);
+export const visionReader = createVisionReader(config);
 export const abrLookup = createAbrLookup(config);
 
 const agent = createInvoiceAgent({
@@ -27,22 +28,26 @@ const agent = createInvoiceAgent({
   today: () => todayIso(),
 });
 
-export async function processInvoice(invoice) {
+// `reading`: a scan or photo the vision reader has already read (see uploads.js).
+export async function processInvoice(invoice, { reading = null } = {}) {
   const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [] });
 
-  const result = await runAgent(agent, { invoice }, {
-    onStep: async (_step, steps) => {
-      run.steps = [...steps];
-      await run.save();
+  const result = await runAgent(
+    agent,
+    { invoice, reading },
+    {
+      onStep: async (_step, steps) => {
+        run.steps = [...steps];
+        await run.save();
+      },
     },
-  });
+  );
 
   // If even the escalate stage failed, make sure the invoice is not left looking fine.
   if (!result.outcome) {
-    await Invoice.updateOne(
-      { _id: invoice._id },
-      { $set: { status: 'failed', decision: { outcome: 'failed', reasons: [`The agent could not finish: ${result.error?.message || 'unknown error'}`] } } },
-    );
+    const reason = `The agent could not finish: ${result.error?.message || 'unknown error'}`;
+    await Invoice.updateOne({ _id: invoice._id }, { $set: { status: 'failed', decision: { outcome: 'failed', reasons: [reason] } } });
+    await recordAudit({ subjectKind: 'invoice', subjectId: invoice._id, actor: 'Agent', action: 'failed', from: invoice.status, to: 'failed', reason });
   }
 
   run.status = result.outcome || 'failed';
@@ -76,7 +81,11 @@ export async function getInvoiceDetail(id) {
   let linkablePos = [];
   if (AWAITING_DECISION.includes(invoice.status)) {
     const filter = invoice.supplier?.abn ? { vendorAbn: normaliseAbn(invoice.supplier.abn) } : {};
-    linkablePos = (await PurchaseOrder.find(filter).select('poNumber vendorName raisedOn').sort({ poNumber: 1 }).lean()).map((p) => ({ poNumber: p.poNumber, vendorName: p.vendorName, raisedOn: p.raisedOn }));
+    linkablePos = (await PurchaseOrder.find(filter).select('poNumber vendorName raisedOn').sort({ poNumber: 1 }).lean()).map((p) => ({
+      poNumber: p.poNumber,
+      vendorName: p.vendorName,
+      raisedOn: p.raisedOn,
+    }));
   }
   return { invoice, run, payment, po, receivedOnly: partial, actions: allowedActions(invoice, ctx), linkablePos, paymentMethods: PAYMENT_METHODS };
 }

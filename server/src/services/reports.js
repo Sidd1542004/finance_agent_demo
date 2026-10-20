@@ -4,7 +4,7 @@ import { createReportAgent, createWriter } from '../agent/finance/reportAgent.js
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { Report } from '../models/index.js';
 import { config } from '../config.js';
-import { HttpError, runAndRecord, latestRun, failedDecision } from './runs.js';
+import { HttpError, runAndRecord, latestRun, failedDecision, auditFailed } from './runs.js';
 
 const agent = createReportAgent({
   ledger: sampleLedger,
@@ -15,7 +15,11 @@ const agent = createReportAgent({
 export async function writeReport(month) {
   const report = await Report.create({ month });
   const result = await runAndRecord(agent, { report }, { kind: 'report', id: report._id });
-  if (!result.outcome) await Report.updateOne({ _id: report._id }, { $set: { status: 'failed', decision: failedDecision(result) } });
+  if (!result.outcome) {
+    const from = report.status;
+    await Report.updateOne({ _id: report._id }, { $set: { status: 'failed', decision: failedDecision(result) } });
+    await auditFailed('report', report._id, from, result);
+  }
   return getReportDetail(report._id);
 }
 

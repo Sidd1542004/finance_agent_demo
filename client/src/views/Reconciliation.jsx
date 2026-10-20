@@ -11,7 +11,10 @@ export default function ReconciliationView({ onError }) {
   const [sample, setSample] = useState(null);
 
   useEffect(() => {
-    api.statementSample().then(setSample).catch((err) => onError(err.message));
+    api
+      .statementSample()
+      .then(setSample)
+      .catch((err) => onError(err.message));
   }, [onError]);
 
   const process = (call) =>
@@ -52,7 +55,14 @@ export default function ReconciliationView({ onError }) {
         />
         <section className="card">
           <h2>Statements</h2>
-          <RecordList rows={rows} selectedId={records.selectedId} onSelect={records.select} empty="No statements yet. Reconcile the sample above. It refers to the demo month, so load that first." />
+          <RecordList
+            rows={rows}
+            selectedId={records.selectedId}
+            onSelect={records.select}
+            onMore={records.nextCursor ? records.loadMore : null}
+            loadingMore={records.loadingMore}
+            empty="No statements yet. Reconcile the sample above. It refers to the demo month, so load that first."
+          />
         </section>
       </aside>
 
@@ -72,8 +82,8 @@ export default function ReconciliationView({ onError }) {
               <>
                 <h1>Give the agent a bank statement</h1>
                 <p>
-                  The agent matches each payment on the statement to an invoice that was approved, and marks those invoices as paid. Double
-                  payments, payments nobody approved and lines it cannot place go to a person.
+                  The agent matches each payment on the statement to an invoice that was approved, and marks those invoices as paid. Double payments, payments nobody approved and
+                  lines it cannot place go to a person.
                 </p>
               </>
             ) : (
@@ -125,7 +135,13 @@ function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
           <label className="field-label" htmlFor="st-paste">
             Statement as CSV, with a header row
           </label>
-          <textarea id="st-paste" rows={7} value={text} onChange={(e) => setText(e.target.value)} placeholder={'Date,Description,Amount\n02/10/2026,SUPPLIER NAME INV-123,-1402.50'} />
+          <textarea
+            id="st-paste"
+            rows={7}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={'Date,Description,Amount\n02/10/2026,SUPPLIER NAME INV-123,-1402.50'}
+          />
           <button
             className="btn btn-primary btn-block"
             disabled={disabled || !text.trim()}
@@ -306,7 +322,11 @@ function BankLine({ line, who, canDecide, busy, onResolve }) {
             <input id={`note-${line.n}`} type="text" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
           {candidate && (
-            <button className="btn btn-primary" disabled={working || !who.trim() || (needsNote && !note.trim())} onClick={() => onResolve(line.n, { action: 'confirm', decidedBy: who, note })}>
+            <button
+              className="btn btn-primary"
+              disabled={working || !who.trim() || (needsNote && !note.trim())}
+              onClick={() => onResolve(line.n, { action: 'confirm', decidedBy: who, note })}
+            >
               Match to {candidate.invoiceNumber}
             </button>
           )}

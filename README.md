@@ -36,7 +36,7 @@ npm run dev
 Open http://localhost:5173. The sample suppliers, purchase orders and deliveries load
 themselves the first time the server starts.
 
-Other commands: `npm test` (106 tests, no database or network needed), `npm run seed`
+Other commands: `npm test` (the server tests; no database, network or keys needed), `npm run format` / `npm run format:check` (Prettier). GitHub Actions (`.github/workflows/ci.yml`) runs the tests, the client build and the format check on every push and pull request., `npm run seed`
 (wipe and reload the sample data), `npm run build` then `npm start` (serve the dashboard
 and the API together on port 4000).
 
@@ -46,6 +46,93 @@ If `GROQ_API_KEY` is empty the app still runs. Invoices are read by a basic patt
 that only understands the sample layout, supplier emails by a keyword reader, bank lines
 get no AI notes, and the report summary uses standard wording. The top bar shows whether
 AI is on.
+
+## Deploy to Vercel
+
+The dashboard and the API deploy together as **one** Vercel project: the dashboard as
+static files from `client/dist`, the API as one serverless function (`api/index.js`, which
+runs the same Express app as `npm start`). `vercel.json` holds the build settings.
+
+1. **MongoDB Atlas.** In Network Access, allow `0.0.0.0/0`. Vercel functions have no fixed
+   IP address, so a narrower list will refuse them. Keep the database user's password strong.
+2. **Import the repository** in Vercel (Add New > Project). Leave the Root Directory as it
+   is (the repository root) and set Framework Preset to **Other**. Do not override the build,
+   output or install commands: they come from `vercel.json`.
+3. **Environment variables** (Project Settings > Environment Variables):
+
+   | Variable | |
+   | --- | --- |
+   | `MONGODB_URI` | Required. The Atlas connection string, including the database name. |
+   | `GROQ_API_KEY` | Optional. Without it the app uses the basic readers. |
+   | `GROQ_MODEL` | Optional. Defaults to `llama-3.3-70b-versatile`. |
+   | `GROQ_VISION_MODEL` | Optional. Defaults to `qwen/qwen3.8-27b`. Reads scans and photos. |
+   | `TIME_ZONE` | Optional. Defaults to `Australia/Sydney`. Report months, "today", due dates and overdue follow it (Vercel's clock is UTC). |
+   | `DEMO_MODE` | `true` shows Load demo month and Reset (they wipe the data). Unset or anything else: off. |
+   | `ACCESS_PASSWORD` | Recommended for a public demo. Every page and API call asks for it (any user name). |
+   | `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` | Optional. Default: 30 requests that run the agent per 10 minutes per IP address. |
+   | `COMPANY_NAME`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`, policy values | Optional, as in `server/.env.example`. |
+   | `ALERT_EMAILS`, `APP_URL`, `CRON_SECRET`, `RESEND_API_KEY` or `SMTP_*`, `ALERT_FROM` | Optional: the daily summary email (below). |
+   | `CORS_ORIGINS` | Leave unset: the dashboard and API are on the same site. |
+
+   Do **not** set `PORT` (Vercel chooses it) or `DNS_SERVERS` (a Windows-only workaround).
+   `VITE_API_BASE_URL` is not needed either: the dashboard calls `/api` on its own site.
+4. **Deploy**, then open `https://<your-project>.vercel.app/api/health`. It should answer
+   `"database": "connected"`. A 503 saying the database cannot be reached means
+   `MONGODB_URI` is wrong or Atlas Network Access is refusing Vercel. The function log
+   shows the reason, with the host only (never the user name or password).
+
+Protecting a public demo:
+
+- **Shared password.** With `ACCESS_PASSWORD` set, the browser asks for a password (any user
+  name) before showing anything. On Vercel, `middleware.js` checks it for the dashboard's
+  static files; the Express app checks it for the API (and for everything when run locally).
+  The password is compared in constant time. It is one shared password, not user accounts.
+- **Vercel Deployment Protection** (Project Settings > Deployment Protection) can protect
+  preview deployments, or every deployment, behind a Vercel login as well.
+- **Demo buttons.** Load demo month and Reset only work when `DEMO_MODE=true`; the server
+  refuses them otherwise, whatever the dashboard shows.
+- **Rate limits.** Requests that call Groq or process a file (adding or re-processing an
+  invoice, supplier email or bank statement, a person's action that re-runs the agent,
+  writing a report, loading the demo month) are limited per IP address: 30 per 10 minutes
+  by default (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MINUTES`). The count is kept in memory,
+  so **on Vercel each function instance counts separately**: treat it as a brake on runaway
+  use, not an exact quota. Reading the dashboard is not limited.
+
+Daily summary email (optional):
+
+- Once a day the agent can email what needs a person: overdue invoices and those due in
+  the next 7 days, new exceptions from the last 24 hours (Needs Review, On Hold, Payment
+  Failed, could not process), supplier emails waiting for a reply, and bank lines needing a
+  decision, each with a link to the dashboard (`APP_URL`). It names invoices, suppliers,
+  amounts and dates only: never a key, a bank account number or a bank line's description.
+- Set `ALERT_EMAILS` (comma-separated), `APP_URL`, `CRON_SECRET` (a long random string),
+  and either `RESEND_API_KEY` (with `ALERT_FROM` on a domain verified in Resend) or
+  `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`. Without an email
+  service or recipients, nothing is sent.
+- `vercel.json` schedules `GET /api/cron/daily-summary` at 03:00 UTC every day (1 or 2 pm
+  in Sydney). Vercel sends `Authorization: Bearer <CRON_SECRET>` itself; any other caller
+  without it gets 401. **The Vercel Hobby plan allows daily cron jobs only** (and may run
+  them at any time within the hour).
+- To check the email without sending it:
+  `curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-project>.vercel.app/api/cron/daily-summary?preview=1"`.
+
+Limits to know:
+
+- **Uploads are limited to 4 MB.** Vercel refuses request bodies over 4.5 MB before they
+  reach the app.
+- **Each request has 60 seconds** (`maxDuration` in `vercel.json`). Processing one invoice
+  with Groq normally takes a few seconds; loading the demo month takes longer. When Groq
+  is busy (429), briefly down (5xx), unreachable or slow, a call is tried up to twice more,
+  waiting as long as Groq's `Retry-After` asks (at most 8 seconds); all attempts fit in
+  45 seconds. A bad request or a rejected key is not retried.
+- **Cold starts.** The first request after a quiet spell starts a new function instance and
+  opens the database connection, so it can take a few seconds. Later requests reuse the
+  connection.
+
+To run it the way Vercel does, on one port: `npm run build --prefix client`, then
+`node scripts/vercel-local.js` (port 3000). `node scripts/smoke.js <url>` runs the demo
+month, a PDF upload, a bank statement and the month-end report against any deployment.
+It resets the data, so only use it on a demo.
 
 ## Demo script
 
@@ -209,8 +296,27 @@ date, optional reference), record payment (reference required; a part payment ke
 Payment Pending), mark payment failed, reverse approval (cancels a scheduled payment; the
 original approval is kept), cancel, start and close a recovery for a paid invoice.
 
+**Edit fields** (reviewer, note required; from Under Review, Needs Review, On Hold or Could
+not process) corrects what the reader got wrong: supplier, ABN, GSTIN, invoice number,
+dates, PO number, currency, subtotal, GST, total and the line items. Values are checked
+(ISO dates, finite numbers, an 11-digit ABN) before anything changes. Each correction is
+kept on the invoice (`corrections`: field, from, to, by, note, time) and laid over whatever
+the reader reads every time the agent runs, so it survives processing again. A corrected
+field counts as confirmed by a person, so the reading-confidence check says "corrected by
+..." instead of failing on it; every other check (ABN checksum, sums, PO matching,
+duplicates, approval blockers) runs on the corrected values. Correcting a field never
+approves anything.
+
+When the supplier is identified, the agent also keeps a short **hint** per supplier and
+field (the label printed next to the value, and an example of the right format, never the
+invoice itself) and gives it to the AI reader for that supplier's later invoices. A hint
+never stands in for the invoice: every value must still appear in the invoice's text.
+
 Every status change is written to the invoice's history with who, from, to, reason and
-time. Changes are compare-and-set on the status, and the payment collection has one
+time, and to the **audit log** (`AuditEvent`): one entry per status change of an invoice,
+payment, supplier email, bank line or report, with subject, actor, action, from, to, reason,
+detail and time. The log is append only: the model refuses updates and deletes, no route
+changes it, and Reset and Load demo month keep it (they add an entry saying so). Changes are compare-and-set on the status, and the payment collection has one
 payment per invoice (unique index), so two people clicking at once cannot both succeed.
 
 Optional controls in `server/.env`: `REVIEWERS`, `APPROVERS`, `PAYERS` (comma-separated
@@ -227,6 +333,9 @@ Names are typed, not logged in, so these are guard rails, not security.
 | `POST /api/invoices/:id/approval` | Kept: `approve`, `approve_received`, `reject`. |
 | `POST /api/invoices/:id/rerun` | Kept: re-checks through the `rerun` action. |
 | `GET /api/health` | Adds `abr` and which roles are configured; `policy` now has `matchThreshold`, `missingAbn`, `segregateDuties`. |
+| `GET /api/invoices`, `/api/queries`, `/api/statements`, `/api/reports` | One page at a time, newest first: `?before=<nextCursor>&limit=<n>` (default 50, at most 200). Answers `{ items, nextCursor }`; `nextCursor` is null on the last page. Invoices also take `?filter=waiting|pay` and return `counts` (tabs and KPIs) over every invoice. |
+| `GET /api/audit?subjectId=<id>` | The append-only audit log for one invoice, payment, supplier email, report, or bank line (`<statement id>:<line number>`), oldest first. Without `subjectId`, the latest entries. |
+| `GET /api/cron/daily-summary` | The daily summary email; needs `Authorization: Bearer <CRON_SECRET>`. `?preview=1` returns it without sending. |
 
 `AUTO_APPROVE_LIMIT` is gone; the new settings are `MATCH_THRESHOLD`,
 `MISSING_ABN_POLICY`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`,
@@ -254,13 +363,20 @@ To connect real systems, write a file with the same functions as
 - **No mailbox.** Emails are pasted in. A real connection must also check that the sender
   address was not forged (SPF, DKIM), which this prototype cannot do.
 - **No bank feed.** Statements are CSV files with date, description and amount columns.
-- **No scanned invoices.** PDFs must contain text. Scans and photos need OCR.
+- **Scans and photos need the Groq key.** With `GROQ_API_KEY` set, a JPG or PNG (up to
+  4 MB), or a PDF with no text layer (its first 2 pages, rendered with unpdf and
+  `@napi-rs/canvas`), is read by a Groq vision model (`GROQ_VISION_MODEL`). The model
+  returns a transcription and the fields; the fields are checked against that
+  transcription, which is kept as the invoice text. Because the same model wrote both,
+  every invoice read from an image gets the check "Read from an image: confirm the key
+  fields" and always goes to Needs Review. Without a key, scans and photos are refused
+  with a clear message, as before.
 - **No follow-up for the unpaid remainder.** After a received-quantity-only approval, the
   rest of the invoice is not tracked or paid later. One bank line pays one invoice. Two
   invoices that each bill half an order are not added together.
 - **Supplier payments only.** Money in, payroll, tax and fees are not reconciled.
 - **The report is an accounts payable summary,** not a month-end close. There is no general
-  ledger, accruals or journals behind it. Months follow the server's time zone.
+  ledger, accruals or journals behind it. Months follow `TIME_ZONE` (Australia/Sydney by default).
 - **Policy values are placeholders.** The 85% threshold, score weights, 2% price tolerance
   and 80% confidence floor are sample numbers; agree them with the finance team.
 - **Payments are simulated.** Scheduling and recording a payment only writes records. No

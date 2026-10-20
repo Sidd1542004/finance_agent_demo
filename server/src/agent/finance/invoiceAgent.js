@@ -15,10 +15,11 @@
 
 import { requestEscalation } from '../core/loop.js';
 import { validateInvoice, identifyVendor, fmtMoney } from './validation.js';
-import { matchToPo, suggestPurchaseOrders } from './matching.js';
+import { matchToPo, suggestPurchaseOrders, resolvePurchaseOrder } from './matching.js';
 import { fingerprints, duplicateCheck } from './duplicates.js';
 import { statusFromChecks, STATUS_LABEL } from './lifecycle.js';
 import { dueInfo } from './due.js';
+import { applyCorrections } from './extract.js';
 
 const SOURCE = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' };
 
@@ -58,19 +59,33 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         return { summary: `Invoice received ${SOURCE[invoice.source?.kind] || ''}${file}: ${text.length.toLocaleString('en-AU')} characters of text.` };
       },
 
-      // 2. Understand: read the fields.
+      // 2. Understand: read the fields. Reviewers' hints for this supplier help
+      // the reader find them; reviewers' corrections are laid over the result.
       async understand(state) {
         const { invoice } = state.input;
-        const { extracted, extraction } = await extract(invoice.rawText);
+        const hints = ledger.supplierHintsFor ? await ledger.supplierHintsFor(invoice.rawText) : [];
+        // A scan or photo arrives already read by the vision reader; processing it
+        // again reads its transcription (the invoice text) with the text reader.
+        const reading = state.input.reading || (await extract(invoice.rawText, { hints }));
+        const { extracted, extraction } = applyCorrections(reading, invoice.corrections, invoice.rawText);
         invoice.extracted = extracted;
         invoice.extraction = extraction;
         invoice.fingerprints = fingerprints(extracted, invoice.rawText);
         invoice.dupKey = invoice.fingerprints.numberKey;
         invoice.due = dueInfo(extracted, today?.());
         await save(invoice);
-        const reader = extraction.method === 'groq' ? `AI reader (${extraction.model})` : 'basic pattern reader';
+        const reader =
+          extraction.method === 'groq-vision'
+            ? `AI vision reader (${extraction.model}), from an image`
+            : extraction.method === 'groq'
+              ? `AI reader (${extraction.model})`
+              : 'basic pattern reader';
+        const helped = extraction.hints?.count
+          ? ` Given ${extraction.hints.count} reviewer hint${extraction.hints.count === 1 ? '' : 's'} for ${extraction.hints.supplier || 'this supplier'}; every value was still checked against the invoice text.`
+          : '';
+        const corrected = extraction.corrected?.length ? ` ${extraction.corrected.length} field${extraction.corrected.length === 1 ? '' : 's'} corrected by a reviewer.` : '';
         return {
-          summary: `Read invoice ${extracted.invoiceNumber || '(no number)'} from ${extracted.vendorName || 'an unknown supplier'}: ${extracted.lines.length} line item(s), total ${fmtMoney(extracted.total, extracted.currency || 'AUD')}. Read by the ${reader}.`,
+          summary: `Read invoice ${extracted.invoiceNumber || '(no number)'} from ${extracted.vendorName || 'an unknown supplier'}: ${(extracted.lines || []).length} line item(s), total ${fmtMoney(extracted.total, extracted.currency || 'AUD')}. Read by the ${reader}.${helped}${corrected}`,
           detail: { confidence: extraction.confidence, notes: extraction.notes },
         };
       },
@@ -81,11 +96,20 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         const e = invoice.extracted;
 
         // Supplier, and an optional register lookup for a well-formed ABN.
-        const { vendor, by } = identifyVendor(e, await ledger.listVendors());
+        const { vendor, by, conflict } = identifyVendor(e, await ledger.listVendors());
         let abrResult = null;
         if (abr && e.abn) abrResult = await abr(e.abn);
 
-        const validation = validateInvoice({ extracted: e, extraction: invoice.extraction, text: invoice.rawText, vendor, vendorBy: by, abr: abrResult, policy });
+        const validation = validateInvoice({
+          extracted: e,
+          extraction: invoice.extraction,
+          text: invoice.rawText,
+          vendor,
+          vendorBy: by,
+          vendorConflict: conflict,
+          abr: abrResult,
+          policy,
+        });
 
         // Duplicates first: a suspected earlier copy must not also count as
         // having used up the purchase order.
@@ -94,30 +118,64 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
 
         const skip = invoice.duplicateCleared ? [] : dup.candidates.filter((c) => !['rejected', 'cancelled', 'failed'].includes(c.status)).map((c) => c.id);
 
-        // Purchase order: one a person linked wins; otherwise the one the invoice quotes.
-        const poNumber = invoice.poOverride?.poNumber || e.poNumber;
-        const po = poNumber ? await ledger.findPurchaseOrder(poNumber) : null;
+        // Purchase order: one a person linked wins, exactly as chosen; otherwise
+        // the one the invoice quotes, resolved by its number ("0011" is PO-0011
+        // only if no other PO has that number). The printed reference is kept as is.
+        const purchaseOrders = await ledger.listPurchaseOrders();
+        const resolution = invoice.poOverride
+          ? { po: await ledger.findPurchaseOrder(invoice.poOverride.poNumber), how: 'linked', candidates: [] }
+          : resolvePurchaseOrder(e.poNumber, purchaseOrders);
+        const po = resolution.po;
         const received = po ? await ledger.receivedQuantities(po.poNumber) : null;
         const invoicedBefore = po ? await ledger.invoicedQuantities({ poNumber: po.poNumber, excludeId: invoice.id, before: invoice.createdAt, skip }) : {};
         const taxCheck = validation.checks.find((c) => c.id === 'tax_charged');
-        const arithmeticOk = validation.checks.find((c) => c.id === 'arithmetic')?.status === 'pass';
-        const match = matchToPo({ extracted: e, vendor, po, received, invoicedBefore, taxStatus: taxCheck?.status || 'unverified', arithmeticOk, policy });
+        const arithmeticStatus = validation.checks.find((c) => c.id === 'arithmetic')?.status;
+        const arithmeticOk = arithmeticStatus === 'pass';
+        const match = matchToPo({ extracted: e, vendor, po, received, invoicedBefore, taxStatus: taxCheck?.status || 'unverified', arithmeticOk, arithmeticStatus, policy });
+        const poCheck = match.checks.find((c) => c.id === 'po_found');
+        if (resolution.how === 'normalised') {
+          poCheck.detail += ` The invoice prints "${e.poNumber}", which is ${po.poNumber} written differently.`;
+        }
+        if (resolution.how === 'ambiguous') {
+          poCheck.detail = `The invoice quotes "${e.poNumber}", which could be any of ${resolution.candidates.map((p) => `${p.poNumber} (${p.vendorName})`).join(', ')}. None was chosen: a person must link the right purchase order.`;
+        }
         if (!po) {
-          match.suggestions = suggestPurchaseOrders({ extracted: e, vendor, purchaseOrders: await ledger.listPurchaseOrders(), policy });
-          const poCheck = match.checks.find((c) => c.id === 'po_found');
+          match.suggestions = suggestPurchaseOrders({ extracted: e, vendor, vendorBy: by, purchaseOrders, policy });
+          const unowned = match.suggestions.some((s) => s.supplierOwnership !== 'confirmed_by_abn');
           poCheck.detail += match.suggestions.length
-            ? ` ${match.suggestions.length} possible purchase order${match.suggestions.length === 1 ? '' : 's'} found: ${match.suggestions.map((s) => `${s.poNumber} (${s.score}%)`).join(', ')}. A reviewer must confirm one; none is linked automatically.`
+            ? ` ${match.suggestions.length} possible purchase order${match.suggestions.length === 1 ? '' : 's'} found: ${match.suggestions.map((s) => `${s.poNumber} (${s.vendorName}, ${s.score}%)`).join(', ')}. These are suggestions, not confirmed matches. A reviewer must confirm one; none is linked automatically.${unowned ? " The invoice's supplier is not confirmed by ABN, so check each PO belongs to this supplier before linking it." : ''}`
             : ' No likely purchase order was found.';
         } else match.suggestions = [];
         if (invoice.poOverride) match.linkedBy = invoice.poOverride;
 
         const checks = [...validation.checks, dup, ...match.checks];
+        // Read from a scan or photo: the same model wrote the text and read the
+        // fields from it, so a person always confirms them. Never straight to Under Review.
+        const scan = invoice.source?.scan;
+        if (scan) {
+          checks.unshift({
+            id: 'read_from_image',
+            label: 'Read from an image: confirm the key fields',
+            status: 'fail',
+            severity: 'review',
+            detail: `This invoice was read from ${scan.from === 'pdf' ? `a scanned PDF (${scan.pages} page${scan.pages === 1 ? '' : 's'})` : 'an image'} by the AI vision reader${scan.model ? ` (${scan.model})` : ''}. Its text was transcribed by the same model that read the fields, so the check that values appear in the text is weaker than for a PDF with a text layer. Compare the supplier, ABN, invoice number, dates and amounts with the original file, and correct any that are wrong with Edit fields.`,
+          });
+        }
         invoice.validation = { jurisdiction: validation.jurisdiction, identifier: validation.identifier, registration: validation.registration };
-        invoice.match = { score: match.score, comparison: match.comparison, po: match.po, suggestions: match.suggestions, linkedBy: match.linkedBy || null, duplicates: dup.candidates };
+        invoice.match = {
+          score: match.score,
+          comparison: match.comparison,
+          po: match.po,
+          // How the printed reference was matched to a PO, for the audit trail.
+          poResolution: { reference: e.poNumber ?? null, how: resolution.how, poNumber: po?.poNumber ?? null, candidates: resolution.candidates.map((p) => p.poNumber) },
+          suggestions: match.suggestions,
+          linkedBy: match.linkedBy || null,
+          duplicates: dup.candidates,
+        };
         invoice.checks = checks.map(({ candidates: _c, ...c }) => c);
         invoice.lineMatches = match.lineMatches;
         invoice.matchedPo = po ? po.poNumber : null;
-        invoice.supplier = vendor ? { name: vendor.name, abn: vendor.abn, by } : null;
+        invoice.supplier = vendor ? { name: vendor.name, abn: vendor.abn, by } : conflict ? { name: null, by: null, conflict: { name: conflict.name, abn: conflict.abn } } : null;
         await save(invoice);
 
         state.target = statusFromChecks(invoice.checks);
@@ -166,8 +224,10 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
           }
           invoice.status = 'failed';
           invoice.decision = { outcome: 'failed', reasons: [`The agent stopped at the "${state.error.stage}" step: ${state.error.message}`] };
-          pushEvent(invoice, { actor: 'Agent', action: 'processed', from, to: 'failed', reason: state.error.message });
+          const event = { actor: 'Agent', action: 'processed', from, to: 'failed', reason: state.error.message };
+          pushEvent(invoice, event);
           await save(invoice);
+          await ledger.recordAudit?.({ subjectKind: 'invoice', subjectId: invoice.id, ...event });
           state.outcome = 'failed';
           return { summary: 'Flagged for a person because the agent could not finish.' };
         }
@@ -176,8 +236,16 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         const reasons = state.escalation?.reasons || [];
         invoice.status = to;
         invoice.decision = { outcome: to, reasons };
-        pushEvent(invoice, { actor: 'Agent', action: 'processed', from, to, reason: reasons.length ? `${reasons.length} exception(s)` : `Match score ${invoice.match?.score?.total}%` });
+        const event = {
+          actor: 'Agent',
+          action: 'processed',
+          from,
+          to,
+          reason: reasons.length ? `${reasons.length} exception(s)` : `Match score ${invoice.match?.score?.total}%`,
+        };
+        pushEvent(invoice, event);
         await save(invoice);
+        await ledger.recordAudit?.({ subjectKind: 'invoice', subjectId: invoice.id, ...event });
         state.outcome = to;
         if (to === 'under_review') {
           return { summary: 'Sent to the approval queue as eligible for approval. A person must approve it.' };

@@ -94,7 +94,12 @@ export function createReportAgent({ ledger, writer, save, now = () => new Date()
         }
         report.commentary = commentary;
         await save(report);
-        return { summary: commentary.method === 'groq' ? `Commentary written by the AI writer (${commentary.model}).` : `Commentary written with standard wording.${commentary.note ? ` ${commentary.note}` : ''}` };
+        return {
+          summary:
+            commentary.method === 'groq'
+              ? `Commentary written by the AI writer (${commentary.model}).`
+              : `Commentary written with standard wording.${commentary.note ? ` ${commentary.note}` : ''}`,
+        };
       },
 
       // 5. Verify: every number in the commentary must be one of the figures.
@@ -133,7 +138,10 @@ export function createReportAgent({ ledger, writer, save, now = () => new Date()
           report.decision = { outcome: 'open_items', reasons };
           await save(report);
           state.outcome = 'open_items';
-          return { summary: `The report is written, but ${reasons.length} item${reasons.length === 1 ? ' is' : 's are'} still open, so the month is not ready to close.`, detail: { reasons } };
+          return {
+            summary: `The report is written, but ${reasons.length} item${reasons.length === 1 ? ' is' : 's are'} still open, so the month is not ready to close.`,
+            detail: { reasons },
+          };
         }
 
         report.status = 'ready';

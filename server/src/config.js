@@ -1,6 +1,11 @@
 import 'dotenv/config';
+import { businessTimeZone } from './agent/finance/timeZone.js';
 
-const list = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+const list = (value) =>
+  String(value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 const num = (value, fallback) => {
   if (value === undefined || value === '') return fallback;
@@ -12,9 +17,15 @@ export const config = {
   port: num(process.env.PORT, 4000),
   mongoUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/finance_agent',
 
+  // Sites allowed to call the API from a browser (comma-separated). Only needed when the
+  // dashboard is served from a different site than the API. Empty: no CORS headers.
+  corsOrigins: list(process.env.CORS_ORIGINS),
+
   // Leave GROQ_API_KEY empty to use the basic pattern reader instead of AI.
   groqApiKey: (process.env.GROQ_API_KEY || '').trim(),
   groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  // A Groq model that accepts images, for scanned and photographed invoices.
+  groqVisionModel: process.env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b',
 
   // Optional override for Node's DNS resolver (see server/.env.example). Empty by default.
   dnsServers: (process.env.DNS_SERVERS || '')
@@ -22,11 +33,43 @@ export const config = {
     .map((s) => s.trim())
     .filter(Boolean),
 
+  // The business's time zone: "today", due dates, overdue and report months follow it.
+  timeZone: businessTimeZone(),
+
   // The business the agent works for. Used to sign replies to suppliers.
   companyName: process.env.COMPANY_NAME || 'Meridian Logistics Pty Ltd',
 
-  // Demo mode enables the "Load demo month" and "Reset" buttons. Turn it off for anything real.
-  demoMode: process.env.DEMO_MODE !== 'false',
+  // Demo mode enables the "Load demo month" and "Reset" buttons. Only when DEMO_MODE=true.
+  demoMode:
+    String(process.env.DEMO_MODE || '')
+      .trim()
+      .toLowerCase() === 'true',
+
+  // Optional daily summary email (GET /api/cron/daily-summary, called by a Vercel cron job).
+  alerts: {
+    recipients: list(process.env.ALERT_EMAILS),
+    from: process.env.ALERT_FROM || 'Finance Operations Agent <onboarding@resend.dev>',
+    appUrl: (process.env.APP_URL || '').trim(),
+    cronSecret: process.env.CRON_SECRET || '',
+    resendApiKey: (process.env.RESEND_API_KEY || '').trim(),
+    smtp: {
+      host: (process.env.SMTP_HOST || '').trim(),
+      port: num(process.env.SMTP_PORT, 587),
+      secure: process.env.SMTP_SECURE === 'true',
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+    },
+  },
+
+  // Optional shared password for the whole site (HTTP Basic auth, any user name).
+  accessPassword: process.env.ACCESS_PASSWORD || '',
+
+  // Requests that call Groq or process files, per client IP address, per server
+  // instance (on Vercel each warm instance counts separately).
+  rateLimit: {
+    windowMinutes: num(process.env.RATE_LIMIT_WINDOW_MINUTES, 10),
+    max: num(process.env.RATE_LIMIT_MAX, 30),
+  },
 
   // Optional Australian Business Register lookup. Free GUID: https://abr.business.gov.au/Tools/WebServices
   // Without it, ABNs are checked for a valid number only and shown as "not verified".

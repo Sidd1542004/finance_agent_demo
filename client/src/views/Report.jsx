@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api.js';
+import { api, API_BASE_URL } from '../api.js';
 import { money, day, when, REPORT_STATUS } from '../format.js';
 import { Rail, Reasons, RecordList, AuditTrail, useBusy, useRecords } from '../shared.jsx';
 
@@ -55,7 +55,14 @@ export default function ReportView({ onError }) {
         </section>
         <section className="card">
           <h2>Reports</h2>
-          <RecordList rows={rows} selectedId={records.selectedId} onSelect={records.select} empty="No reports yet." />
+          <RecordList
+            rows={rows}
+            selectedId={records.selectedId}
+            onSelect={records.select}
+            onMore={records.nextCursor ? records.loadMore : null}
+            loadingMore={records.loadingMore}
+            empty="No reports yet."
+          />
         </section>
       </aside>
 
@@ -68,8 +75,8 @@ export default function ReportView({ onError }) {
               <>
                 <h1>Ask the agent for a month-end report</h1>
                 <p>
-                  The agent adds up the month from the records: what came in, what it approved on its own, what people decided, what has been
-                  paid and what is still open. Code calculates every figure. AI only writes the summary paragraph.
+                  The agent adds up the month from the records: what came in, what it approved on its own, what people decided, what has been paid and what is still open. Code
+                  calculates every figure. AI only writes the summary paragraph.
                 </p>
               </>
             ) : (
@@ -127,39 +134,36 @@ function ReportDetail({ data, fresh }) {
         <section className="panel">
           <div className="panel-head">
             <h2>Summary</h2>
-            
-<button
-  className="btn btn-outline"
-  type="button"
-  onClick={async () => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL}/api/reports/${report._id}/csv`
-      );
 
-      if (!response.ok) {
-        throw new Error(`CSV download failed: ${response.status}`);
-      }
+            <button
+              className="btn btn-outline"
+              type="button"
+              onClick={async () => {
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/reports/${report._id}/csv`);
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
+                  if (!response.ok) {
+                    throw new Error(`CSV download failed: ${response.status}`);
+                  }
 
-      link.href = url;
-      link.download = 'month-end-report.csv';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('CSV download error:', error);
-      alert('CSV download failed. Please check the browser console.');
-    }
-  }}
->
-  Download figures (CSV)
-</button>
+                  const blob = await response.blob();
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
 
+                  link.href = url;
+                  link.download = 'month-end-report.csv';
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                  URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('CSV download error:', error);
+                  alert('CSV download failed. Please check the browser console.');
+                }
+              }}
+            >
+              Download figures (CSV)
+            </button>
           </div>
           <p className="commentary">{c.text}</p>
           <p className="hint">
@@ -184,6 +188,7 @@ function ReportDetail({ data, fresh }) {
               ['Rejected', f.invoices.rejected],
               ['Cancelled', f.invoices.cancelled ?? 0],
               ['Could not be processed', f.invoices.failed],
+              ['Possible duplicate copies (not counted again)', f.invoices.duplicateCopies ?? 0],
               ['Cleared with no exceptions, of those it could read', f.invoices.clearedPct === null || f.invoices.clearedPct === undefined ? '—' : `${f.invoices.clearedPct}%`],
             ]}
           />
@@ -213,9 +218,14 @@ function ReportDetail({ data, fresh }) {
               ['Lines matched to invoices', `${f.bank.linesMatched} (${money(f.bank.valueMatched)})`],
               ['Lines dismissed by a person', f.bank.linesDismissed],
               ['Lines needing a decision', f.bank.linesOpen],
+              ['Repeated lines from re-run statements (counted once)', f.bank.linesRepeated ?? 0],
             ]}
           />
-          <Figures title="Still to pay, by supplier" empty="Nothing is waiting to be paid." rows={f.outstandingBySupplier.map((s) => [`${s.vendorName}${s.earliestDue ? `, due ${day(s.earliestDue)}` : ''}`, money(s.value)])} />
+          <Figures
+            title="Still to pay, by supplier"
+            empty="Nothing is waiting to be paid."
+            rows={f.outstandingBySupplier.map((s) => [`${s.vendorName}${s.earliestDue ? `, due ${day(s.earliestDue)}` : ''}`, money(s.value)])}
+          />
           <Figures title="Why invoices needed a person" empty="No invoice needed a person." rows={f.heldReasons.map((r) => [r.label, r.count])} />
         </div>
       )}

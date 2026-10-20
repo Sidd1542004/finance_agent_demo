@@ -56,11 +56,7 @@ export default function App() {
         <div className="topbar-row">
           <span className="brand-name">Finance Operations Agent</span>
           <div className="topbar-right">
-            {health && (
-              <span className={`reader reader-${health.reader.mode}`}>
-                {health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}
-              </span>
-            )}
+            {health && <span className={`reader reader-${health.reader.mode}`}>{health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}</span>}
             {health?.demoMode && (
               <>
                 <button className="btn btn-on-navy" onClick={loadDemo} disabled={Boolean(busy)}>
@@ -100,7 +96,10 @@ export default function App() {
               <>
                 <h1>The server is not answering</h1>
                 <p>
-                  Start MongoDB, then run <code>npm run dev</code> in the project folder and reload this page.
+                  Locally: start MongoDB, then run <code>npm run dev</code> in the project folder and reload this page.
+                </p>
+                <p>
+                  On Vercel: open <code>/api/health</code>, and check the function logs, <code>MONGODB_URI</code> and MongoDB Atlas Network Access.
                 </p>
               </>
             ) : (

@@ -12,6 +12,8 @@ import { assertAction, ActionError, failedChecks, STATUS_LABEL } from '../agent/
 import { receivedOnly, cents, isNum } from '../agent/finance/rules.js';
 import { fmtMoney } from '../agent/finance/validation.js';
 import { todayIso } from '../agent/finance/due.js';
+import { correctionChanges, describeChange } from '../agent/finance/corrections.js';
+import { buildHints } from '../agent/finance/supplierHints.js';
 
 export const PAYMENT_METHODS = ['EFT', 'BPAY', 'Card', 'Cheque', 'Other'];
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -41,9 +43,26 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
       case 'approve':
       case 'approve_received': {
         const amount = actionId === 'approve_received' ? partial.total : invoice.extracted.total;
-        const approval = { decision: actionId, decidedBy: who, note, decidedAt: at, amount, invoiceTotal: invoice.extracted.total, exceptions, score: invoice.match?.score?.total ?? null };
-        await claim('approved', { approval }, { detail: `Approved ${m(amount)}${actionId === 'approve_received' ? ` of ${m(invoice.extracted.total)} (received quantity only)` : ''}${exceptions.length ? ` with ${exceptions.length} exception(s)` : ''}. No payment yet.` });
-        return { summary: `${actionId === 'approve_received' ? 'Approved for the received quantity only' : 'Approved'} by ${who}: ${m(amount)}.${note ? ` Note: ${note}` : ''} Payment not scheduled yet.` };
+        const approval = {
+          decision: actionId,
+          decidedBy: who,
+          note,
+          decidedAt: at,
+          amount,
+          invoiceTotal: invoice.extracted.total,
+          exceptions,
+          score: invoice.match?.score?.total ?? null,
+        };
+        await claim(
+          'approved',
+          { approval },
+          {
+            detail: `Approved ${m(amount)}${actionId === 'approve_received' ? ` of ${m(invoice.extracted.total)} (received quantity only)` : ''}${exceptions.length ? ` with ${exceptions.length} exception(s)` : ''}. No payment yet.`,
+          },
+        );
+        return {
+          summary: `${actionId === 'approve_received' ? 'Approved for the received quantity only' : 'Approved'} by ${who}: ${m(amount)}.${note ? ` Note: ${note}` : ''} Payment not scheduled yet.`,
+        };
       }
 
       case 'reject':
@@ -59,7 +78,9 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
         return { summary: `Corrected invoice requested by ${who}: ${note}` };
 
       case 'link_po': {
-        const poNumber = String(input.poNumber || '').trim().toUpperCase();
+        const poNumber = String(input.poNumber || '')
+          .trim()
+          .toUpperCase();
         if (!poNumber) throw new ActionError(400, 'Choose the purchase order to link.');
         const po = await store.findPurchaseOrder(poNumber);
         if (!po) throw new ActionError(400, `Purchase order ${poNumber} does not exist.`);
@@ -78,18 +99,51 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
         await rerun(invoice.id);
         return { summary: `Processed again at ${who}'s request.` };
 
+      case 'edit_fields': {
+        // Checked before anything changes: types, formats, and that something actually changes.
+        const changes = correctionChanges(invoice.extracted, input.fields);
+        const made = changes.map((c) => ({ ...c, by: who, note, at }));
+        const described = changes.map(describeChange).join('; ');
+        await claim('processing', { corrections: [...(invoice.corrections || []), ...made] }, { detail: `Corrected ${described}. Re-checked by the agent.`, changes });
+        await rerun(invoice.id);
+        // What the agent learns: where this supplier prints these fields, for its later invoices.
+        const after = await store.getInvoice(invoice.id);
+        if (store.saveSupplierHints && after?.supplier?.abn) {
+          const hints = buildHints({ supplier: after.supplier, corrections: made, text: invoice.rawText, by: who, at });
+          if (hints.length) await store.saveSupplierHints(hints);
+        }
+        return { summary: `Fields corrected by ${who}: ${described}. Note: ${note}. The agent re-checked the invoice on the corrected values.` };
+      }
+
       case 'schedule_payment': {
         const method = PAYMENT_METHODS.includes(input.method) ? input.method : 'EFT';
         const scheduledFor = ISO.test(input.scheduledFor || '') ? input.scheduledFor : invoice.due?.date || todayIso(now());
         const dupes = await store.duplicatePayments(invoice);
-        if (dupes.length) throw new ActionError(409, `A payment already exists for what looks like the same invoice (${dupes[0].invoiceNumber || 'no number'}, ${m(dupes[0].amount)}). It will not be paid twice.`);
+        if (dupes.length)
+          throw new ActionError(
+            409,
+            `A payment already exists for what looks like the same invoice (${dupes[0].invoiceNumber || 'no number'}, ${m(dupes[0].amount)}). It will not be paid twice.`,
+          );
         const amount = isNum(invoice.approval?.amount) ? invoice.approval.amount : invoice.extracted.total;
         await claim('payment_pending', {}, { detail: `${m(amount)} by ${method}, scheduled for ${scheduledFor}. Simulated: no money moves.` });
         try {
-          if (payment && from === 'payment_failed') {
-            const retried = await store.updatePayment(payment.id, ['failed'], { status: 'queued', method, scheduledFor, scheduledBy: who, attempts: (payment.attempts || 1) + 1, failure: null }, { event: 'retried', by: who });
+          // A payment record for this invoice already exists (a failed attempt,
+          // or one cancelled when the invoice was reopened for review): reactivate
+          // it rather than creating a second one, which the unique index on
+          // invoiceId would refuse anyway.
+          if (payment && ['failed', 'cancelled', 'on_hold'].includes(payment.status)) {
+            const retried = await store.updatePayment(
+              payment.id,
+              [payment.status],
+              { status: 'queued', method, scheduledFor, scheduledBy: who, attempts: (payment.attempts || 1) + 1, failure: null },
+              {
+                event: 'rescheduled',
+                by: who,
+                detail: payment.status === 'failed' ? 'Retried after a failed payment.' : 'Rescheduled after the invoice was reopened and decided again.',
+              },
+            );
             if (!retried) throw Object.assign(new Error('changed'), { code: 'CHANGED' });
-          } else {
+          } else if (!payment) {
             await store.createPayment({
               invoiceId: invoice.id,
               vendorName: invoice.supplier?.name || invoice.extracted.vendorName,
@@ -100,14 +154,26 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
               dueDate: invoice.due?.date || invoice.extracted.dueDate || null,
               approvedBy: invoice.approval?.decidedBy || null,
               method,
-              reference: String(input.reference || '').trim().slice(0, 80) || null,
+              reference:
+                String(input.reference || '')
+                  .trim()
+                  .slice(0, 80) || null,
               scheduledFor,
               scheduledBy: who,
               simulated: true,
             });
+          } else {
+            // payment.status is 'queued' or 'paid': something else scheduled or
+            // paid it at the same moment. Never a second payment for one invoice.
+            throw Object.assign(new Error('duplicate key'), { code: 11000 });
           }
         } catch (err) {
-          await store.claimInvoice(invoice.id, 'payment_pending', { status: from }, { actor: 'System', action: 'undo', from: 'payment_pending', to: from, reason: 'The payment could not be created, so scheduling was undone.' });
+          await store.claimInvoice(
+            invoice.id,
+            'payment_pending',
+            { status: from },
+            { actor: 'System', action: 'undo', from: 'payment_pending', to: from, reason: 'The payment could not be created, so scheduling was undone.' },
+          );
           if (err?.code === 11000 || err?.code === 'CHANGED') throw new ActionError(409, 'A payment for this invoice already exists. It will not be created twice.');
           throw err;
         }
@@ -115,7 +181,9 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
       }
 
       case 'record_payment': {
-        const reference = String(input.reference || '').trim().slice(0, 80);
+        const reference = String(input.reference || '')
+          .trim()
+          .slice(0, 80);
         if (!reference) throw new ActionError(400, 'Enter the payment reference as evidence of the payment.');
         const paidOn = ISO.test(input.paidOn || '') ? input.paidOn : todayIso(now());
         const method = PAYMENT_METHODS.includes(input.method) ? input.method : payment.method || 'EFT';
@@ -126,15 +194,30 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
         if (cents(total) > cents(payment.amount)) throw new ActionError(400, `That is more than the ${m(payment.amount)} payment.`);
         if (cents(total) < cents(payment.amount)) {
           // A part payment is recorded, but the invoice stays Payment Pending.
-          const p = await store.updatePayment(payment.id, ['queued'], { paidAmount: total, reference, method }, { event: 'part_payment', by: who, detail: `${m(amount)} on ${paidOn}, reference ${reference}` });
+          const p = await store.updatePayment(
+            payment.id,
+            ['queued'],
+            { paidAmount: total, reference, method },
+            { event: 'part_payment', by: who, detail: `${m(amount)} on ${paidOn}, reference ${reference}` },
+          );
           if (!p) throw new ActionError(409, CHANGED);
           await store.updateInvoice(invoice.id, {}, ev(from, { action: 'part_payment', detail: `Part payment of ${m(amount)} recorded (${m(total)} of ${m(payment.amount)}).` }));
           return { summary: `Part payment of ${m(amount)} recorded by ${who} (reference ${reference}). ${m(payment.amount - total)} is still to pay.` };
         }
         await claim('payment_completed', {}, { detail: `${m(amount)} paid on ${paidOn} by ${method}, reference ${reference}. Simulated.` });
-        const p = await store.updatePayment(payment.id, ['queued'], { status: 'paid', paidOn, paidAmount: total, reference, method, recordedBy: who }, { event: 'paid', by: who, detail: `reference ${reference}` });
+        const p = await store.updatePayment(
+          payment.id,
+          ['queued'],
+          { status: 'paid', paidOn, paidAmount: total, reference, method, recordedBy: who },
+          { event: 'paid', by: who, detail: `reference ${reference}` },
+        );
         if (!p) {
-          await store.claimInvoice(invoice.id, 'payment_completed', { status: from }, { actor: 'System', action: 'undo', from: 'payment_completed', to: from, reason: 'The payment changed at the same time, so recording was undone.' });
+          await store.claimInvoice(
+            invoice.id,
+            'payment_completed',
+            { status: from },
+            { actor: 'System', action: 'undo', from: 'payment_completed', to: from, reason: 'The payment changed at the same time, so recording was undone.' },
+          );
           throw new ActionError(409, 'The payment changed at the same time (for example a bank match). Reload and check before recording it.');
         }
         return { summary: `Payment recorded by ${who}: ${m(amount)} on ${paidOn} (${method}, reference ${reference}).` };
@@ -144,7 +227,12 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
         await claim('payment_failed', {}, { detail: 'The payment did not go through.' });
         const p = await store.updatePayment(payment.id, ['queued'], { status: 'failed', failure: { reason: note, by: who, at } }, { event: 'failed', by: who, detail: note });
         if (!p) {
-          await store.claimInvoice(invoice.id, 'payment_failed', { status: from }, { actor: 'System', action: 'undo', from: 'payment_failed', to: from, reason: 'The payment changed at the same time.' });
+          await store.claimInvoice(
+            invoice.id,
+            'payment_failed',
+            { status: from },
+            { actor: 'System', action: 'undo', from: 'payment_failed', to: from, reason: 'The payment changed at the same time.' },
+          );
           throw new ActionError(409, CHANGED);
         }
         return { summary: `Payment marked as failed by ${who}: ${note}` };
@@ -161,15 +249,63 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
           throw new ActionError(409, 'This payment has already been made. Start a recovery instead.');
         }
         try {
-          await claim(to, actionId === 'reverse_approval' ? { reversal: { decidedBy: who, note, at, from, approval: invoice.approval || null } } : { cancellation: { decidedBy: who, note, at, from } }, {
-            detail: stopped ? 'The scheduled payment was cancelled before it was made.' : invoice.approval ? 'No payment had been scheduled.' : null,
-          });
+          await claim(
+            to,
+            actionId === 'reverse_approval'
+              ? { reversal: { decidedBy: who, note, at, from, approval: invoice.approval || null } }
+              : { cancellation: { decidedBy: who, note, at, from } },
+            {
+              detail: stopped ? 'The scheduled payment was cancelled before it was made.' : invoice.approval ? 'No payment had been scheduled.' : null,
+            },
+          );
         } catch (err) {
-          if (stopped) await store.updatePayment(payment.id, ['cancelled'], { status: payment.status }, { event: 'restored', by: 'System', detail: 'The invoice changed at the same time.' });
+          if (stopped)
+            await store.updatePayment(payment.id, ['cancelled'], { status: payment.status }, { event: 'restored', by: 'System', detail: 'The invoice changed at the same time.' });
           throw err;
         }
         return {
           summary: `${actionId === 'reverse_approval' ? 'Approval reversed' : 'Invoice cancelled'} by ${who}: ${note}.${stopped ? ' The scheduled payment was cancelled.' : ''} The original approval is kept in the history.`,
+        };
+      }
+
+      case 'reopen': {
+        let stopped = null;
+        if (payment && ['queued', 'failed', 'on_hold'].includes(payment.status)) {
+          stopped = await store.updatePayment(
+            payment.id,
+            ['queued', 'failed', 'on_hold'],
+            { status: 'cancelled' },
+            { event: 'cancelled', by: who, detail: `Payment cancelled: the invoice was reopened for review. ${note}` },
+          );
+          if (!stopped) throw new ActionError(409, 'The payment went out at the same time. Reload the invoice; if it was paid, start a recovery instead.');
+        } else if (payment?.status === 'paid') {
+          throw new ActionError(409, 'This payment has already been made. Start a recovery instead; reopening never claims a payment was reversed.');
+        }
+        // Whatever decision is being undone (approval, rejection or cancellation)
+        // is kept here, not overwritten: the invoice's own approval/rejection/
+        // cancellation field is only replaced if a person makes a fresh decision.
+        const priorDecision = invoice.approval
+          ? { type: 'approval', ...invoice.approval }
+          : invoice.rejection
+            ? { type: 'rejection', ...invoice.rejection }
+            : invoice.cancellation
+              ? { type: 'cancellation', ...invoice.cancellation }
+              : null;
+        try {
+          await claim(
+            'needs_review',
+            { reopened: { decidedBy: who, note, at, from, priorDecision } },
+            {
+              detail: `Reopened for review${stopped ? '; the scheduled payment was cancelled first' : ''}. The earlier decision is kept in the history, not deleted.`,
+            },
+          );
+        } catch (err) {
+          if (stopped)
+            await store.updatePayment(payment.id, ['cancelled'], { status: payment.status }, { event: 'restored', by: 'System', detail: 'The invoice changed at the same time.' });
+          throw err;
+        }
+        return {
+          summary: `Reopened for review by ${who}: ${note}.${stopped ? ' The scheduled payment was cancelled.' : ''} The earlier decision is kept in the history, not deleted.`,
         };
       }
 

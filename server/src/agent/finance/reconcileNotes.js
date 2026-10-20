@@ -24,7 +24,9 @@ export async function explainLines(lines, { apiKey, model, fetchImpl } = {}) {
   const notes = {};
   for (const item of Array.isArray(raw.notes) ? raw.notes : []) {
     const n = Number(item?.n);
-    const note = String(item?.note ?? '').trim().slice(0, 200);
+    const note = String(item?.note ?? '')
+      .trim()
+      .slice(0, 200);
     if (wanted.has(n) && note) notes[n] = note;
   }
   return notes;

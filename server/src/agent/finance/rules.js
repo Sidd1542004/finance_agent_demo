@@ -7,8 +7,7 @@
 export const cents = (n) => Math.round(Number(n) * 100);
 export const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
 
-export const money = (n) =>
-  isNum(n) ? n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }) : 'not shown';
+export const money = (n) => (isNum(n) ? n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }) : 'not shown');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "2026-10-14" -> "14 Oct 2026". Anything else is returned as it was read.
@@ -35,6 +34,28 @@ export function isValidAbn(value) {
   return digits.reduce((sum, digit, i) => sum + digit * weights[i], 0) % 89 === 0;
 }
 
+export const normaliseAcn = (value) => String(value ?? '').replace(/\D/g, '');
+
+export const formatAcn = (value) => {
+  const d = normaliseAcn(value);
+  return d.length === 9 ? `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}` : String(value ?? '');
+};
+
+// Australian Company Number checksum (ASIC algorithm): the first 8 digits,
+// weighted 8 down to 1, summed; the 9th digit is 10 minus the remainder on
+// 10 (0 if that remainder is 0). Separate from the ABN, which is a different
+// number and a different algorithm, even though the first 9 digits of an
+// ABN are often (but not always) built from a company's ACN.
+export function isValidAcn(value) {
+  const d = normaliseAcn(value);
+  if (d.length !== 9) return false;
+  const weights = [8, 7, 6, 5, 4, 3, 2, 1];
+  const digits = d.split('').map(Number);
+  const sum = digits.slice(0, 8).reduce((s, digit, i) => s + digit * weights[i], 0);
+  const complement = (10 - (sum % 10)) % 10;
+  return complement === digits[8];
+}
+
 const nameKey = (name) =>
   String(name ?? '')
     .toLowerCase()
@@ -48,6 +69,15 @@ export function namesMatch(a, b) {
   const y = nameKey(b);
   if (!x || !y) return false;
   return x === y || x.includes(y) || y.includes(x);
+}
+
+// The same name once case, punctuation and legal suffixes are ignored. Strict
+// enough to identify a supplier on its name alone; namesMatch, which also
+// accepts one name inside the other ("Harbour" in "Harbour Office Supplies"),
+// is only a similarity to warn about, never proof of who the supplier is.
+export function namesEqual(a, b) {
+  const x = nameKey(a);
+  return Boolean(x) && x === nameKey(b);
 }
 
 // Purchase order matching moved to matching.js, invoice validation to

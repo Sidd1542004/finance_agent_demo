@@ -1,8 +1,10 @@
 // Due dates, overdue alerts and upcoming cash. Plain functions.
 
 import { isNum } from './rules.js';
+import { isoDateIn, businessTimeZone } from './timeZone.js';
 
-export const todayIso = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+// Today's date in the business's time zone (TIME_ZONE), not the server's.
+export const todayIso = (now = new Date(), tz = businessTimeZone()) => isoDateIn(now, tz);
 
 const addDays = (iso, n) => {
   const [y, m, d] = iso.split('-').map(Number);

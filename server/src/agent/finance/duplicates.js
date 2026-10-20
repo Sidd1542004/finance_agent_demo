@@ -9,11 +9,18 @@
 //   contentHash the same document text, even if it was read differently
 // A suspected duplicate cannot be approved or paid until a person clears it.
 
+import { businessTimeZone } from './timeZone.js';
 import crypto from 'node:crypto';
 import { isNum } from './rules.js';
 
-const alnum = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-const invoiceKey = (n) => alnum(n).replace(/^0+(?=\d)/, '').replace(/([A-Z])0+(?=\d)/g, '$1');
+const alnum = (s) =>
+  String(s ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+const invoiceKey = (n) =>
+  alnum(n)
+    .replace(/^0+(?=\d)/, '')
+    .replace(/([A-Z])0+(?=\d)/g, '$1');
 const nameKey = (s) => alnum(String(s ?? '').replace(/\b(pty|ltd|limited|co|company|the)\b/gi, ''));
 
 export function supplierKey(e) {
@@ -27,7 +34,10 @@ export function fingerprints(e, rawText) {
   const sup = supplierKey(e);
   const num = e.invoiceNumber ? invoiceKey(e.invoiceNumber) : null;
   const total = isNum(e.total) ? e.total.toFixed(2) : null;
-  const text = String(rawText ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const text = String(rawText ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
   return {
     numberKey: sup && num ? `${sup}|${num}` : null,
     amountKey: sup && total && e.invoiceDate ? `${sup}|${total}|${e.invoiceDate}` : null,
@@ -45,7 +55,9 @@ const SIGNAL = {
 
 // Which fingerprints do two invoices share?
 export function sharedSignals(a, b) {
-  return Object.keys(SIGNAL).filter((k) => a?.[k] && b?.[k] && a[k] === b[k]).map((k) => SIGNAL[k]);
+  return Object.keys(SIGNAL)
+    .filter((k) => a?.[k] && b?.[k] && a[k] === b[k])
+    .map((k) => SIGNAL[k]);
 }
 
 const INACTIVE = ['rejected', 'cancelled', 'failed'];
@@ -58,7 +70,8 @@ const INACTIVE = ['rejected', 'cancelled', 'failed'];
 export function duplicateCheck(candidates, cleared, fmt = (n) => String(n)) {
   const live = candidates.filter((c) => !INACTIVE.includes(c.status));
   const gone = candidates.filter((c) => INACTIVE.includes(c.status));
-  const describe = (c) => `invoice ${c.invoiceNumber || '(no number)'} for ${fmt(c.total)} received ${new Date(c.createdAt).toLocaleDateString('en-AU')} (${c.signals.join(', ')}; now ${String(c.status).replace(/_/g, ' ')})`;
+  const describe = (c) =>
+    `invoice ${c.invoiceNumber || '(no number)'} for ${fmt(c.total)} received ${new Date(c.createdAt).toLocaleDateString('en-AU', { timeZone: businessTimeZone() })} (${c.signals.join(', ')}; now ${String(c.status).replace(/_/g, ' ')})`;
   if (!live.length) {
     return {
       id: 'duplicate',
