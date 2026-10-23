@@ -56,7 +56,7 @@ export function dueInfo(extracted, today = todayIso()) {
   return { date, source, terms: e.paymentTerms || null, daysUntil, state: daysUntil < 0 ? 'overdue' : daysUntil <= 7 ? 'due_soon' : 'later' };
 }
 
-const UNPAID = ['under_review', 'needs_review', 'on_hold', 'approved', 'payment_pending', 'payment_failed'];
+const UNPAID = ['under_review', 'needs_review', 'on_hold', 'approved', 'payment_pending', 'payment_processing', 'payment_failed'];
 
 /**
  * Overdue and due-soon invoices, and the cash needed.
@@ -82,7 +82,7 @@ export function payablesSummary(invoices, today = todayIso()) {
     };
   });
   const sum = (list) => Math.round(list.reduce((s, r) => s + (r.currency === 'AUD' && isNum(r.amount) ? r.amount : 0), 0) * 100) / 100;
-  const approvedish = (r) => ['approved', 'payment_pending', 'payment_failed'].includes(r.status);
+  const approvedish = (r) => ['approved', 'payment_pending', 'payment_processing', 'payment_failed'].includes(r.status);
   const within = (n) => rows.filter((r) => r.dueDate && r.daysUntil <= n);
   const byDue = (a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999');
   return {

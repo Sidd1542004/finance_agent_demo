@@ -47,6 +47,7 @@ export const mentionsBankDetails = (text) => BANK_DETAILS.test(String(text ?? ''
 const RANK = {
   payment_completed: 0,
   payment_pending: 1,
+  payment_processing: 1,
   approved: 2,
   under_review: 3,
   needs_review: 3,
@@ -67,6 +68,8 @@ export function shareable(invoice) {
   if (!invoice) return false;
   if (['under_review', 'needs_review', 'on_hold', 'approved'].includes(invoice.status)) return true;
   if (invoice.status === 'payment_pending') return invoice.payment?.status === 'queued';
+  // Sent to the bank, not yet confirmed: the reply says exactly that, never "paid".
+  if (invoice.status === 'payment_processing') return invoice.payment?.status === 'processing';
   return invoice.status === 'payment_completed' && invoice.payment?.status === 'paid';
 }
 
@@ -86,6 +89,9 @@ export function statusLine(invoice) {
   const pay = invoice.payment;
   const part = pay && isNum(pay.amount) && isNum(invoice.total) && cents(pay.amount) !== cents(invoice.total);
   if (pay?.status === 'paid') return `${head}: ${part ? `${money(pay.amount)} paid, for the quantity we have received` : 'paid'}${pay.paidOn ? ` on ${day(pay.paidOn)}` : ''}.`;
+  if (invoice.status === 'payment_processing') {
+    return `${head}: payment has been sent to the bank and is being processed. It is not confirmed yet.`;
+  }
   if (invoice.status === 'payment_pending') {
     return `${head}: ${part ? `approved for ${money(pay.amount)}, the quantity we have received, and scheduled for payment` : 'approved and scheduled for payment'}${invoice.dueDate ? `, due ${day(invoice.dueDate)}` : ''}.`;
   }

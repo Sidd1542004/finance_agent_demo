@@ -11,15 +11,19 @@ import { resetEverything } from '../seed/seed.js';
 import { processInvoice, performInvoiceAction } from './invoices.js';
 import { recordAudit } from './runs.js';
 
-const DEMO_APPROVER = 'Priya N (demo)';
-const DEMO_PAYER = 'Sam K (demo)';
+// Internal demo actors, used only by this loader (they are not accounts and
+// cannot sign in). Two people, so approving and paying stay separate.
+const DEMO_APPROVER = { id: 'demo:priya', name: 'Priya N (demo)', roles: ['approver'] };
+const DEMO_PAYER = { id: 'demo:sam', name: 'Sam K (demo)', roles: ['payer'] };
 
-export async function loadDemoMonth() {
+// `by`: the administrator who pressed Load demo month.
+export async function loadDemoMonth(by = null) {
   await resetEverything();
   await recordAudit({
     subjectKind: 'system',
     subjectId: 'demo',
-    actor: 'Demo',
+    actor: by?.name || 'Demo',
+    ...(by?.id ? { actorId: by.id } : {}),
     action: 'demo_loaded',
     detail: 'Everything was deleted and the demo month loaded. The audit log is kept.',
   });
@@ -37,17 +41,21 @@ export async function loadDemoMonth() {
   // every scheduled payment below is a person's action (simulated, no money
   // moves). Skipped quietly if the invoice is not in a state that allows it
   // (for example because the reader failed).
-  const act = async (sampleId, action, input) => {
+  // The two payments are Cheque (paid outside the system), dated early in the
+  // month, so the sample bank statement can match them as before. EFT, BPAY
+  // and Card now go through the simulated bank on future business days:
+  // schedule one from the invoice screen to see that flow.
+  const act = async (sampleId, action, input, actor = DEMO_APPROVER) => {
     try {
-      await performInvoiceAction(ids[sampleId], action, { decidedBy: DEMO_APPROVER, ...input });
+      await performInvoiceAction(ids[sampleId], action, input, actor);
     } catch {
       /* not in a state that allows this action */
     }
   };
   await act('clean', 'approve', { note: 'Matches PO-2041 and the delivery in full.' });
-  await act('clean', 'schedule_payment', { decidedBy: DEMO_PAYER, method: 'EFT', scheduledFor: '2026-10-02' });
+  await act('clean', 'schedule_payment', { method: 'Cheque', scheduledFor: '2026-10-02' }, DEMO_PAYER);
   await act('quantity-variance', 'approve_received', { note: 'Paying for the 10 pallets received. The other 2 will be paid once they arrive.' });
-  await act('quantity-variance', 'schedule_payment', { decidedBy: DEMO_PAYER, method: 'EFT', scheduledFor: '2026-10-03' });
+  await act('quantity-variance', 'schedule_payment', { method: 'Cheque', scheduledFor: '2026-10-03' }, DEMO_PAYER);
   await act('gst-error', 'reject', { note: 'GST is wrong. Asked the supplier to reissue.' });
 
   const counts = {};

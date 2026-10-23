@@ -6,10 +6,19 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\
 
 const UNREACHABLE = 'Cannot reach the server. Locally, check that the API is running on port 4000 (npm run dev). On Vercel, open /api/health and check the function logs.';
 
-async function request(path, options) {
+// Fired when the server says the session has ended, so the app shows the sign-in page.
+export const SIGNED_OUT = 'foa:signed-out';
+
+async function request(path, options = {}) {
   let res;
   try {
-    res = await fetch(`${API_BASE_URL}/api${path}`, options);
+    res = await fetch(`${API_BASE_URL}/api${path}`, {
+      ...options,
+      // The session cookie. Cross-site only when the API is hosted elsewhere.
+      credentials: API_BASE_URL ? 'include' : 'same-origin',
+      // Every call says it comes from the dashboard: the server refuses changes without it (CSRF).
+      headers: { 'X-FOA-Request': '1', ...(options.headers || {}) },
+    });
   } catch {
     throw new Error(UNREACHABLE);
   }
@@ -19,8 +28,15 @@ async function request(path, options) {
   } catch {
     /* not JSON: handled below */
   }
+  if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) throw new Error(data?.error || (res.status >= 500 ? UNREACHABLE : `The request failed (${res.status}).`));
   return data;
+}
+
+async function requestText(path) {
+  const res = await fetch(`${API_BASE_URL}/api${path}`, { credentials: API_BASE_URL ? 'include' : 'same-origin', headers: { 'X-FOA-Request': '1' } });
+  if (!res.ok) throw new Error(`The request failed (${res.status}).`);
+  return res.text();
 }
 
 // ?before=<cursor>&limit=<n>&filter=..., leaving out what is not set.
@@ -29,10 +45,46 @@ const query = (params = {}) => {
   return q.toString() ? `?${q}` : '';
 };
 
-const json = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const json = (body, method = 'POST') => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
 
 export const api = {
   health: () => request('/health'),
+
+  // Signing in
+  me: () => request('/auth/me'),
+  login: (email, password) => request('/auth/login', json({ email, password })),
+  logout: () => request('/auth/logout', json({})),
+  setup: (body) => request('/auth/setup', json(body)),
+  changePassword: (currentPassword, newPassword) => request('/auth/password', json({ currentPassword, newPassword })),
+
+  // Administration
+  users: () => request('/admin/users'),
+  createUser: (body) => request('/admin/users', json(body)),
+  updateUser: (id, body) => request(`/admin/users/${id}`, json(body, 'PATCH')),
+  resetPassword: (id, password) => request(`/admin/users/${id}/password`, json({ password })),
+  runDuePayments: () => request('/admin/run-due', json({})),
+  simBankAdmin: () => request('/admin/sim-bank'),
+  setSimBalance: (balance) => request('/admin/sim-bank/balance', json({ balance }, 'PUT')),
+  setSimScenario: (abn, scenario) => request(`/admin/sim-bank/scenarios/${abn}`, json({ scenario }, 'PUT')),
+
+  // Suppliers' (simulated) bank details
+  suppliers: () => request('/suppliers'),
+  supplierHistory: (abn) => request(`/suppliers/${abn}/history`),
+  proposeBankDetails: (abn, body) => request(`/suppliers/${abn}/beneficiary-changes`, json(body)),
+  approveBankDetails: (id, note) => request(`/beneficiary-changes/${id}/approve`, json({ note })),
+  rejectBankDetails: (id, note) => request(`/beneficiary-changes/${id}/reject`, json({ note })),
+
+  // Payments, notices to suppliers, the simulated bank
+  payments: (status) => request(`/payments${query({ status })}`),
+  payment: (id) => request(`/payments/${id}`),
+  paymentCalendar: () => request('/payment-calendar'),
+  paymentNotices: (status) => request(`/payment-notices${query({ status })}`),
+  draftNotice: (paymentId, kind) => request(`/payments/${paymentId}/notices`, json({ kind })),
+  sendNotice: (id) => request(`/payment-notices/${id}/send`, json({})),
+  discardNotice: (id, note) => request(`/payment-notices/${id}/discard`, json({ note })),
+  simAccount: () => request('/sim-bank/account'),
+  simTransactions: () => request('/sim-bank/transactions'),
+  simStatementCsv: () => requestText('/sim-bank/statement.csv'),
   samples: () => request('/samples'),
   reference: () => request('/reference'),
   // Lists come a page at a time: { items, nextCursor }.

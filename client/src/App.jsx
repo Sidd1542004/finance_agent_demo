@@ -1,36 +1,53 @@
-import { useEffect, useState } from 'react';
-import { api } from './api.js';
+import { useCallback, useEffect, useState } from 'react';
+import { api, SIGNED_OUT } from './api.js';
 import { useBusy } from './shared.jsx';
+import { hasRole, ROLE_LABEL } from './format.js';
 import InvoicesView from './views/Invoices.jsx';
+import PaymentsView from './views/Payments.jsx';
+import SuppliersView from './views/Suppliers.jsx';
 import QueriesView from './views/Queries.jsx';
 import ReconciliationView from './views/Reconciliation.jsx';
 import ReportView from './views/Report.jsx';
+import AdminView from './views/Admin.jsx';
+import Login from './views/Login.jsx';
 
-// The Finance Operations Agent's four workflows.
+// The Finance Operations Agent's workflows. `admin`: shown to administrators only.
 const TABS = [
   ['invoices', 'Invoices', InvoicesView],
+  ['payments', 'Payments', PaymentsView],
+  ['suppliers', 'Suppliers', SuppliersView],
   ['queries', 'Supplier emails', QueriesView],
   ['bank', 'Bank reconciliation', ReconciliationView],
   ['report', 'Month-end report', ReportView],
+  ['admin', 'Admin', AdminView, 'admin'],
 ];
 
 export default function App() {
   const [health, setHealth] = useState(null);
+  const [session, setSession] = useState(null); // { user, setupRequired, setupEnabled }
   const [unreachable, setUnreachable] = useState(false);
   const [tab, setTab] = useState('invoices');
   const [version, setVersion] = useState(0); // bumped to reload every screen after a reset
   const [error, setError] = useState(null);
   const [busy, run] = useBusy(setError);
 
+  const loadSession = useCallback(() => api.me().then(setSession), []);
+
   useEffect(() => {
-    api
-      .health()
-      .then(setHealth)
-      .catch((err) => {
-        setError(err.message);
-        setUnreachable(true);
-      });
+    Promise.all([api.health().then(setHealth), loadSession()]).catch((err) => {
+      setError(err.message);
+      setUnreachable(true);
+    });
+  }, [loadSession]);
+
+  // Any request that finds the session gone brings back the sign-in page.
+  useEffect(() => {
+    const onSignedOut = () => setSession((s) => (s?.user ? { user: null, setupRequired: false, setupEnabled: false } : s));
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT, onSignedOut);
   }, []);
+
+  const user = session?.user || null;
 
   const loadDemo = () => {
     if (!window.confirm('Delete everything and load the demo month? This runs the eight sample invoices through the agent.')) return;
@@ -41,14 +58,22 @@ export default function App() {
   };
 
   const reset = () => {
-    if (!window.confirm('Delete every invoice, email, statement and report?')) return;
+    if (!window.confirm('Delete every invoice, payment, email, statement and report? Users and the audit log are kept.')) return;
     run('reset', async () => {
       await api.reset();
       setVersion((v) => v + 1);
     });
   };
 
-  const View = TABS.find(([id]) => id === tab)[2];
+  const signOut = () =>
+    run('logout', async () => {
+      await api.logout();
+      setSession({ user: null, setupRequired: false, setupEnabled: false });
+      setTab('invoices');
+    });
+
+  const tabs = TABS.filter(([, , , role]) => !role || hasRole(user, role));
+  const View = (tabs.find(([id]) => id === tab) || tabs[0])[2];
 
   return (
     <div className="app">
@@ -57,7 +82,7 @@ export default function App() {
           <span className="brand-name">Finance Operations Agent</span>
           <div className="topbar-right">
             {health && <span className={`reader reader-${health.reader.mode}`}>{health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}</span>}
-            {health?.demoMode && (
+            {user && health?.demoMode && hasRole(user, 'admin') && (
               <>
                 <button className="btn btn-on-navy" onClick={loadDemo} disabled={Boolean(busy)}>
                   {busy === 'demo' ? 'Loading…' : 'Load demo month'}
@@ -67,15 +92,26 @@ export default function App() {
                 </button>
               </>
             )}
+            {user && (
+              <span className="whoami">
+                <span className="whoami-name">{user.name}</span>
+                <span className="whoami-roles">{user.roles.map((r) => ROLE_LABEL[r] || r).join(', ') || 'No role yet'}</span>
+                <button className="btn btn-on-navy" onClick={signOut} disabled={Boolean(busy)}>
+                  Sign out
+                </button>
+              </span>
+            )}
           </div>
         </div>
-        <nav className="mainnav" aria-label="Workflows">
-          {TABS.map(([id, label]) => (
-            <button key={id} className="mainnav-item" aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
-              {label}
-            </button>
-          ))}
-        </nav>
+        {user && (
+          <nav className="mainnav" aria-label="Workflows">
+            {tabs.map(([id, label]) => (
+              <button key={id} className="mainnav-item" aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+                {label}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
 
       {error && (
@@ -87,8 +123,17 @@ export default function App() {
         </div>
       )}
 
-      {health ? (
-        <View key={`${tab}-${version}`} health={health} onError={setError} />
+      {health && session && !user ? (
+        <Login
+          setupRequired={session.setupRequired}
+          setupEnabled={session.setupEnabled}
+          onSignedIn={(u) => {
+            setError(null);
+            setSession({ user: u, setupRequired: false, setupEnabled: false });
+          }}
+        />
+      ) : health && user ? (
+        <View key={`${tab}-${version}`} health={health} user={user} onError={setError} />
       ) : (
         <div className="layout">
           <div className="blank">

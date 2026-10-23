@@ -5,7 +5,21 @@
 // another file that exports the same functions and pass it to the agents
 // instead. Nothing in the agents or the rules needs to change.
 
-import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, Payment, OutboxMessage, VendorQuery, BankStatement, SupplierHint, AuditEvent } from '../models/index.js';
+import {
+  Vendor,
+  PurchaseOrder,
+  GoodsReceipt,
+  Invoice,
+  Payment,
+  PaymentJob,
+  OutboxMessage,
+  VendorQuery,
+  BankStatement,
+  SupplierHint,
+  AuditEvent,
+  BeneficiaryChange,
+} from '../models/index.js';
+import { normaliseAbn } from '../agent/finance/rules.js';
 import { auditEntry } from '../agent/finance/audit.js';
 import { hintsForText } from '../agent/finance/supplierHints.js';
 import { skuKey } from '../agent/finance/matching.js';
@@ -42,6 +56,9 @@ const paymentSummary = (p) => ({
   status: p.status,
   paidOn: p.paidOn ?? null,
   bank: p.bank ?? null,
+  route: p.route || 'manual',
+  confirmation: p.confirmation ?? null, // the simulated bank's confirmed success
+  submission: p.submission ? { txnRef: p.submission.txnRef ?? null } : null,
 });
 
 const inRange = ({ start, end } = {}) => (start && end ? { createdAt: { $gte: start, $lt: end } } : {});
@@ -51,7 +68,20 @@ const audit = (entry) => AuditEvent.create(auditEntry(entry));
 
 // A payment's own history entry, mirrored in the audit log with its status change.
 const auditPayment = (p, from, history) =>
-  audit({ subjectKind: 'payment', subjectId: p._id, actor: history?.by || 'System', action: history?.event || 'changed', from, to: p.status, detail: history?.detail || null });
+  audit({
+    subjectKind: 'payment',
+    subjectId: p._id,
+    actor: history?.by || 'System',
+    actorId: history?.byId || null,
+    action: history?.event || 'changed',
+    from,
+    to: p.status,
+    detail: history?.detail || null,
+  });
+
+// `from`: the statuses a change is allowed from, or { status: [...], scheduleVersion }
+// to also require the schedule version (so a stale reschedule or job cannot win).
+const paymentFilter = (id, from) => (Array.isArray(from) ? { _id: id, status: { $in: from } } : { _id: id, status: { $in: from.status }, scheduleVersion: from.scheduleVersion });
 
 async function revertInvoice(invoiceId) {
   const event = { actor: 'Bank reconciliation', action: 'payment_unmatched', from: 'payment_completed', to: 'payment_pending', reason: 'The bank match was undone.' };
@@ -83,6 +113,51 @@ export const sampleLedger = {
   listVendors: () => Vendor.find().lean(),
 
   findVendorByAbn: (abn) => Vendor.findOne({ abn }).lean(),
+
+  // The supplier's verified (simulated) bank details, and whether a change is waiting for approval.
+  async beneficiaryFor(abn) {
+    const key = normaliseAbn(abn);
+    if (!key) return { vendor: null, pending: false };
+    const [vendor, pending] = await Promise.all([Vendor.findOne({ abn: key }).lean(), BeneficiaryChange.exists({ vendorAbn: key, status: 'pending' })]);
+    return { vendor, pending: Boolean(pending) };
+  },
+
+  // ----- payment execution jobs (see services/paymentExecution.js) -----
+
+  // One active job per payment (unique index): a second one is refused.
+  async createPaymentJob({ paymentId, invoiceId, runAt, scheduleVersion, by = 'System' }) {
+    const job = await PaymentJob.create({ paymentId, invoiceId, runAt, scheduleVersion, history: [{ at: new Date().toISOString(), event: 'created', by, runAt }] });
+    return { ...job.toObject(), id: String(job._id) };
+  },
+
+  // Stop every active job of a payment. status: cancelled | superseded.
+  async cancelPaymentJobs(paymentId, { status = 'cancelled', by = 'System', reason = null } = {}) {
+    const r = await PaymentJob.updateMany(
+      { paymentId, active: true },
+      { $set: { status, active: false, leaseOwner: null, leaseUntil: null }, $push: { history: { at: new Date().toISOString(), event: status, by, reason } } },
+    );
+    return r.modifiedCount;
+  },
+
+  // Make sure a queued bank-routed payment has its job (after an undo put it back).
+  async ensurePaymentJob(payment) {
+    if (payment.route !== 'bank' || payment.status !== 'queued') return null;
+    if (await PaymentJob.exists({ paymentId: payment._id || payment.id, active: true })) return null;
+    try {
+      return await this.createPaymentJob({
+        paymentId: payment._id || payment.id,
+        invoiceId: payment.invoiceId,
+        runAt: payment.scheduledAt || new Date(),
+        scheduleVersion: payment.scheduleVersion || 1,
+        by: 'System',
+      });
+    } catch (err) {
+      if (err?.code === 11000) return null;
+      throw err;
+    }
+  },
+
+  listPaymentJobs: (paymentId) => PaymentJob.find({ paymentId }).sort({ createdAt: 1 }).lean(),
 
   findPurchaseOrder: (poNumber) => PurchaseOrder.findOne({ poNumber: String(poNumber).toUpperCase() }).lean(),
 
@@ -205,7 +280,7 @@ export const sampleLedger = {
     const update = { $set: set };
     if (entry) update.$push = { history: entry };
     // The record before the change, so the log shows the status it moved from.
-    const before = await Payment.findOneAndUpdate({ _id: id, status: { $in: from } }, update, { new: false }).lean();
+    const before = await Payment.findOneAndUpdate(paymentFilter(id, from), update, { new: false }).lean();
     if (!before) return null;
     const p = { ...before, ...set, history: entry ? [...(before.history || []), entry] : before.history };
     await auditPayment(p, before.status, entry);
@@ -226,7 +301,7 @@ export const sampleLedger = {
       .select('_id')
       .lean();
     if (!others.length) return [];
-    return Payment.find({ invoiceId: { $in: others.map((o) => o._id) }, status: { $in: ['queued', 'paid'] } }).lean();
+    return Payment.find({ invoiceId: { $in: others.map((o) => o._id) }, status: { $in: ['queued', 'processing', 'paid'] } }).lean();
   },
 
   // ----- what reviewers' corrections taught the reader, per supplier -----
@@ -308,9 +383,33 @@ export const sampleLedger = {
     return paymentSummary(doc);
   },
 
+  // A payment the simulated bank confirmed: link the statement line to it. Its
+  // status does not change (it is already paid); it is never paid twice.
+  async linkBankLine(paymentId, bank) {
+    const doc = await Payment.findOneAndUpdate(
+      { _id: paymentId, status: 'paid', route: 'bank', $or: [{ bank: null }, { bank: { $exists: false } }, { 'bank.statementId': bank.statementId }] },
+      {
+        $set: { bank },
+        $push: { history: { at: new Date().toISOString(), event: 'reconciled', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
+      },
+      { new: true },
+    ).lean();
+    if (!doc) return null;
+    await audit({
+      subjectKind: 'payment',
+      subjectId: doc._id,
+      actor: 'Bank reconciliation',
+      action: 'reconciled',
+      from: 'paid',
+      to: 'paid',
+      detail: `Bank line ${bank.line} of statement ${bank.statementId} shows ${doc.confirmation?.txnRef}.`,
+    });
+    return paymentSummary(doc);
+  },
+
   async unmarkPaid(paymentId, statementId) {
     const doc = await Payment.findOneAndUpdate(
-      { _id: paymentId, status: 'paid', 'bank.statementId': statementId },
+      { _id: paymentId, status: 'paid', route: { $ne: 'bank' }, 'bank.statementId': statementId },
       { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } },
       { new: true },
     ).lean();
@@ -321,10 +420,14 @@ export const sampleLedger = {
 
   // Undo everything one statement marked as paid.
   async revertStatement(statementId) {
-    const docs = await Payment.find({ status: 'paid', 'bank.statementId': statementId }).select('_id invoiceId').lean();
+    // Bank-confirmed payments stay paid: only their link to this statement is removed.
+    await Payment.updateMany({ status: 'paid', route: 'bank', 'bank.statementId': statementId }, { $set: { bank: null } });
+    const docs = await Payment.find({ status: 'paid', route: { $ne: 'bank' }, 'bank.statementId': statementId })
+      .select('_id invoiceId')
+      .lean();
     for (const d of docs) {
       const p = await Payment.findOneAndUpdate(
-        { _id: d._id, status: 'paid', 'bank.statementId': statementId },
+        { _id: d._id, status: 'paid', route: { $ne: 'bank' }, 'bank.statementId': statementId },
         { $set: { status: 'queued', paidOn: null, bank: null, recordedBy: null } },
         { new: true },
       ).lean();

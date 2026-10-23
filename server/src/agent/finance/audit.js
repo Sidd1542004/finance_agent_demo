@@ -3,12 +3,15 @@
 // ever added: nothing updates or deletes them (see AuditEvent in
 // models/index.js, which refuses both).
 
-export const SUBJECT_KINDS = ['invoice', 'payment', 'query', 'statement', 'bank_line', 'report', 'system'];
+// supplier: beneficiary (bank detail) changes. user: accounts and roles.
+// sim_bank: simulated bank settings. payment_email: payment notices to suppliers.
+export const SUBJECT_KINDS = ['invoice', 'payment', 'query', 'statement', 'bank_line', 'report', 'system', 'supplier', 'user', 'sim_bank', 'payment_email'];
 
-/** One audit entry, in a fixed shape. */
-export function auditEntry({ subjectKind, subjectId, actor, action, from = null, to = null, reason = null, detail = null, at = new Date() }) {
+/** One audit entry, in a fixed shape. `actorId` (the signed-in user's id) is added only when known. */
+export function auditEntry({ subjectKind, subjectId, actor, actorId = null, action, from = null, to = null, reason = null, detail = null, at = new Date() }) {
   if (!SUBJECT_KINDS.includes(subjectKind)) throw new Error(`Unknown audit subject: ${subjectKind}`);
   return {
+    ...(actorId ? { actorId: String(actorId).slice(0, 64) } : {}),
     subjectKind,
     subjectId: String(subjectId),
     actor: String(actor || 'System').slice(0, 120),

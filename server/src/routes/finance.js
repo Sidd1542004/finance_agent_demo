@@ -14,6 +14,10 @@ import { processStatement, getStatementDetail, resolveLine } from '../services/s
 import { writeReport, getReportDetail } from '../services/reports.js';
 import { loadDemoMonth } from '../services/demo.js';
 import { pageOf, pageParams } from './paging.js';
+import { requireRole } from '../auth/middleware.js';
+
+// The signed-in person decides; a typed name in the body is ignored.
+const asUser = (req) => ({ ...(req.body || {}), decidedBy: req.user.name, actorId: req.user.id });
 
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
@@ -45,6 +49,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/queries',
+    requireRole('reviewer'),
     work,
     wrap(async (req, res) => {
       let fields;
@@ -75,6 +80,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/queries/:id/rerun',
+    requireRole('reviewer'),
     work,
     wrap(async (req, res) => {
       const query = await VendorQuery.findById(requireId(req, 'email'));
@@ -87,8 +93,9 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/queries/:id/resolution',
+    requireRole('reviewer'),
     wrap(async (req, res) => {
-      res.json(await resolveQuery(requireId(req, 'email'), req.body || {}));
+      res.json(await resolveQuery(requireId(req, 'email'), asUser(req)));
     }),
   );
 
@@ -127,6 +134,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/statements',
+    requireRole('payer'),
     work,
     upload.single('file'),
     wrap(async (req, res) => {
@@ -162,6 +170,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/statements/:id/rerun',
+    requireRole('payer'),
     work,
     wrap(async (req, res) => {
       const statement = await BankStatement.findById(requireId(req, 'statement'));
@@ -175,8 +184,9 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/statements/:id/lines/:n/resolution',
+    requireRole('payer'),
     wrap(async (req, res) => {
-      res.json(await resolveLine(requireId(req, 'statement'), req.params.n, req.body || {}));
+      res.json(await resolveLine(requireId(req, 'statement'), req.params.n, asUser(req)));
     }),
   );
 
@@ -209,6 +219,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/reports',
+    requireRole('reviewer', 'approver', 'payer', 'admin'),
     work,
     wrap(async (req, res) => {
       const month = req.body?.month || monthOf(new Date());
@@ -221,10 +232,11 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/demo/load',
+    requireRole('admin'),
     work,
     wrap(async (req, res) => {
       if (!config.demoMode) throw new HttpError(403, 'The demo month is only available in demo mode.');
-      res.json(await loadDemoMonth());
+      res.json(await loadDemoMonth(req.user));
     }),
   );
 }

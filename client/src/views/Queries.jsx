@@ -263,8 +263,8 @@ function QueryDetail({ data, fresh, busy, onResolve, onRerun }) {
   );
 }
 
+// Replies and closes are recorded under the signed-in person's name.
 function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
-  const [name, setName] = useState('');
   const [reply, setReply] = useState(query.draft?.body || '');
   const [note, setNote] = useState('');
   const reasons = query.decision?.reasons || [];
@@ -282,12 +282,6 @@ function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
           </label>
           <textarea id="q-reply" rows={query.draft ? 12 : 5} value={reply} onChange={(e) => setReply(e.target.value)} />
           <div className="decision-fields">
-            <div>
-              <label className="field-label" htmlFor="q-who">
-                Your name
-              </label>
-              <input id="q-who" type="text" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
-            </div>
             <div className="grow">
               <label className="field-label" htmlFor="q-note">
                 Note (required to close without a reply)
@@ -296,14 +290,10 @@ function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
             </div>
           </div>
           <div className="decision-actions">
-            <button
-              className="btn btn-primary"
-              disabled={working || !name.trim() || !reply.trim()}
-              onClick={() => onResolve({ action: 'send', decidedBy: name, body: reply, note })}
-            >
+            <button className="btn btn-primary" disabled={working || !reply.trim()} onClick={() => onResolve({ action: 'send', body: reply, note })}>
               Send reply
             </button>
-            <button className="btn btn-danger" disabled={working || !name.trim() || !note.trim()} onClick={() => onResolve({ action: 'close', decidedBy: name, note })}>
+            <button className="btn btn-danger" disabled={working || !note.trim()} onClick={() => onResolve({ action: 'close', note })}>
               Close without replying
             </button>
             <button className="btn btn-outline" disabled={working} onClick={onRerun}>

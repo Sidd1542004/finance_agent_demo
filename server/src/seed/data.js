@@ -10,6 +10,15 @@ const COASTAL = { name: 'Coastal Print & Sign Pty Ltd', abn: '11111111111', addr
 
 export const vendors = [HARBOUR, PALLETS, BLUEGUM].map((v) => ({ name: v.name, abn: v.abn, email: v.email, gstRegistered: true }));
 
+// SIMULATED bank details for the sample suppliers, loaded as already verified
+// so the demo can pay them. The BSBs are in the simulated 999 range: none is a
+// real bank account. Bluegum has none on purpose, to show that a payment to a
+// supplier without verified details is refused.
+export const sampleBeneficiaries = {
+  [HARBOUR.abn]: { accountName: 'Harbour Office Supplies (SIMULATED)', bsb: '999-001', accountNumber: '10482001', billerCode: '99001', crn: '5760041027' },
+  [PALLETS.abn]: { accountName: 'Southern Cross Pallets (SIMULATED)', bsb: '999-002', accountNumber: '20518342', cardToken: 'SIMCARD-PAL8342' },
+};
+
 export const purchaseOrders = [
   {
     poNumber: 'PO-2041',

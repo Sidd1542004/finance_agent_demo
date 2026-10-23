@@ -5,12 +5,47 @@ import mongoose from 'mongoose';
 import { pathToFileURL } from 'node:url';
 import { config } from '../config.js';
 import { safeUri, redactSecrets } from '../safeUri.js';
-import { Vendor, PurchaseOrder, GoodsReceipt, Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report, SupplierHint } from '../models/index.js';
-import { vendors, purchaseOrders, goodsReceipts } from './data.js';
+import {
+  Vendor,
+  PurchaseOrder,
+  GoodsReceipt,
+  Invoice,
+  AgentRun,
+  Payment,
+  PaymentJob,
+  VendorQuery,
+  OutboxMessage,
+  BankStatement,
+  Report,
+  SupplierHint,
+  BeneficiaryChange,
+  SimBankTransaction,
+  SimBankAttempt,
+  SimBankAccount,
+} from '../models/index.js';
+import { vendors, purchaseOrders, goodsReceipts, sampleBeneficiaries } from './data.js';
+
+// The sample suppliers' simulated bank details, as verified version 1.
+const withBeneficiary = (v) =>
+  sampleBeneficiaries[v.abn]
+    ? {
+        ...v,
+        beneficiary: {
+          ...sampleBeneficiaries[v.abn],
+          simulated: true,
+          status: 'verified',
+          version: 1,
+          changeId: null,
+          proposedBy: 'Sample data',
+          verifiedBy: 'Sample data (simulated)',
+          verifiedAt: new Date().toISOString(),
+        },
+      }
+    : v;
 
 export async function seedReferenceData() {
-  await Promise.all([Vendor.deleteMany({}), PurchaseOrder.deleteMany({}), GoodsReceipt.deleteMany({})]);
-  await Vendor.insertMany(vendors);
+  await Promise.all([Vendor.deleteMany({}), PurchaseOrder.deleteMany({}), GoodsReceipt.deleteMany({}), BeneficiaryChange.deleteMany({})]);
+  await Vendor.insertMany(vendors.map(withBeneficiary));
   await PurchaseOrder.insertMany(purchaseOrders);
   await GoodsReceipt.insertMany(goodsReceipts);
 }
@@ -24,7 +59,12 @@ export async function seedIfEmpty() {
 }
 
 export async function resetEverything() {
-  await Promise.all([Invoice, AgentRun, Payment, VendorQuery, OutboxMessage, BankStatement, Report, SupplierHint].map((m) => m.deleteMany({})));
+  // Users, sessions and the audit log are kept. The simulated bank starts again from its opening balance.
+  await Promise.all(
+    [Invoice, AgentRun, Payment, PaymentJob, VendorQuery, OutboxMessage, BankStatement, Report, SupplierHint, SimBankTransaction, SimBankAttempt, SimBankAccount].map((m) =>
+      m.deleteMany({}),
+    ),
+  );
   await seedReferenceData();
 }
 

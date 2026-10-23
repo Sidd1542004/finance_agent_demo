@@ -7,9 +7,10 @@ import { sampleLedger } from '../integrations/sampleLedger.js';
 import { bankLineId } from '../agent/finance/audit.js';
 
 export class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, extra = null) {
     super(message);
     this.status = status;
+    this.extra = extra;
   }
 }
 

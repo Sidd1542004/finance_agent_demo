@@ -58,6 +58,7 @@ export async function resolveQuery(id, input) {
     subjectKind: 'query',
     subjectId: id,
     actor: who,
+    ...(input.actorId ? { actorId: input.actorId } : {}),
     action: action === 'send' ? 'reply_sent' : 'closed',
     from: 'needs_person',
     to: query.status,

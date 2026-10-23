@@ -12,9 +12,14 @@ It covers the Finance tasks the page lists, as four workflows:
 
 Stack: MongoDB, Express, React (Vite), Node. AI steps use Groq.
 
-Everything runs on made-up sample data. No accounting system, mailbox or bank is
-connected. No money moves and no email is sent: "paid" and "sent" are entries in sample
-collections, and every payment record is labelled **simulated**.
+Everything runs on made-up sample data. No accounting system, mailbox or real bank is
+connected. No money moves: EFT, BPAY and Card payments go to a **simulated bank** inside
+the app, and every payment, transaction and balance is labelled **simulated**. People
+sign in with an email and password and act under their own account and roles.
+
+**Accounts, payments and the simulated bank** (roles, statuses, the scheduler, the
+simulated bank, supplier notices, environment variables and one-time setup) are
+described in [docs/payments.md](docs/payments.md).
 
 ## Run it
 
@@ -29,14 +34,26 @@ Copy `server/.env.example` to `server/.env`, then set:
 - `MONGODB_URI` if your database is not on `mongodb://127.0.0.1:27017`
 - `GROQ_API_KEY` with a key from https://console.groq.com/keys
 
+Create the first administrator (the password is asked for at a hidden prompt):
+
+```
+npm run create-admin --prefix server -- --email you@example.com --name "Your Name"
+```
+
 ```
 npm run dev
 ```
 
-Open http://localhost:5173. The sample suppliers, purchase orders and deliveries load
-themselves the first time the server starts.
+Open http://localhost:5173 and sign in. Add the other users and their roles on the Admin
+screen. The sample suppliers, purchase orders and deliveries load themselves the first
+time the server starts. To run due payments locally, press **Run due payments now** on
+the Payments screen (administrators), or call the tick:
+`curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:4000/api/cron/tick`.
 
-Other commands: `npm test` (the server tests; no database, network or keys needed), `npm run format` / `npm run format:check` (Prettier). GitHub Actions (`.github/workflows/ci.yml`) runs the tests, the client build and the format check on every push and pull request., `npm run seed`
+Other commands: `npm test` (the server tests; no network or keys needed. The tests that
+need MongoDB start an in-memory server with `mongodb-memory-server`: it uses a local
+`mongod` if one is on the PATH, otherwise it downloads one the first time; set
+`MONGODB_TEST_URI` to use another server instead), `npm run format` / `npm run format:check` (Prettier). GitHub Actions (`.github/workflows/ci.yml`) runs the tests, the client build and the format check on every push and pull request., `npm run seed`
 (wipe and reload the sample data), `npm run build` then `npm start` (serve the dashboard
 and the API together on port 4000).
 
@@ -70,7 +87,10 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    | `DEMO_MODE` | `true` shows Load demo month and Reset (they wipe the data). Unset or anything else: off. |
    | `ACCESS_PASSWORD` | Recommended for a public demo. Every page and API call asks for it (any user name). |
    | `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` | Optional. Default: 30 requests that run the agent per 10 minutes per IP address. |
-   | `COMPANY_NAME`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`, policy values | Optional, as in `server/.env.example`. |
+   | `COMPANY_NAME`, `ABR_GUID`, `SEGREGATE_DUTIES`, policy values | Optional, as in `server/.env.example`. |
+   | `CRON_SECRET` | Required for payments: the scheduler calls `/api/cron/tick` with it (and the daily summary uses it). A long random string. |
+   | `ADMIN_SETUP_TOKEN` | Optional, one-time: lets the first administrator be created from the sign-in page. Remove it afterwards. |
+   | Payment, simulated bank and supplier email settings | Optional, see [docs/payments.md](docs/payments.md#environment-variables-new). `APP_ENV` stays unset (development) for a demo, so no supplier is ever emailed. |
    | `ALERT_EMAILS`, `APP_URL`, `CRON_SECRET`, `RESEND_API_KEY` or `SMTP_*`, `ALERT_FROM` | Optional: the daily summary email (below). |
    | `CORS_ORIGINS` | Leave unset: the dashboard and API are on the same site. |
 
@@ -80,17 +100,29 @@ runs the same Express app as `npm start`). `vercel.json` holds the build setting
    `"database": "connected"`. A 503 saying the database cannot be reached means
    `MONGODB_URI` is wrong or Atlas Network Access is refusing Vercel. The function log
    shows the reason, with the host only (never the user name or password).
+5. **First administrator and upgrade.** From your machine, with `MONGODB_URI` set to the
+   same database: `npm run migrate --prefix server`, then `npm run create-admin --prefix
+   server -- --email you@example.com --name "Your Name"`. See
+   [docs/payments.md](docs/payments.md#one-time-setup-existing-deployment).
+6. **Payment scheduler.** Point an external scheduler at `GET /api/cron/tick` every 5
+   minutes with `Authorization: Bearer <CRON_SECRET>` (Hobby allows only daily Vercel
+   cron jobs; `vercel.json` adds a daily tick as a safety net only). Details and
+   options in [docs/payments.md](docs/payments.md#how-often-and-the-vercel-plan).
 
 Protecting a public demo:
 
+- **Accounts.** Every API call except `/api/health`, sign-in and the cron endpoints needs a
+  signed-in user, and the server checks the user's role for every action (see
+  [docs/payments.md](docs/payments.md#accounts-and-roles)).
 - **Shared password.** With `ACCESS_PASSWORD` set, the browser asks for a password (any user
   name) before showing anything. On Vercel, `middleware.js` checks it for the dashboard's
   static files; the Express app checks it for the API (and for everything when run locally).
   The password is compared in constant time. It is one shared password, not user accounts.
 - **Vercel Deployment Protection** (Project Settings > Deployment Protection) can protect
   preview deployments, or every deployment, behind a Vercel login as well.
-- **Demo buttons.** Load demo month and Reset only work when `DEMO_MODE=true`; the server
-  refuses them otherwise, whatever the dashboard shows.
+- **Demo buttons.** Load demo month and Reset only work when `DEMO_MODE=true`, and only for
+  administrators; the server refuses them otherwise, whatever the dashboard shows. They
+  keep users, sessions and the audit log.
 - **Rate limits.** Requests that call Groq or process a file (adding or re-processing an
   invoice, supplier email or bank statement, a person's action that re-runs the agent,
   writing a report, loading the demo month) are limited per IP address: 30 per 10 minutes
@@ -136,10 +168,17 @@ It resets the data, so only use it on a demo.
 
 ## Demo script
 
-Press **Load demo month** first. It wipes everything and runs the seven sample invoices
-through the agent (one of them twice). Then, as people would: Priya approves the clean
-invoice and the received quantity of the pallets invoice ($727.10 of $811.80), Sam
-schedules both payments (simulated), and Priya rejects the GST error. The supplier emails
+Sign in as an administrator and press **Load demo month** first. It wipes everything and
+runs the seven sample invoices through the agent (one of them twice). Then, as people
+would: Priya approves the clean invoice and the received quantity of the pallets invoice
+($727.10 of $811.80), Sam schedules both payments by cheque (paid outside the system, so
+the sample bank statement can match them), and Priya rejects the GST error. Priya and Sam
+are internal demo actors, not accounts.
+
+To see a bank payment: approve the large Bluegum invoice, try to schedule it by EFT (refused:
+Bluegum has no verified bank details), propose details on the Suppliers screen and have a
+second person approve them, schedule the EFT payment, then press **Run due payments now**
+twice, about 20 seconds apart. The supplier emails
 and the bank statement refer to those invoices.
 
 **1. Invoices.** The counts at the top: in queue, matched by agent (cleared with no
@@ -273,8 +312,9 @@ links a PO. Suggestions (top 3, only POs sharing at least one item, provisional 
 ### Statuses
 
 `Received → Processing → Under Review | Needs Review | On Hold → Approved → Payment
-Pending → Payment Completed`, plus `Rejected`, `Cancelled`, `Payment Failed` and `Could
-not process`. The backend refuses any other move. The agent can only reach Under Review,
+Pending → (Payment Processing →) Payment Completed`, plus `Rejected`, `Cancelled`,
+`Payment Failed` and `Could not process`. Payment Processing is for payments through the
+simulated bank: accepted, not yet confirmed. The backend refuses any other move. The agent can only reach Under Review,
 Needs Review, On Hold or Could not process.
 
 | From | Allowed to |
@@ -283,17 +323,19 @@ Needs Review, On Hold or Could not process.
 | On Hold | Approved, Rejected, Cancelled, Processing |
 | Could not process | Processing, Rejected, Cancelled |
 | Approved | Payment Pending, Rejected (reversal), Cancelled |
-| Payment Pending | Payment Completed, Payment Failed, Rejected (reversal), Cancelled |
+| Payment Pending | Payment Processing (sent to the simulated bank), Payment Completed, Payment Failed, Approved (payment cancelled), Rejected (reversal), Cancelled |
+| Payment Processing | Payment Completed (the bank confirmed it), Payment Failed. Nothing can cancel it. |
 | Payment Failed | Payment Pending (retry), Cancelled |
 | Payment Completed, Rejected, Cancelled | Final (a paid invoice can have a recovery opened) |
 
 ### People's actions
 
-Every action needs a name; some need a note. Approve (note required if there are
+Every action is recorded under the signed-in person's account; some need a note. Approve (note required if there are
 exceptions), approve received quantity only, reject, place on hold, request a corrected
 invoice, link a PO, mark as not a duplicate, process again, schedule payment (method,
-date, optional reference), record payment (reference required; a part payment keeps it
-Payment Pending), mark payment failed, reverse approval (cancels a scheduled payment; the
+date, time for bank payments, optional reference), reschedule payment, cancel payment (the
+invoice stays approved), record payment (Cheque and Other only; reference required; a part
+payment keeps it Payment Pending), mark payment failed (Cheque and Other only), reverse approval (cancels a scheduled payment; the
 original approval is kept), cancel, start and close a recovery for a paid invoice.
 
 **Edit fields** (reviewer, note required; from Under Review, Needs Review, On Hold or Could
@@ -319,15 +361,23 @@ detail and time. The log is append only: the model refuses updates and deletes, 
 changes it, and Reset and Load demo month keep it (they add an entry saying so). Changes are compare-and-set on the status, and the payment collection has one
 payment per invoice (unique index), so two people clicking at once cannot both succeed.
 
-Optional controls in `server/.env`: `REVIEWERS`, `APPROVERS`, `PAYERS` (comma-separated
-names; empty means anyone) and `SEGREGATE_DUTIES=true` (whoever approved cannot pay).
-Names are typed, not logged in, so these are guard rails, not security.
+Roles come from user accounts (reviewer, approver, payer, administrator), checked on the
+server for every action. `SEGREGATE_DUTIES=true` stops the account that approved an
+invoice from also paying it. The earlier typed-name lists (`REVIEWERS`, `APPROVERS`,
+`PAYERS`) are moved onto accounts once by `npm run migrate --prefix server`.
 
 ### API
 
 | Route | What it does |
 |---|---|
-| `POST /api/invoices/:id/actions/:action` | Any action above. Body: `{ decidedBy, note, ...fields }`. 400 bad input, 403 role, 409 not allowed now or changed meanwhile. |
+| `POST /api/invoices/:id/actions/:action` | Any action above. Body: `{ note, ...fields }` (a `decidedBy` is ignored: the signed-in user acts). 400 bad input, 401 not signed in, 403 role, 409 not allowed now or changed meanwhile. |
+| `POST /api/auth/login`, `/logout`, `/setup`, `/password`; `GET /api/auth/me` | Sign-in. |
+| `/api/admin/users...` | Users and roles (administrators). |
+| `GET /api/suppliers`; `POST /api/suppliers/:abn/beneficiary-changes`; `POST /api/beneficiary-changes/:id/approve`, `/reject` | Supplier bank details (simulated), two people. |
+| `GET /api/payments?status=`, `GET /api/payments/:id`, `GET /api/payment-calendar` | Payments by status, one payment with its jobs, bank transaction and notices; the scheduling rules. |
+| `GET /api/payment-notices`; `POST /api/payments/:id/notices`; `POST /api/payment-notices/:id/send`, `/discard` | Payment notices to suppliers. |
+| `/api/sim-bank/...`; `/api/admin/sim-bank...`; `POST /api/admin/run-due` | The simulated bank, its settings, and "Run due payments now". |
+| `GET` or `POST /api/cron/tick` | The payment scheduler's tick; needs `Authorization: Bearer <CRON_SECRET>`. |
 | `GET /api/invoices/:id` | Adds `actions` (what is allowed and why not), `linkablePos`, `paymentMethods`, `payment`. |
 | `GET /api/payables` | Overdue and due-soon invoices and cash needed (approved due in 7/30 days, awaiting a decision due in 7 days; AUD only). |
 | `POST /api/invoices/:id/approval` | Kept: `approve`, `approve_received`, `reject`. |
@@ -355,9 +405,13 @@ To connect real systems, write a file with the same functions as
 
 ## What this prototype does not do
 
-- **No login.** Anyone who can open the page can approve invoices, schedule payments, send replies and confirm
-  bank matches. The "Your name" fields are typed, not verified. Add authentication and roles
-  before any real data goes in.
+- **Accounts, not single sign-on.** Email and password accounts with roles; no Google or
+  company sign-in, no multi-factor authentication, and no self-service password reset (an
+  administrator sets a new one). Sign-in rate limits are counted per server instance.
+- **A simulated bank only.** There is no adapter for a real bank. Bank payments pay the
+  whole remaining amount (part payments are by Cheque or Other), in AUD only. The simulated
+  balance is updated with two separate writes, so a crash at exactly the wrong moment can
+  leave it off by one payment (an administrator can set it again).
 - **No real systems.** Suppliers, orders, deliveries, the payment queue, the outbox and the
   bank statement are sample data in MongoDB.
 - **No mailbox.** Emails are pasted in. A real connection must also check that the sender
@@ -379,8 +433,8 @@ To connect real systems, write a file with the same functions as
   ledger, accruals or journals behind it. Months follow `TIME_ZONE` (Australia/Sydney by default).
 - **Policy values are placeholders.** The 85% threshold, score weights, 2% price tolerance
   and 80% confidence floor are sample numbers; agree them with the finance team.
-- **Payments are simulated.** Scheduling and recording a payment only writes records. No
-  bank or accounting system is touched.
+- **Payments are simulated.** Scheduling, executing and recording a payment only writes
+  records. No real bank or accounting system is touched.
 - **Tax numbers are not looked up by default.** ABNs are checked against the ABR only when
   `ABR_GUID` is set (not tested live). GSTINs are never looked up online.
 - **Cash figures are AUD only.** Invoices in other currencies are listed but not added.
@@ -389,10 +443,9 @@ To connect real systems, write a file with the same functions as
 
 ## What was and was not tested
 
-Tested: the 106 automated tests (including the scenarios in `server/test/lifecycle.test.js`, the user's Australian invoice template PDF and an Indian GST invoice); every API route and all four screens, run end to end
-without a Groq key against FerretDB (a MongoDB-compatible database), including the sample
-PDFs and the sample CSV.
+Tested: the 286 automated tests (including the scenarios in `server/test/lifecycle.test.js`, the user's Australian invoice template PDF and an Indian GST invoice). The accounts, payments and simulated bank tests run on a real MongoDB server (8.0, through `mongodb-memory-server`): concurrent cron ticks, leases, duplicate submissions, retries, timeouts, and every bank scenario. The sign-in, Admin, Suppliers, Payments and invoice screens were driven in a headless browser end to end (first administrator, users, demo month, a blocked payment to an unverified supplier, a two-person bank-detail change, an EFT payment scheduled, submitted, confirmed, and its notice approved to the simulated outbox).
 
-Not tested: any live call to Groq or the ABR, (no key was available when this was built; the request
-and response handling are tested against a stand-in), and a real MongoDB server. Run the
-demo script once with your key and your database before showing it to anyone.
+Not tested: any live call to Groq or the ABR (the request and response handling are tested
+against a stand-in); the app deployed on Vercel, with Vercel Cron or an external scheduler;
+MongoDB Atlas; real email delivery of payment notices (Resend or SMTP). Run the demo script
+once with your key, your database and your scheduler before showing it to anyone.

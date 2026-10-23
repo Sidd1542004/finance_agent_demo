@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { money, day, when, STATEMENT_STATUS, LINE_STATUS } from '../format.js';
+import { money, day, when, hasRole, STATEMENT_STATUS, LINE_STATUS } from '../format.js';
 import { Rail, Reasons, RecordList, AuditTrail, useBusy, useRecords } from '../shared.jsx';
 
 const OPEN = ['suggested', 'exception', 'unmatched'];
 
-export default function ReconciliationView({ onError }) {
+export default function ReconciliationView({ user, onError }) {
   const records = useRecords(api.statements, api.statement, onError);
   const [busy, run] = useBusy(onError);
   const [sample, setSample] = useState(null);
@@ -52,6 +52,7 @@ export default function ReconciliationView({ onError }) {
           onSample={() => process(() => api.processStatementSample(sample.id))}
           onFile={(file) => process(() => api.processStatementFile(file))}
           onText={(text) => process(() => api.processStatementText(text))}
+          onSimBank={hasRole(user, 'payer', 'admin') ? () => process(async () => api.processStatementText(await api.simStatementCsv())) : null}
         />
         <section className="card">
           <h2>Statements</h2>
@@ -96,7 +97,7 @@ export default function ReconciliationView({ onError }) {
   );
 }
 
-function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
+function AddStatement({ sample, busy, disabled, onSample, onFile, onText, onSimBank }) {
   const [pasting, setPasting] = useState(false);
   const [text, setText] = useState('');
   return (
@@ -111,6 +112,11 @@ function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
       <button className="btn btn-primary btn-block" disabled={disabled || !sample} onClick={onSample}>
         {busy ? 'Reconciling…' : 'Reconcile the sample statement'}
       </button>
+      {onSimBank && (
+        <button className="btn btn-outline btn-block" disabled={disabled} onClick={onSimBank}>
+          Reconcile the simulated bank's statement
+        </button>
+      )}
       <div className="add-alt">
         <label className={`btn btn-outline file-btn ${disabled ? 'is-disabled' : ''}`}>
           Upload a CSV
@@ -162,7 +168,6 @@ function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
 
 function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
   const { statement, run } = data;
-  const [who, setWho] = useState('');
   const status = STATEMENT_STATUS[statement.status] || STATEMENT_STATUS.received;
   const lines = statement.lines || [];
   const open = lines.filter((l) => OPEN.includes(l.status));
@@ -192,17 +197,7 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
           <h2 id="st-decision">
             {open.length} line{open.length === 1 ? ' needs' : 's need'} your decision
           </h2>
-          <p>Each one is marked below. Enter your name once, then decide each line.</p>
-          <div className="decision-form">
-            <div className="decision-fields">
-              <div>
-                <label className="field-label" htmlFor="st-who">
-                  Your name
-                </label>
-                <input id="st-who" type="text" value={who} onChange={(e) => setWho(e.target.value)} autoComplete="name" />
-              </div>
-            </div>
-          </div>
+          <p>Each one is marked below. Your decisions are recorded under your account.</p>
         </section>
       )}
 
@@ -233,7 +228,7 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
           <h2>Statement lines</h2>
           <ol className="bank-lines">
             {lines.map((line) => (
-              <BankLine key={line.n} line={line} who={who} canDecide={statement.status === 'needs_person'} busy={busy} onResolve={onResolve} />
+              <BankLine key={line.n} line={line} canDecide={statement.status === 'needs_person'} busy={busy} onResolve={onResolve} />
             ))}
           </ol>
         </section>
@@ -280,7 +275,7 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
   );
 }
 
-function BankLine({ line, who, canDecide, busy, onResolve }) {
+function BankLine({ line, canDecide, busy, onResolve }) {
   const [note, setNote] = useState('');
   const status = LINE_STATUS[line.status] || LINE_STATUS.unmatched;
   const isOpen = OPEN.includes(line.status);
@@ -322,15 +317,11 @@ function BankLine({ line, who, canDecide, busy, onResolve }) {
             <input id={`note-${line.n}`} type="text" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
           {candidate && (
-            <button
-              className="btn btn-primary"
-              disabled={working || !who.trim() || (needsNote && !note.trim())}
-              onClick={() => onResolve(line.n, { action: 'confirm', decidedBy: who, note })}
-            >
+            <button className="btn btn-primary" disabled={working || (needsNote && !note.trim())} onClick={() => onResolve(line.n, { action: 'confirm', note })}>
               Match to {candidate.invoiceNumber}
             </button>
           )}
-          <button className="btn btn-outline" disabled={working || !who.trim() || !note.trim()} onClick={() => onResolve(line.n, { action: 'dismiss', decidedBy: who, note })}>
+          <button className="btn btn-outline" disabled={working || !note.trim()} onClick={() => onResolve(line.n, { action: 'dismiss', note })}>
             Dismiss line
           </button>
         </div>

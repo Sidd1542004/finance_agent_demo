@@ -16,6 +16,11 @@ import { registerFinanceRoutes } from './finance.js';
 import { pageOf, pageParams } from './paging.js';
 import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { createWorkLimiter } from '../rateLimit.js';
+import { requireUser, requireRole } from '../auth/middleware.js';
+import { createAuthRouter } from './auth.js';
+import { createAdminRouter } from './admin.js';
+import { registerSupplierRoutes } from './suppliers.js';
+import { registerPaymentCron, registerPaymentRoutes, registerAdminPaymentRoutes } from './payments.js';
 
 const MAX_TEXT = 200_000;
 // Vercel refuses request bodies over 4.5 MB before they reach the app, so uploads stop at 4 MB.
@@ -30,7 +35,7 @@ const workIfRerun = (req, res, next) => (RERUN_ACTIONS.has(req.params.action) ? 
 
 const INVOICE_FILTERS = {
   waiting: { status: { $in: [...AWAITING_DECISION, 'failed'] } },
-  pay: { status: { $in: ['approved', 'payment_pending', 'payment_failed'] } },
+  pay: { status: { $in: ['approved', 'payment_pending', 'payment_processing', 'payment_failed'] } },
 };
 
 async function invoiceCounts() {
@@ -48,6 +53,14 @@ async function invoiceCounts() {
 // Express 4 does not catch errors from async handlers on its own.
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
+// The signed-in person, as the actor of an action. Whatever name the request
+// body types is ignored: the session decides who acted.
+export const actorOf = (req) => ({ id: req.user.id, name: req.user.name, roles: req.user.roles });
+export const withoutTypedName = (body) => {
+  const { decidedBy: _ignored, ...rest } = body || {};
+  return rest;
+};
+
 const requireId = (req) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'That invoice no longer exists.');
   return req.params.id;
@@ -62,11 +75,40 @@ api.get('/health', (req, res) => {
     reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null },
     policy: config.policy,
     abr: Boolean(abrLookup),
-    roles: { reviewers: config.roles.reviewers.length > 0, approvers: config.roles.approvers.length > 0, payers: config.roles.payers.length > 0 },
+    auth: 'accounts',
     demoMode: config.demoMode,
     timeZone: config.timeZone,
   });
 });
+
+// Sign in / out. Open: these are how a person gets a session.
+api.use('/auth', createAuthRouter());
+
+// The daily summary email, called once a day by a Vercel cron job with
+// Authorization: Bearer CRON_SECRET. ?preview=1 returns the email without sending it.
+// Open to the scheduler: CRON_SECRET is checked instead of a session.
+api.get(
+  '/cron/daily-summary',
+  wrap(
+    createDailySummaryHandler({
+      secret: config.alerts.cronSecret,
+      recipients: config.alerts.recipients,
+      appUrl: config.alerts.appUrl,
+      companyName: config.companyName,
+      mailer: createMailer(config.alerts),
+    }),
+  ),
+);
+
+// The payment scheduler's tick: CRON_SECRET, not a session.
+registerPaymentCron(api);
+
+// Everything below needs a signed-in user.
+api.use(requireUser);
+
+const adminRouter = createAdminRouter();
+registerAdminPaymentRoutes(adminRouter);
+api.use('/admin', adminRouter);
 
 api.get('/samples', (req, res) => {
   res.json(sampleInvoices.map((s) => ({ id: s.id, title: s.title, hint: s.hint, vendorName: s.vendor.name, total: sampleTotals(s).total })));
@@ -102,13 +144,14 @@ api.get(
 api.get(
   '/invoices/:id',
   wrap(async (req, res) => {
-    res.json(await getInvoiceDetail(requireId(req)));
+    res.json(await getInvoiceDetail(requireId(req), actorOf(req)));
   }),
 );
 
 // Add an invoice (sample, pasted text or uploaded file) and run the agent on it.
 api.post(
   '/invoices',
+  requireRole('reviewer'),
   work,
   upload.single('file'),
   wrap(async (req, res) => {
@@ -147,7 +190,7 @@ api.post(
   '/invoices/:id/rerun',
   work,
   wrap(async (req, res) => {
-    res.json(await performInvoiceAction(requireId(req), 'rerun', { decidedBy: 'Reviewer', ...(req.body || {}) }));
+    res.json(await performInvoiceAction(requireId(req), 'rerun', withoutTypedName(req.body), actorOf(req)));
   }),
 );
 
@@ -157,7 +200,7 @@ api.post(
   '/invoices/:id/actions/:action',
   workIfRerun,
   wrap(async (req, res) => {
-    res.json(await performInvoiceAction(requireId(req), req.params.action, req.body || {}));
+    res.json(await performInvoiceAction(requireId(req), req.params.action, withoutTypedName(req.body), actorOf(req)));
   }),
 );
 
@@ -165,7 +208,7 @@ api.post(
 api.post(
   '/invoices/:id/approval',
   wrap(async (req, res) => {
-    res.json(await applyHumanDecision(requireId(req), req.body || {}));
+    res.json(await applyHumanDecision(requireId(req), withoutTypedName(req.body), actorOf(req)));
   }),
 );
 
@@ -192,13 +235,15 @@ api.get(
 
 api.post(
   '/reset',
+  requireRole('admin'),
   wrap(async (req, res) => {
     if (!config.demoMode) throw new HttpError(403, 'Reset is only available in demo mode.');
     await resetEverything();
     await recordAudit({
       subjectKind: 'system',
       subjectId: 'demo',
-      actor: 'Demo',
+      actor: req.user.name,
+      actorId: req.user.id,
       action: 'reset',
       detail: 'Every invoice, email, statement and report was deleted. The audit log is kept.',
     });
@@ -207,21 +252,8 @@ api.post(
 );
 
 registerFinanceRoutes(api, { upload, work });
-
-// The daily summary email, called once a day by a Vercel cron job with
-// Authorization: Bearer CRON_SECRET. ?preview=1 returns the email without sending it.
-api.get(
-  '/cron/daily-summary',
-  wrap(
-    createDailySummaryHandler({
-      secret: config.alerts.cronSecret,
-      recipients: config.alerts.recipients,
-      appUrl: config.alerts.appUrl,
-      companyName: config.companyName,
-      mailer: createMailer(config.alerts),
-    }),
-  ),
-);
+registerSupplierRoutes(api);
+registerPaymentRoutes(api);
 
 api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 
@@ -231,7 +263,7 @@ api.use((err, req, res, next) => {
     const message = err.code === 'LIMIT_FILE_SIZE' ? 'That file is larger than 4 MB. Upload a smaller file, or split it.' : 'The upload could not be read.';
     return res.status(400).json({ error: message });
   }
-  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof HttpError) return res.status(err.status).json({ ...(err.extra || {}), error: err.message });
   if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'That is too much text.' });
   if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'The request was not valid JSON.' });
   console.error(err);
