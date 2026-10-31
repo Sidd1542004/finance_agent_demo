@@ -117,6 +117,21 @@ test('the check does not depend on the confidence slider: even at 50% the invoic
   assert.equal(invoice.status, 'needs_review');
 });
 
+test('at the most lenient settings allowed (85% match threshold, 50% reading confidence) it still blocks approval', async () => {
+  const s = setup({ policy: { matchThreshold: 85, minConfidence: 0.5 } });
+  const { invoice } = await s.submit();
+  assert.equal(invoice.match.score.total, 100);
+  assert.equal(invoice.checks.find((c) => c.id === 'match_score').status, 'pass');
+  assert.equal(invoice.checks.find((c) => c.id === 'reader_confidence').status, 'pass');
+  assert.equal(check(invoice).status, 'fail');
+  assert.equal(invoice.status, 'needs_review');
+  await assert.rejects(
+    s.act(invoice, 'approve', { note: 'Every other check passed.' }, person('Priya N', ['approver'])),
+    (err) => err instanceof ActionError && err.status === 409,
+  );
+  assert.equal(invoice.approval, undefined);
+});
+
 test('approval is blocked, with the reason, for an approver and an administrator alike; rejecting is still possible', async () => {
   const s = setup();
   const { invoice } = await s.submit();

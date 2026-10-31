@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toDisplay, fromDisplay, displayRange, formatValue, valueProblem, changedValues } from '../src/policyForm.js';
+import { toDisplay, fromDisplay, displayRange, formatValue, valueProblem, changedValues, checkedAtText } from '../src/policyForm.js';
 
 const match = { key: 'matchThreshold', label: 'Match score', min: 50, max: 100, step: 1, format: 'percent', value: 99, default: 99 };
 const confidence = { key: 'minConfidence', label: 'Reading confidence', min: 0.5, max: 1, step: 0.01, format: 'fraction', value: 0.99, default: 0.99 };
@@ -48,4 +48,10 @@ test('only the settings that were moved are sent', () => {
   const settings = [match, confidence, price];
   assert.deepEqual(changedValues(settings, { matchThreshold: 99, minConfidence: 0.99, priceTolerancePct: 2 }), {});
   assert.deepEqual(changedValues(settings, { matchThreshold: 90, minConfidence: 0.99, priceTolerancePct: 2.5 }), { matchThreshold: 90, priceTolerancePct: 2.5 });
+});
+
+test('an invoice run says which policy it was checked against', () => {
+  assert.equal(checkedAtText({ matchThreshold: 99, priceTolerancePct: 2, confidenceFloor: 99, version: 3 }), 'Checked at 99% match threshold (policy v3)');
+  assert.equal(checkedAtText({ matchThreshold: 95 }), 'Checked at 95% match threshold');
+  assert.equal(checkedAtText(null), null, 'runs from before snapshots were kept');
 });

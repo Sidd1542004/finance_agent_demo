@@ -5,7 +5,22 @@
 
 // supplier: beneficiary (bank detail) changes. user: accounts and roles.
 // sim_bank: simulated bank settings. payment_email: payment notices to suppliers.
-export const SUBJECT_KINDS = ['invoice', 'payment', 'query', 'statement', 'bank_line', 'report', 'system', 'supplier', 'user', 'sim_bank', 'payment_email', 'ingestion'];
+// settings: the agent's policy (services/policySettings.js).
+export const SUBJECT_KINDS = [
+  'invoice',
+  'payment',
+  'query',
+  'statement',
+  'bank_line',
+  'report',
+  'system',
+  'supplier',
+  'user',
+  'sim_bank',
+  'payment_email',
+  'ingestion',
+  'settings',
+];
 
 /** One audit entry, in a fixed shape. `actorId` (the signed-in user's id) is added only when known. */
 export function auditEntry({ subjectKind, subjectId, actor, actorId = null, action, from = null, to = null, reason = null, detail = null, at = new Date() }) {

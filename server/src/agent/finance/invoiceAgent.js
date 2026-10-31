@@ -58,7 +58,8 @@ export function fallbackCheck(invoice) {
   };
 }
 
-export function createInvoiceAgent({ ledger, extract, fallback = null, abr = null, policy, save, today }) {
+// `policy`: the default; a run may bring its own fixed copy (state.input.policy, see services/invoices.js).
+export function createInvoiceAgent({ ledger, extract, fallback = null, abr = null, policy: defaultPolicy, save, today }) {
   return {
     name: 'finance.invoice-processing',
 
@@ -138,6 +139,7 @@ export function createInvoiceAgent({ ledger, extract, fallback = null, abr = nul
       // 3. Decide: validate, find the supplier and PO, score the match, look for duplicates.
       async decide(state) {
         const { invoice } = state.input;
+        const policy = state.input.policy || defaultPolicy;
         const e = invoice.extracted;
 
         // Supplier, and an optional register lookup for a well-formed ABN.

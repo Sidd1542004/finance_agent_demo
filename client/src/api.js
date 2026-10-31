@@ -90,10 +90,10 @@ export const api = {
   updateUser: (id, body) => request(`/admin/users/${id}`, json(body, 'PATCH')),
   resetPassword: (id, password) => request(`/admin/users/${id}/password`, json({ password })),
   runDuePayments: () => request('/admin/run-due', json({})),
-  // The agent's adjustable policy (sliders): { settings: [{ key, label, min, max, step, format, value, default, saved }] }
-  policy: () => request('/admin/policy'),
-  savePolicy: (values) => request('/admin/policy', json({ values }, 'PUT')),
-  resetPolicy: () => request('/admin/policy/reset', json({})),
+  // The agent's policy (Settings tab): { fields: [{ key, label, help, min, max, step, value, default }], version, updatedBy, updatedAt, history }
+  policySettings: () => request('/settings/policy'),
+  // Administrators: { ...changed values, expectedVersion, reason }. 409 when someone else saved first.
+  savePolicySettings: (body) => request('/settings/policy', json(body, 'PUT')),
   simBankAdmin: () => request('/admin/sim-bank'),
   // Automatic invoice ingestion (administrators). No tokens ever reach the dashboard.
   ingestion: () => request('/ingestion'),

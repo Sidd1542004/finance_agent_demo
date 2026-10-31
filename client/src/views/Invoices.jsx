@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
 import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
 import { pdfBlobProblem, fileSize, showsDocumentPanel } from '../documentView.js';
+import { checkedAtText } from '../policyForm.js';
 import { paidToText } from '../bankDetails.js';
 
 // Decisions are recorded under the signed-in person's name: there is no name to type.
@@ -381,7 +382,7 @@ function Rules({ health }) {
       </dl>
       <p className="hint">
         A score at or above the threshold makes an invoice eligible for a person to approve. It is never approved or paid automatically, and a failed mandatory check still stops
-        it. An administrator can adjust the numbers on the Admin screen; the defaults are in server/.env.
+        it. An administrator can adjust the numbers on the Settings screen (policy v{policy.version}); the defaults are in server/.env.
       </p>
     </section>
   );
@@ -504,6 +505,7 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
             Received {when(invoice.createdAt)} {sourceLabel}
             {invoice.source?.filename ? ` (${invoice.source.filename})` : ''}
           </p>
+          {checkedAtText(run?.policy) && <p className="detail-meta">{checkedAtText(run.policy)}</p>}
         </div>
         <div className="detail-amount">
           <span className="amount">{money(e.total, cur)}</span>

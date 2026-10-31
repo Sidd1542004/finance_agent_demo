@@ -256,7 +256,7 @@ test('a reset failure is still reported when the audit write fails too', async (
 
 // ---------- scope ----------
 
-test('the reset scope is the documented demo data; users, sessions, settings, scenarios and the audit log are never in it', () => {
+test('the reset scope is the documented demo data; users, sessions, settings (including the policy), scenarios and the audit log are never in it', () => {
   const names = (models) => models.map((m) => m.modelName).sort();
   assert.deepEqual(names(DEMO_DATA_MODELS), [
     'AgentRun',
@@ -276,7 +276,7 @@ test('the reset scope is the documented demo data; users, sessions, settings, sc
   ]);
   assert.deepEqual(names(REFERENCE_MODELS), ['BeneficiaryChange', 'GoodsReceipt', 'PurchaseOrder', 'Vendor']);
   const touched = new Set([...names(DEMO_DATA_MODELS), ...names(REFERENCE_MODELS)]);
-  const KEPT = ['User', 'Session', 'AuditEvent', 'Setting', 'SimBankScenario', 'IngestionSource'];
+  const KEPT = ['User', 'Session', 'AuditEvent', 'Setting', 'PolicySettings', 'SimBankScenario', 'IngestionSource'];
   for (const kept of KEPT) assert.ok(!touched.has(kept), `${kept} is kept`);
   // Every collection the app defines is either in the scope or explicitly kept.
   for (const name of mongoose.modelNames()) assert.ok(touched.has(name) || KEPT.includes(name), `${name} is neither reset nor listed as kept`);

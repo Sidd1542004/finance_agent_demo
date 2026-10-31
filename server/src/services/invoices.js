@@ -18,6 +18,7 @@ import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 import { createCalendar } from '../agent/finance/businessDays.js';
 import { BANK_METHODS } from '../agent/finance/beneficiary.js';
 import { invoiceDocumentStatus } from './invoiceDocuments.js';
+import { policySnapshot } from './policySettings.js';
 import { paymentFor, transactionFor, noticeFor } from './bankViews.js';
 
 // When bank payments may run: business days, bank holidays, cut-off, in TIME_ZONE.
@@ -56,11 +57,15 @@ const agent = createInvoiceAgent({
 
 // `reading`: a scan or photo the vision reader has already read (see uploads.js).
 export async function processInvoice(invoice, { reading = null } = {}) {
-  const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [] });
+  // The policy this run checks against, fixed for the whole run and kept on it
+  // ("Checked at 99% match threshold (policy v3)"). A later save does not change it.
+  const snapshot = policySnapshot();
+  const policy = Object.freeze({ ...config.policy });
+  const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [], policy: snapshot });
 
   const result = await runAgent(
     agent,
-    { invoice, reading },
+    { invoice, reading, policy },
     {
       onStep: async (_step, steps) => {
         run.steps = [...steps];

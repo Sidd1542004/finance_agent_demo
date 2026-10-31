@@ -337,29 +337,41 @@ With no PO only the amounts and tax parts can score, so the score is low and a r
 links a PO. Suggestions (top 3, only POs sharing at least one item, provisional score
 ≥ 50%) are shown with an explanation and are never linked automatically.
 
-### Adjusting the policy (Admin screen)
+### Adjusting the policy (Settings screen)
 
-An administrator can move four values with sliders under **Admin > Agent policy**:
+An administrator moves three values with sliders on the **Settings** tab (visible to
+administrators only; the API refuses anyone else):
 
-| Setting | Default | Slider |
+| Setting | Default | Allowed |
 |---|---|---|
-| Match score for approval review (`MATCH_THRESHOLD`) | 99% | 50% to 100%, steps of 1 |
-| Minimum invoice reading confidence (`MIN_CONFIDENCE`) | 99% | 50% to 100%, steps of 1 |
+| Match score for approval review (`MATCH_THRESHOLD`) | 99% | 85% to 100%, whole numbers |
 | Unit price may differ from the purchase order by (`PRICE_TOLERANCE_PCT`) | 2% | 0% to 10%, steps of 0.5 |
-| Minimum supplier email reading confidence (`MIN_EMAIL_CONFIDENCE`) | 80% | 50% to 100%, steps of 1 |
+| Minimum invoice reading confidence (`MIN_CONFIDENCE`, as `confidenceFloor` in percent) | 99% | 50% to 100%, whole numbers |
 
-The environment variables stay the defaults. A saved value is kept in MongoDB (the
-`settings` collection, `_id: "policy"`) and laid over the same `config.policy` object the
-agents already use, so there is one policy, not two. Every warm Vercel instance re-reads
-it at most every 5 seconds; the instance that saved it applies it at once. The server
-refuses any value outside the slider's limits (nothing is saved), ignores a saved value
-that later falls outside narrower limits, and logs every change and reset in the audit log
-(subject `system`, id `policy`). **Reset to defaults** goes back to the environment's values.
-Invoices already processed keep their result until they are processed again. None of these
-values approves anything.
+They live in ONE `PolicySettings` document in MongoDB (`policysettings`, `_id: "policy"`):
+the three values, `version`, `updatedBy { id, name }` and `updatedAt`. The environment
+variables are only the initial defaults, used to create it the first time it is read.
 
-Supplier emails used to share `MIN_CONFIDENCE` with invoices. They now have their own
-`MIN_EMAIL_CONFIDENCE` (80%), so the 99% invoice floor does not stop automatic status replies.
+- `GET /api/settings/policy` (any signed-in role): the values, limits, version and the
+  latest changes. `PUT /api/settings/policy` (administrators, CSRF):
+  `{ matchThreshold?, priceTolerancePct?, confidenceFloor?, expectedVersion, reason }`.
+  Anything out of range, unknown or without a reason is refused (400, nothing saved). The
+  save only succeeds from the version the administrator looked at: if someone else saved
+  first, it is refused (409) and the screen reloads their values.
+- Every change is in the audit log (subject `settings`): each old and new value, who, and
+  the reason. The Settings tab shows the latest changes.
+- The values are laid over the same `config.policy` object the agents use, so there is
+  one policy. Every warm instance re-reads them at most every 5 seconds; the instance that
+  saved applies them at once. `GET /api/status` serves the live values and version.
+- They apply to invoices processed, or processed again, after the save. Existing invoices
+  are not re-evaluated. Each invoice run keeps the values and the version it was checked
+  against, and the invoice page says so ("Checked at 99% match threshold (policy v3)").
+- None of them approves anything, and none switches off a mandatory check: an invoice read
+  by the rules reader while the AI reader was down (`ai_reader_unavailable`) stays blocked
+  at any setting.
+
+Supplier emails have their own reading-confidence floor, `MIN_EMAIL_CONFIDENCE` (80%),
+set in the environment only.
 
 ### When the AI reader fails
 

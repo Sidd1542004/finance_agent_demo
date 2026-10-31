@@ -48,6 +48,28 @@ export const Session = model(
   ),
 );
 
+// The agent's adjustable policy (the Settings screen): ONE document, _id 'policy'.
+// Created with the environment's values (MATCH_THRESHOLD, PRICE_TOLERANCE_PCT,
+// MIN_CONFIDENCE) the first time it is read; from then on only an administrator
+// changes it, with a reason, version by version (compare-and-set). See
+// services/policySettings.js. Percentages: confidenceFloor 99 means 0.99.
+export const PolicySettings = model(
+  'PolicySettings',
+  new Schema(
+    {
+      _id: { type: String, default: 'policy' },
+      matchThreshold: { type: Number, required: true },
+      priceTolerancePct: { type: Number, required: true },
+      confidenceFloor: { type: Number, required: true },
+      version: { type: Number, required: true, default: 1 },
+      updatedBy: { id: { type: String, default: null }, name: { type: String, default: null } },
+      updatedAt: { type: Date, default: null },
+    },
+    { versionKey: false },
+  ),
+  'policysettings',
+);
+
 // Small one-off flags, keyed by _id (for example the first-administrator setup).
 export const Setting = model('Setting', new Schema({ _id: String, value: { type: Mixed, default: null } }, { timestamps: true }));
 
@@ -274,6 +296,8 @@ export const AgentRun = model(
       subjectId: { type: Schema.Types.ObjectId, index: true },
       status: { type: String, default: 'running' },
       steps: { type: [Mixed], default: [] },
+      // Invoice runs: the policy the agent checked against { matchThreshold, priceTolerancePct, confidenceFloor, version }.
+      policy: { type: Mixed, default: null },
       finishedAt: Date,
     },
     { timestamps: true },

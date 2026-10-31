@@ -9,6 +9,7 @@ import QueriesView from './views/Queries.jsx';
 import ReconciliationView from './views/Reconciliation.jsx';
 import ReportView from './views/Report.jsx';
 import AdminView from './views/Admin.jsx';
+import SettingsView from './views/Settings.jsx';
 import Login from './views/Login.jsx';
 
 // The Finance Operations Agent's workflows. `admin`: shown to administrators only.
@@ -19,6 +20,7 @@ const TABS = [
   ['queries', 'Supplier emails', QueriesView],
   ['bank', 'Bank reconciliation', ReconciliationView],
   ['report', 'Month-end report', ReportView],
+  ['settings', 'Settings', SettingsView, 'admin'],
   ['admin', 'Admin', AdminView, 'admin'],
 ];
 

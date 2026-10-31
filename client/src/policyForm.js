@@ -38,3 +38,9 @@ export function changedValues(settings, draft) {
   for (const s of settings) if (Object.hasOwn(draft, s.key) && draft[s.key] !== s.value) out[s.key] = draft[s.key];
   return out;
 }
+
+/** The policy an invoice run was checked against, in words: "Checked at 99% match threshold (policy v3)". */
+export function checkedAtText(snapshot) {
+  if (!snapshot || typeof snapshot.matchThreshold !== 'number') return null;
+  return `Checked at ${snapshot.matchThreshold}% match threshold${snapshot.version ? ` (policy v${snapshot.version})` : ''}`;
+}

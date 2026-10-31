@@ -263,7 +263,7 @@ checks in `matching.js` (`hold`), and `duplicate` in `duplicates.js` (`review`).
 
 Match score (`matching.js:30`): weights `supplier 20, items 20, quantity 20,
 price 20, amounts 10, tax 10`; `match_score` passes at
-`MATCH_THRESHOLD` (default 85).
+`MATCH_THRESHOLD` (default 85 at the time of this analysis; now 99, adjustable on the Settings screen).
 
 People's actions (`lifecycle.js:129-164`; executed in `invoiceActions.js:77-505`):
 

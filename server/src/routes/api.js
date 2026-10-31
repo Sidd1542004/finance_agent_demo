@@ -20,6 +20,7 @@ import {
 } from '../services/invoices.js';
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
 import { referenceVendor, auditEntryFor } from '../services/bankViews.js';
+import { policySnapshot } from '../services/policySettings.js';
 import { keepInvoiceDocument, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { HttpError, recordAudit } from '../services/runs.js';
@@ -32,6 +33,7 @@ import { createDemoResetHandler, demoResetBlocked } from '../services/demoReset.
 import { registerIngestionPublicRoutes, registerIngestionRoutes } from './ingestion.js';
 import { createAuthRouter } from './auth.js';
 import { createAdminRouter } from './admin.js';
+import { createSettingsRouter } from './settings.js';
 import { registerSupplierRoutes } from './suppliers.js';
 import { registerPaymentRoutes, registerAdminPaymentRoutes } from './payments.js';
 import { createCronRouter } from './cron.js';
@@ -114,7 +116,8 @@ api.get('/status', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
     reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null },
-    policy: config.policy,
+    // The live policy (the Settings screen's values), with its version.
+    policy: { ...config.policy, version: policySnapshot().version },
     abr: Boolean(abrLookup),
     auth: 'accounts',
     demoMode: config.demoMode,
@@ -123,6 +126,9 @@ api.get('/status', (req, res) => {
     timeZone: config.timeZone,
   });
 });
+
+// The agent's policy: read by any role, changed by administrators (routes/settings.js).
+api.use('/settings', createSettingsRouter());
 
 const adminRouter = createAdminRouter();
 registerAdminPaymentRoutes(adminRouter);

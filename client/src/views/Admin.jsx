@@ -3,10 +3,9 @@ import { api } from '../api.js';
 import { money, when, ROLE_LABEL } from '../format.js';
 import { useBusy } from '../shared.jsx';
 import Ingestion from './Ingestion.jsx';
-import Policy from './Policy.jsx';
 
-// Administrators: user accounts and roles, the agent's policy (sliders), and
-// the simulated bank's settings (balance, per-supplier test scenarios).
+// Administrators: user accounts and roles, and the simulated bank's settings
+// (balance, per-supplier test scenarios). The agent's policy is on the Settings tab.
 // Everything here is logged.
 const SCENARIO_LABEL = {
   success: 'Success',
@@ -18,7 +17,7 @@ const SCENARIO_LABEL = {
   temporary_failure: 'Temporary failure (first attempt)',
 };
 
-export default function AdminView({ user, onError, onNotice, openInvoice, onHealthChange }) {
+export default function AdminView({ user, onError, onNotice, openInvoice }) {
   const [users, setUsers] = useState({ items: [], roles: [] });
   const [bank, setBank] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
@@ -44,7 +43,6 @@ export default function AdminView({ user, onError, onNotice, openInvoice, onHeal
   return (
     <div className="admin">
       <Users users={users} me={user} busy={busy} act={act} />
-      <Policy onError={onError} onNotice={onNotice} onSaved={onHealthChange} />
       {bank && <SimBank bank={bank} suppliers={suppliers} busy={busy} act={act} />}
       <Ingestion onError={onError} onNotice={onNotice} openInvoice={openInvoice} />
     </div>
