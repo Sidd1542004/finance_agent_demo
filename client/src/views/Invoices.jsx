@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
 import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
-import { pdfBlobProblem, fileSize, showsDocumentPanel } from '../documentView.js';
+import { documentBlobProblem, fileSize, documentButtons, opensInNewTab } from '../documentView.js';
 import { checkedAtText } from '../policyForm.js';
 import { paidToText } from '../bankDetails.js';
 
@@ -524,7 +524,7 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
 
       <Actions data={data} busy={busy} onAct={onAct} user={user} />
 
-      {showsDocumentPanel(data.document) && <OriginalPdf key={invoice._id} invoiceId={invoice._id} document={data.document} />}
+      {data.documents && <Documents key={invoice._id} invoiceId={invoice._id} documents={data.documents} />}
 
       {invoice.extracted && (
         <>
@@ -726,11 +726,13 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
   );
 }
 
-// The invoice's original PDF, viewed inside the app. It is fetched first (with
-// the same sign-in as everything else) and shown from memory, so a missing or
-// damaged file gives a clear message instead of an error page in the frame.
-function OriginalPdf({ invoiceId, document }) {
-  const [view, setView] = useState({ url: null, loading: false, error: null });
+// The documents behind the invoice: its original (or its text), the purchase
+// order and the delivery slip. One button each, disabled with the reason when
+// the document does not exist. On a wide screen the document opens in a panel
+// here (fetched first with the same sign-in, so a missing one gives a clear
+// message instead of an error page in the frame); on a phone, in a new tab.
+function Documents({ invoiceId, documents }) {
+  const [view, setView] = useState({ kind: null, url: null, loading: null, error: null });
 
   // Free the in-memory copy when it is replaced or the invoice is closed.
   useEffect(
@@ -740,53 +742,75 @@ function OriginalPdf({ invoiceId, document }) {
     [view.url],
   );
 
-  const open = async () => {
-    setView({ url: null, loading: true, error: null });
+  const open = async (d) => {
+    if (opensInNewTab(window.innerWidth)) {
+      window.open(api.invoiceDocumentUrl(invoiceId, d.kind), '_blank', 'noopener');
+      return;
+    }
+    setView({ kind: null, url: null, loading: d.kind, error: null });
     try {
-      const blob = await api.invoiceDocument(invoiceId);
-      const problem = pdfBlobProblem(blob);
+      const blob = await api.invoiceDocument(invoiceId, d.kind);
+      const problem = documentBlobProblem(blob);
       if (problem) throw new Error(problem);
-      setView({ url: URL.createObjectURL(blob), loading: false, error: null });
+      setView({ kind: d.kind, url: URL.createObjectURL(blob), loading: null, error: null });
     } catch (err) {
-      setView({ url: null, loading: false, error: err.message });
+      setView({ kind: null, url: null, loading: null, error: err.message });
     }
   };
+  const shown = documents.find((d) => d.kind === view.kind) || null;
+  const buttons = documentButtons(documents);
 
   return (
-    <section className="panel original-pdf">
+    <section className="panel documents">
       <div className="panel-head">
-        <h2>Original invoice (PDF)</h2>
-        {document.available && (
-          <div className="decision-actions">
-            {view.url ? (
-              <button className="btn btn-outline" onClick={() => setView({ url: null, loading: false, error: null })}>
-                Hide PDF
-              </button>
-            ) : (
-              <button className="btn btn-outline" disabled={view.loading} onClick={open}>
-                {view.loading ? 'Opening…' : 'View PDF'}
-              </button>
-            )}
-            <a className="btn btn-outline" href={api.invoiceDocumentUrl(invoiceId)} target="_blank" rel="noopener noreferrer">
-              Open in a new tab
-            </a>
-          </div>
-        )}
+        <h2>Documents</h2>
+        <div className="decision-actions" role="group" aria-label="Documents">
+          {buttons.map((b) => (
+            <button
+              key={b.kind}
+              className={`btn ${view.kind === b.kind ? 'btn-primary' : 'btn-outline'}`}
+              disabled={!b.enabled || Boolean(view.loading)}
+              title={b.reason || undefined}
+              aria-pressed={view.kind === b.kind}
+              onClick={() => open(b)}
+            >
+              {view.loading === b.kind ? 'Opening…' : b.label}
+            </button>
+          ))}
+        </div>
       </div>
-      {document.available ? (
-        <p className="hint">
-          {document.filename}
-          {document.size ? `, ${fileSize(document.size)}` : ''}. Compare it with the fields the agent read.
-        </p>
-      ) : (
-        <p className="hint">{document.reason}</p>
-      )}
+      <ul className="documents-notes">
+        {buttons
+          .filter((b) => b.note)
+          .map((b) => (
+            <li key={b.kind} className="hint">
+              {b.label}: {b.note}
+            </li>
+          ))}
+      </ul>
       {view.error && (
         <p className="form-hint" role="alert">
           {view.error}
         </p>
       )}
-      {view.url && <iframe className="pdf-frame" src={view.url} title={`Original invoice ${document.filename || ''}`.trim()} />}
+      {view.url && shown && (
+        <div className="document-view">
+          <div className="decision-actions">
+            <span className="hint">
+              {shown.label}
+              {shown.filename ? `: ${shown.filename}` : ''}
+              {shown.size ? `, ${fileSize(shown.size)}` : ''}
+            </span>
+            <a className="btn btn-outline" href={api.invoiceDocumentUrl(invoiceId, shown.kind)} target="_blank" rel="noopener noreferrer">
+              Open in a new tab
+            </a>
+            <button className="btn btn-outline" onClick={() => setView({ kind: null, url: null, loading: null, error: null })}>
+              Close
+            </button>
+          </div>
+          <iframe className="pdf-frame" src={view.url} title={shown.label} />
+        </div>
+      )}
     </section>
   );
 }

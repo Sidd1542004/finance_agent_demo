@@ -1,22 +1,37 @@
-// Viewing an invoice's original PDF, as plain functions (no React), so they
-// can be tested with node --test. The server decides what can be viewed and
-// says why not (GET /api/invoices/:id: `document`); this only checks what
-// actually arrived before it is shown.
+// The invoice screen's Documents row, as plain functions (no React), so they
+// can be tested with node --test. The server says what exists and why not
+// (GET /api/invoices/:id: `documents`); this only decides how to show it and
+// checks what actually arrived before it is shown.
 
-export const PDF_TYPE = 'application/pdf';
+export const DOCUMENT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'];
+// Narrower than this (a phone): documents open in a new tab instead of a panel.
+export const NARROW_SCREEN_PX = 700;
 
-/** Why a downloaded file cannot be shown as a PDF, or null. `blob`: { type, size }. */
-export function pdfBlobProblem(blob) {
-  if (!blob || !(blob.size > 0)) return 'The PDF is empty, so there is nothing to show.';
-  if (
-    String(blob.type || '')
-      .split(';')[0]
-      .trim()
-      .toLowerCase() !== PDF_TYPE
-  )
-    return 'The server did not send a PDF, so it is not shown.';
+/** Why a downloaded document cannot be shown, or null. `blob`: { type, size }. */
+export function documentBlobProblem(blob) {
+  if (!blob || !(blob.size > 0)) return 'The document is empty, so there is nothing to show.';
+  const type = String(blob.type || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  if (!DOCUMENT_TYPES.includes(type)) return 'The server did not send a document this page can show, so it is not shown.';
   return null;
 }
+
+/** One button per document: { kind, label, enabled, reason (when disabled), note (shown under the row) }. */
+export function documentButtons(documents = []) {
+  return documents.map((d) => ({
+    kind: d.kind,
+    label: d.label,
+    enabled: Boolean(d.available),
+    reason: d.available ? null : d.reason || 'Not available.',
+    // Disabled: say why. Available as text instead of the original: say that too.
+    note: !d.available ? d.reason || 'Not available.' : d.source === 'text' ? d.reason : null,
+  }));
+}
+
+/** On a phone, a document opens in a new tab. */
+export const opensInNewTab = (width) => typeof width === 'number' && width < NARROW_SCREEN_PX;
 
 /** 1536 -> "1.5 KB". */
 export function fileSize(bytes) {
@@ -25,6 +40,3 @@ export function fileSize(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1).replace(/\.0$/, '')} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '')} MB`;
 }
-
-/** Whether to show the original-file panel at all: not for pasted text or samples, which never had a file. */
-export const showsDocumentPanel = (document) => Boolean(document) && document.code !== 'no_file';

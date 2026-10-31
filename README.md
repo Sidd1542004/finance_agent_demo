@@ -402,19 +402,32 @@ for the person, the email is **never answered automatically**, and it goes to a
 person with the check "Email was read by the AI reader" failed and the reason, under
 the same codes as invoices (`rate_limit`, `timeout`, `bad_output`, ...).
 
-### Viewing the original PDF
+### Documents on the invoice screen
 
-An uploaded PDF, or a PDF imported from a mailbox, is kept (the `invoicedocuments`
-collection, one per invoice, at most 15 MB) and shown on the invoice page under
-**Original invoice (PDF)**: **View PDF** opens it inside the page, **Open in a new tab**
-opens it in the browser's PDF viewer. Nothing is downloaded. The file is served by
-`GET /api/invoices/:id/document` with the same sign-in and roles as the invoice itself, as
-`application/pdf`, inline, `nosniff`, `Cache-Control: private, no-store`, and only framed by
-this site. Images, text files, pasted text and samples are not kept (their text is on the
-invoice); the page says so instead. A PDF invoice added before this change says its PDF was
-not kept. A damaged PDF is refused at upload, as before. On Vercel, a PDF over 4.4 MB (only
-possible from a mailbox) cannot be sent back and the page says so. Reset and Load demo month
-delete the stored PDFs with their invoices.
+The invoice page has a **Documents** row with three buttons. Each opens the document in a
+panel on the page, or in a new tab on a phone. A button is disabled, with the reason, when
+its document does not exist (for example "No purchase order linked").
+
+| Button | What it shows |
+|---|---|
+| Invoice | The original file as it was uploaded or imported from a mailbox: PDF, PNG, JPEG or plain text, at most 4 MB, kept in the `invoicedocuments` collection (contentType, size, sha256, data). For an invoice added as text (pasted, or a sample), or one whose file was not kept (added before files were stored, or larger than 4 MB), its text. |
+| Purchase order | A PDF made on request from the linked purchase order: supplier, PO number, date, items, quantities, prices, subtotal, GST and total. |
+| Delivery slip | A PDF made on request from the goods receipts against that purchase order: each delivery, its date, items, quantities and their value at the PO price. |
+
+The two generated PDFs say on the page that they come from the records in this system, not
+the original documents. They are made with `pdfkit` (the only PDF-writing library; `unpdf`
+only reads PDFs). It adds about 3.6 MB to the traced Vercel function (38.9 MB to 42.7 MB).
+
+`GET /api/invoices/:id/documents` lists what is available, and
+`GET /api/invoices/:id/documents/:kind` (`invoice`, `purchase_order`, `delivery_slip`) sends
+one. Both need a signed-in user with any role, like the invoice itself. A document is sent
+inline, with `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and framed only by
+this site. The type is decided from the file's bytes, never from what the uploader or the
+email said, and only `application/pdf`, `image/png`, `image/jpeg` or `text/plain` is ever
+stored or sent. An HTML file uploaded as text is kept and sent as plain text, an SVG is
+refused at upload, and a stored file whose bytes do not match its type is refused (415). A
+missing document is a 404 with the reason. Document content is not masked: it is what the
+supplier sent. Reset and Load demo month delete the stored files with their invoices.
 
 ### Statuses
 
@@ -482,14 +495,14 @@ invoice from also paying it, administrators included. The earlier typed-name lis
 | `POST /api/auth/login`, `/logout`, `/setup`, `/password`; `GET /api/auth/me` | Sign-in. |
 | `/api/admin/users...` | Users and roles (administrators). |
 | `GET /api/admin/policy`, `PUT /api/admin/policy` `{ values }`, `POST /api/admin/policy/reset` | Administrators: the adjustable policy (the Admin screen's sliders): limits, current values and defaults; save (refused as a whole if any value is out of bounds); back to the defaults. Audited. |
-| `GET /api/invoices/:id/document` | The invoice's original PDF, inline (`application/pdf`). Same access as `GET /api/invoices/:id`. 404 with a `code` (`no_file`, `not_pdf`, `not_stored`) when there is none, 415 if the stored file is not a PDF, 413 on Vercel above 4.4 MB. |
+| `GET /api/invoices/:id/documents`, `GET /api/invoices/:id/documents/:kind` | The documents behind an invoice (`invoice`, `purchase_order`, `delivery_slip`): the list, and one inline. Same access as `GET /api/invoices/:id`. 404 with the reason when it does not exist; only PDF, PNG, JPEG or plain text is sent. |
 | `GET /api/suppliers`; `POST /api/suppliers/:abn/beneficiary-changes`; `POST /api/beneficiary-changes/:id/approve`, `/reject` | Supplier bank details (simulated), two people. |
 | `GET /api/payments?status=`, `GET /api/payments/:id`, `GET /api/payment-calendar` | Payments by status, one payment with its jobs, bank transaction and notices; the scheduling rules. |
 | `GET /api/payment-notices`; `POST /api/payments/:id/notices`; `POST /api/payment-notices/:id/send`, `/discard` | Payment notices to suppliers: payers and reviewers draft, approvers and administrators send, payers, reviewers and approvers discard. Reviewers see the bodies with the account redacted. |
 | `POST /api/suppliers/:abn/bank-details/reveal` | Approvers and administrators: the full stored bank details, with a reason; logged. Everywhere else they are masked, and hidden from reviewers (docs/payments.md). |
 | `/api/sim-bank/...`; `/api/admin/sim-bank...`; `POST /api/admin/run-due` | The simulated bank, its settings, and "Run due payments now". |
 | `GET` or `POST /api/cron/tick` | The payment scheduler's tick; needs `Authorization: Bearer <CRON_SECRET>`. |
-| `GET /api/invoices/:id` | Adds `actions` (what is allowed and why not), `linkablePos`, `paymentMethods`, `payment`, and `document` (whether the original PDF can be viewed, and if not, why). |
+| `GET /api/invoices/:id` | Adds `actions` (what is allowed and why not), `linkablePos`, `paymentMethods`, `payment`, and `documents` (what can be viewed, and if not, why). |
 | `GET /api/payables` | Overdue and due-soon invoices and cash needed (approved due in 7/30 days, awaiting a decision due in 7 days; AUD only). |
 | `POST /api/invoices/:id/approval` | Kept: `approve`, `approve_received`, `reject`. |
 | `POST /api/invoices/:id/rerun` | Kept: re-checks through the `rerun` action. |

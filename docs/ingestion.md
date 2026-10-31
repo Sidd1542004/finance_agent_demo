@@ -30,10 +30,10 @@ mailbox ──(scheduler or "Sync inbox now")──> list new messages since the
 - **Same pipeline.** `services/ingestion.js` calls `readUpload` and
   `processInvoice` from the upload flow; there is no second invoice pipeline.
   Imported invoices appear on the Invoices screen ("as an email attachment from …").
-  An imported PDF is kept with its invoice, like an uploaded one, so a person can
-  view it on the invoice page (see "Viewing the original PDF" in the README). On
-  Vercel, a PDF over 4.4 MB cannot be sent back to the browser; keep
-  `INGESTION_MAX_ATTACHMENT_MB` at 4 there if every PDF must be viewable.
+  An imported attachment (PDF, PNG or JPEG, up to 4 MB) is kept with its invoice,
+  like an uploaded file, so a person can view it on the invoice page (see
+  "Documents on the invoice screen" in the README). A larger one is still imported,
+  but only its text can be viewed.
 - **Duplicates.** The same file never becomes two invoices (a unique index on
   the file hash, safe with several workers). The same invoice in a different
   file (same supplier and number, or same supplier, total and date) is imported

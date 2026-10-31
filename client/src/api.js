@@ -131,9 +131,11 @@ export const api = {
   // Lists come a page at a time: { items, nextCursor }.
   invoices: (params) => request(`/invoices${query(params)}`),
   invoice: (id) => request(`/invoices/${id}`),
-  // The invoice's original PDF: as a Blob for the viewer, and its address for "Open in a new tab".
-  invoiceDocument: (id) => requestBlob(`/invoices/${id}/document`),
-  invoiceDocumentUrl: (id) => `${API_BASE_URL}/api/invoices/${id}/document`,
+  // The documents behind an invoice (kind: invoice | purchase_order | delivery_slip): the list,
+  // one as a Blob for the viewer, and its address for a new tab.
+  invoiceDocuments: (id) => request(`/invoices/${id}/documents`),
+  invoiceDocument: (id, kind) => requestBlob(`/invoices/${id}/documents/${kind}`),
+  invoiceDocumentUrl: (id, kind) => `${API_BASE_URL}/api/invoices/${id}/documents/${kind}`,
   processSample: (sampleId) => request('/invoices', json({ sampleId })),
   processText: (text) => request('/invoices', json({ text })),
   processFile: (file) => {

@@ -210,17 +210,19 @@ invoiceSchema.index({ 'aiFallback.at': -1 }, { name: 'ai_fallback', sparse: true
 invoiceSchema.index({ 'source.fileHash': 1 }, { name: 'one_invoice_per_file', unique: true, partialFilterExpression: { 'source.fileHash': { $type: 'string' } } });
 export const Invoice = model('Invoice', invoiceSchema);
 
-// The original PDF of an invoice (uploaded, or imported from a mailbox), so a
+// The original file of an invoice (uploaded, or imported from a mailbox), so a
 // person can view it in the app. Kept apart from Invoice so that invoice
-// lists, the agent and the reports never load the file. One per invoice.
-// Only PDFs are kept (see services/invoiceDocuments.js).
+// lists, the agent and the reports never load the file. One per invoice, at
+// most 4 MB; only PDF, PNG, JPEG or plain text, decided from the bytes (see
+// services/invoiceDocuments.js).
 export const InvoiceDocument = model(
   'InvoiceDocument',
   new Schema(
     {
       invoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice', required: true, unique: true },
       filename: { type: String, default: 'invoice.pdf' },
-      mimeType: { type: String, default: 'application/pdf' },
+      contentType: { type: String, enum: ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'] },
+      mimeType: { type: String, default: undefined }, // records kept before contentType (always PDFs)
       size: { type: Number, required: true },
       sha256: { type: String, required: true },
       data: { type: Buffer, required: true },

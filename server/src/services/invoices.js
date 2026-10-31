@@ -17,7 +17,7 @@ import { HttpError, recordAudit } from './runs.js';
 import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 import { createCalendar } from '../agent/finance/businessDays.js';
 import { BANK_METHODS } from '../agent/finance/beneficiary.js';
-import { invoiceDocumentStatus } from './invoiceDocuments.js';
+import { documentsFor } from './invoiceDocuments.js';
 import { policySnapshot } from './policySettings.js';
 import { paymentFor, transactionFor, noticeFor } from './bankViews.js';
 
@@ -101,11 +101,11 @@ const actions = createInvoiceActions({
 export async function getInvoiceDetail(id, actor = null) {
   const invoice = await Invoice.findById(id).lean();
   if (!invoice) throw new HttpError(404, 'That invoice no longer exists.');
-  const [run, payment, po, document] = await Promise.all([
+  const [run, payment, po, documents] = await Promise.all([
     AgentRun.findOne({ invoiceId: id }).sort({ createdAt: -1 }).lean(),
     Payment.findOne({ invoiceId: id }).lean(),
     invoice.matchedPo ? sampleLedger.findPurchaseOrder(invoice.matchedPo) : null,
-    invoiceDocumentStatus(invoice), // the original PDF, if one was kept
+    documentsFor(invoice), // the invoice's original, its purchase order and delivery slip
   ]);
   const partial = AWAITING_DECISION.includes(invoice.status) ? receivedOnly(invoice, config.policy.gstRatePct) : null;
   const ctx = { payment: payment ? { ...payment, id: String(payment._id) } : null, receivedOnly: partial, policy: config.policy, actor };
@@ -147,7 +147,7 @@ export async function getInvoiceDetail(id, actor = null) {
     jobs,
     bankTransaction: transactionFor(bankTransaction, actor),
     notices: notices.map((n) => noticeFor(n, actor)),
-    document,
+    documents,
   };
 }
 

@@ -18,10 +18,10 @@ import {
   visionReader,
   readerFallbackStatus,
 } from '../services/invoices.js';
-import { readUpload, NEEDS_OCR } from '../services/uploads.js';
+import { readUpload, uploadKind, NEEDS_OCR } from '../services/uploads.js';
 import { referenceVendor, auditEntryFor } from '../services/bankViews.js';
 import { policySnapshot } from '../services/policySettings.js';
-import { keepInvoiceDocument, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
+import { keepInvoiceDocument, listInvoiceDocuments, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { HttpError, recordAudit } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
@@ -183,14 +183,25 @@ api.get(
   }),
 );
 
-// The invoice's original PDF, shown inline in the app. Same access as the
-// invoice itself: any signed-in user with a role. A clear JSON error (with a
-// `code`) when there is no PDF, it is not valid, or it is too large to send.
+// The documents behind an invoice: its original (or its text), the purchase
+// order and the delivery slip (services/invoiceDocuments.js). Same access as the
+// invoice itself: any signed-in user with a role.
 api.get(
-  '/invoices/:id/document',
+  '/invoices/:id/documents',
   wrap(async (req, res) => {
-    const { buffer, filename } = await openInvoiceDocument(requireId(req));
-    res.set({ ...DOCUMENT_HEADERS, 'Content-Length': String(buffer.length), 'Content-Disposition': inlineDisposition(filename) });
+    res.set('Cache-Control', 'no-store');
+    res.json({ items: await listInvoiceDocuments(requireId(req), req.user) });
+  }),
+);
+
+// One of them, inline: kind = invoice | purchase_order | delivery_slip. Only
+// application/pdf, image/png, image/jpeg or text/plain is ever sent. A clear
+// JSON error (404 with the reason) when that document does not exist.
+api.get(
+  '/invoices/:id/documents/:kind',
+  wrap(async (req, res) => {
+    const { buffer, contentType, filename } = await openInvoiceDocument(requireId(req), req.params.kind, req.user);
+    res.set({ ...DOCUMENT_HEADERS, 'Content-Type': contentType, 'Content-Length': String(buffer.length), 'Content-Disposition': inlineDisposition(filename) });
     res.end(buffer);
   }),
 );
@@ -228,7 +239,8 @@ api.post(
 
     const invoice = await Invoice.create({ source, rawText });
     // The original PDF, so it can be viewed in the app (images and text are not kept).
-    if (req.file) await keepInvoiceDocument(invoice._id, { buffer: req.file.buffer, filename: req.file.originalname, mimetype: req.file.mimetype });
+    // The original file, so it can be viewed in the app (PDF, PNG, JPEG or plain text; the bytes decide).
+    if (req.file) await keepInvoiceDocument(invoice._id, { buffer: req.file.buffer, filename: req.file.originalname, text: uploadKind(req.file) === 'text' });
     await processInvoice(invoice, { reading });
     res.status(201).json(await getInvoiceDetail(invoice._id, actorOf(req)));
   }),

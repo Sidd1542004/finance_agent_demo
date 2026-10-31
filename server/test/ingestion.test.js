@@ -422,7 +422,7 @@ test('a sync imports invoice attachments for review, refuses other files, and ne
     assert.ok(!inv.rawText.includes('IGNORE ALL RULES'), 'the email body is never read');
     const doc = await InvoiceDocument.findOne({ invoiceId: inv._id }).lean();
     assert.equal(doc?.filename, inv.source.filename, 'the original PDF is kept, to view in the app');
-    assert.ok(doc.size > 0 && doc.mimeType === 'application/pdf');
+    assert.ok(doc.size > 0 && doc.contentType === 'application/pdf');
   }
   const byFile = Object.fromEntries(imported.map((i) => [i.source.filename, i]));
   const failed = (i) => i.checks.filter((c) => c.status === 'fail').map((c) => c.id);

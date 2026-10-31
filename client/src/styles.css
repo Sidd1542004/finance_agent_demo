@@ -2056,3 +2056,13 @@ input[type='date'] {
 .original-pdf a.btn {
   text-decoration: none;
 }
+
+/* The invoice's Documents row */
+.documents-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.document-view .decision-actions {
+  align-items: center;
+}
