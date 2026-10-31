@@ -36,7 +36,7 @@ const CONNECT_ERROR = {
 const RESET_SCOPE = [
   'Reset the demo data?',
   '',
-  'Deleted: every invoice, payment and scheduled payment job, supplier email and outbox message, bank statement, month-end report, learned supplier hint, agent run, the record of imported email attachments, and the simulated bank’s account and transactions.',
+  'Deleted: every invoice (with its original PDF), payment and scheduled payment job, supplier email and outbox message, bank statement, month-end report, learned supplier hint, agent run, the record of imported email attachments, and the simulated bank’s account and transactions.',
   'Replaced with the samples: suppliers (with their sample bank details), purchase orders, deliveries; pending bank-detail proposals are removed.',
   'Kept: user accounts and sign-ins, settings, the simulated bank’s test scenarios, connected mailboxes, and the audit log (the reset is added to it).',
   '',
@@ -216,6 +216,7 @@ export default function App() {
           user={user}
           onError={setError}
           onNotice={setNotice}
+          onHealthChange={() => api.health().then(setHealth)}
           openInvoice={openInvoice}
           openId={tab === 'invoices' ? openInvoiceId : null}
         />

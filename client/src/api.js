@@ -39,6 +39,28 @@ async function requestText(path) {
   return res.text();
 }
 
+// A file (for example an invoice's PDF) as a Blob. A refusal is read as the
+// server's JSON message, so it can be shown instead of the file.
+async function requestBlob(path) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE_URL}/api${path}`, { credentials: API_BASE_URL ? 'include' : 'same-origin', headers: { 'X-FOA-Request': '1' } });
+  } catch {
+    throw new Error(UNREACHABLE);
+  }
+  if (!res.ok) {
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      /* not JSON */
+    }
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+    throw new Error(data?.error || (res.status >= 500 ? UNREACHABLE : `The request failed (${res.status}).`));
+  }
+  return res.blob();
+}
+
 // ?before=<cursor>&limit=<n>&filter=..., leaving out what is not set.
 const query = (params = {}) => {
   const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''));
@@ -63,6 +85,10 @@ export const api = {
   updateUser: (id, body) => request(`/admin/users/${id}`, json(body, 'PATCH')),
   resetPassword: (id, password) => request(`/admin/users/${id}/password`, json({ password })),
   runDuePayments: () => request('/admin/run-due', json({})),
+  // The agent's adjustable policy (sliders): { settings: [{ key, label, min, max, step, format, value, default, saved }] }
+  policy: () => request('/admin/policy'),
+  savePolicy: (values) => request('/admin/policy', json({ values }, 'PUT')),
+  resetPolicy: () => request('/admin/policy/reset', json({})),
   simBankAdmin: () => request('/admin/sim-bank'),
   // Automatic invoice ingestion (administrators). No tokens ever reach the dashboard.
   ingestion: () => request('/ingestion'),
@@ -98,6 +124,9 @@ export const api = {
   // Lists come a page at a time: { items, nextCursor }.
   invoices: (params) => request(`/invoices${query(params)}`),
   invoice: (id) => request(`/invoices/${id}`),
+  // The invoice's original PDF: as a Blob for the viewer, and its address for "Open in a new tab".
+  invoiceDocument: (id) => requestBlob(`/invoices/${id}/document`),
+  invoiceDocumentUrl: (id) => `${API_BASE_URL}/api/invoices/${id}/document`,
   processSample: (sampleId) => request('/invoices', json({ sampleId })),
   processText: (text) => request('/invoices', json({ text })),
   processFile: (file) => {

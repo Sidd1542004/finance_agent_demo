@@ -30,6 +30,7 @@ import { createOutlook } from '../ingestion/providers/outlook.js';
 import { redactSecrets } from '../safeUri.js';
 import { readUpload } from './uploads.js';
 import { processInvoice, visionReader } from './invoices.js';
+import { keepInvoiceDocument } from './invoiceDocuments.js';
 import { HttpError, recordAudit } from './runs.js';
 
 export const ACTOR = 'Email ingestion';
@@ -60,6 +61,7 @@ export function createIngestion({
   vision = visionReader,
   read = readUpload,
   process: runAgent = processInvoice,
+  keepDocument = keepInvoiceDocument,
   audit = recordAudit,
   now = () => new Date(),
   log = console,
@@ -511,6 +513,8 @@ export function createIngestion({
       throw err;
     }
     await IngestionItem.updateOne({ _id: item._id }, { $set: { invoiceId: invoice._id } });
+    // The original PDF, so a person can view it in the app (images are not kept).
+    if (kind === 'pdf') await keepDocument(invoice._id, { buffer, filename: item.filename, mimetype: item.mimeType });
     await note(name, 'invoice_created', {
       subjectId: item._id,
       detail: `Invoice ${invoice._id} created from ${item.filename} (from ${item.from || 'unknown sender'}, received ${item.receivedAt ? new Date(item.receivedAt).toISOString() : 'unknown'}).`,

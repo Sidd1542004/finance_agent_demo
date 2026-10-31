@@ -14,6 +14,7 @@ import { csrfGuard, loadUser } from './auth/middleware.js';
 import { api } from './routes/api.js';
 import { seedIfEmpty } from './seed/seed.js';
 import { ensureOutboxIndexes } from './models/index.js';
+import { refreshPolicy } from './services/policySettings.js';
 
 // Node's bundled DNS resolver (not Windows') is used for mongodb+srv://
 // lookups and can detect the wrong DNS server on some Windows machines even
@@ -100,11 +101,13 @@ app.use('/api', csrfGuard({ allowedOrigins: config.corsOrigins, skip: [/^\/cron\
 app.use('/api', async (req, res, next) => {
   try {
     await ensureDatabase();
-    next();
   } catch (err) {
     console.error(`\nCould not connect to MongoDB at ${safeUri(config.mongoUri)}: ${redactSecrets(err?.message)}`);
-    res.status(503).json({ error: DATABASE_UNAVAILABLE });
+    return res.status(503).json({ error: DATABASE_UNAVAILABLE });
   }
+  // The administrator's saved policy values (sliders), laid over config.policy. Never throws.
+  await refreshPolicy();
+  next();
 });
 
 // Who is signed in (req.user), from the session cookie.

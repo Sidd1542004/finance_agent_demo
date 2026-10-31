@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
 import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
+import { pdfBlobProblem, fileSize, showsDocumentPanel } from '../documentView.js';
 
 // Decisions are recorded under the signed-in person's name: there is no name to type.
 export default function InvoicesView({ health, user, onError, openId = null }) {
@@ -362,7 +363,7 @@ function Rules({ health }) {
         </div>
         <div>
           <dt>Minimum reading confidence</dt>
-          <dd>{Math.round(policy.minConfidence * 100)}%</dd>
+          <dd>{Math.round(policy.minConfidence * 100)}%, below it a person reviews the invoice</dd>
         </div>
         <div>
           <dt>Australian invoice with no ABN</dt>
@@ -379,7 +380,7 @@ function Rules({ health }) {
       </dl>
       <p className="hint">
         A score at or above the threshold makes an invoice eligible for a person to approve. It is never approved or paid automatically, and a failed mandatory check still stops
-        it. Change these in server/.env.
+        it. An administrator can adjust the numbers on the Admin screen; the defaults are in server/.env.
       </p>
     </section>
   );
@@ -519,6 +520,8 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
       <Outcome invoice={invoice} payment={payment} />
 
       <Actions data={data} busy={busy} onAct={onAct} user={user} />
+
+      {showsDocumentPanel(data.document) && <OriginalPdf key={invoice._id} invoiceId={invoice._id} document={data.document} />}
 
       {invoice.extracted && (
         <>
@@ -715,6 +718,71 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
         <pre>{invoice.rawText}</pre>
       </details>
     </article>
+  );
+}
+
+// The invoice's original PDF, viewed inside the app. It is fetched first (with
+// the same sign-in as everything else) and shown from memory, so a missing or
+// damaged file gives a clear message instead of an error page in the frame.
+function OriginalPdf({ invoiceId, document }) {
+  const [view, setView] = useState({ url: null, loading: false, error: null });
+
+  // Free the in-memory copy when it is replaced or the invoice is closed.
+  useEffect(
+    () => () => {
+      if (view.url) URL.revokeObjectURL(view.url);
+    },
+    [view.url],
+  );
+
+  const open = async () => {
+    setView({ url: null, loading: true, error: null });
+    try {
+      const blob = await api.invoiceDocument(invoiceId);
+      const problem = pdfBlobProblem(blob);
+      if (problem) throw new Error(problem);
+      setView({ url: URL.createObjectURL(blob), loading: false, error: null });
+    } catch (err) {
+      setView({ url: null, loading: false, error: err.message });
+    }
+  };
+
+  return (
+    <section className="panel original-pdf">
+      <div className="panel-head">
+        <h2>Original invoice (PDF)</h2>
+        {document.available && (
+          <div className="decision-actions">
+            {view.url ? (
+              <button className="btn btn-outline" onClick={() => setView({ url: null, loading: false, error: null })}>
+                Hide PDF
+              </button>
+            ) : (
+              <button className="btn btn-outline" disabled={view.loading} onClick={open}>
+                {view.loading ? 'Opening…' : 'View PDF'}
+              </button>
+            )}
+            <a className="btn btn-outline" href={api.invoiceDocumentUrl(invoiceId)} target="_blank" rel="noopener noreferrer">
+              Open in a new tab
+            </a>
+          </div>
+        )}
+      </div>
+      {document.available ? (
+        <p className="hint">
+          {document.filename}
+          {document.size ? `, ${fileSize(document.size)}` : ''}. Compare it with the fields the agent read.
+        </p>
+      ) : (
+        <p className="hint">{document.reason}</p>
+      )}
+      {view.error && (
+        <p className="form-hint" role="alert">
+          {view.error}
+        </p>
+      )}
+      {view.url && <iframe className="pdf-frame" src={view.url} title={`Original invoice ${document.filename || ''}`.trim()} />}
+    </section>
   );
 }
 

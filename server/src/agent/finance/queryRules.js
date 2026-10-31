@@ -158,13 +158,15 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
   );
 
   const confidence = isNum(reading?.confidence) ? reading.confidence : 0;
+  // Supplier emails have their own floor (MIN_EMAIL_CONFIDENCE); the invoice one is stricter.
+  const floor = isNum(policy.emailMinConfidence) ? policy.emailMinConfidence : policy.minConfidence;
   add(
     'reader_confidence',
     'Email was read with enough confidence',
-    confidence >= policy.minConfidence ? 'pass' : 'fail',
-    confidence >= policy.minConfidence
-      ? `Reader confidence ${pct(confidence)} (minimum ${pct(policy.minConfidence)}).`
-      : `Reader confidence ${pct(confidence)} is below the ${pct(policy.minConfidence)} minimum.${reading?.notes ? ` ${reading.notes}` : ''}`,
+    confidence >= floor ? 'pass' : 'fail',
+    confidence >= floor
+      ? `Reader confidence ${pct(confidence)} (minimum ${pct(floor)}).`
+      : `Reader confidence ${pct(confidence)} is below the ${pct(floor)} minimum.${reading?.notes ? ` ${reading.notes}` : ''}`,
   );
 
   const named = understood.invoiceNumbers || [];

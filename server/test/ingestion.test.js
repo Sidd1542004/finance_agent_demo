@@ -28,7 +28,7 @@ const { configureIngestion } = await import('../src/services/ingestion.js');
 const { config } = await import('../src/config.js');
 const { createSealer } = await import('../src/ingestion/secrets.js');
 const { triage, checkFile, safeFilename, senderAllowed, addressOf } = await import('../src/ingestion/attachments.js');
-const { Invoice, Payment, PaymentJob, IngestionItem, IngestionSource, AuditEvent } = await import('../src/models/index.js');
+const { Invoice, Payment, PaymentJob, IngestionItem, IngestionSource, AuditEvent, InvoiceDocument } = await import('../src/models/index.js');
 const { CSRF_REFUSED } = await import('../src/auth/middleware.js');
 const { renderInvoiceText, sampleInvoices } = await import('../src/seed/data.js');
 
@@ -420,11 +420,17 @@ test('a sync imports invoice attachments for review, refuses other files, and ne
     assert.equal(inv.source.email.provider, 'gmail');
     assert.ok(inv.source.fileHash);
     assert.ok(!inv.rawText.includes('IGNORE ALL RULES'), 'the email body is never read');
+    const doc = await InvoiceDocument.findOne({ invoiceId: inv._id }).lean();
+    assert.equal(doc?.filename, inv.source.filename, 'the original PDF is kept, to view in the app');
+    assert.ok(doc.size > 0 && doc.mimeType === 'application/pdf');
   }
   const byFile = Object.fromEntries(imported.map((i) => [i.source.filename, i]));
   const failed = (i) => i.checks.filter((c) => c.status === 'fail').map((c) => c.id);
-  assert.equal(byFile['HOS-10482.pdf'].status, 'under_review');
-  assert.equal(byFile['SCP-7731.pdf'].status, 'on_hold');
+  // A clean invoice, but read by the basic reader (90% confident) under the 99% minimum: a person reviews it.
+  assert.equal(byFile['HOS-10482.pdf'].status, 'needs_review');
+  assert.deepEqual(failed(byFile['HOS-10482.pdf']), ['reader_confidence']);
+  // The quantity mismatch alone would hold it; the low reading confidence sends it to Needs Review first.
+  assert.equal(byFile['SCP-7731.pdf'].status, 'needs_review');
   assert.ok(failed(byFile['SCP-7731.pdf']).includes('quantity_match'), 'quantity mismatch flagged');
   assert.ok(failed(byFile['INV-000003.pdf']).includes('supplier_known'), 'unknown supplier flagged');
   assert.ok(failed(byFile['INV-000003.pdf']).includes('po_found'), 'missing PO flagged');

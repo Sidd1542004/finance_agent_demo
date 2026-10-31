@@ -139,6 +139,13 @@ export function testEnv(uri, extra = {}) {
     SMTP_HOST: '',
     ALERT_EMAILS: '',
     ADMIN_SETUP_TOKEN: '',
+    // Empty: the defaults in config.js, whatever a local server/.env says
+    // (dotenv never replaces a variable that is already set, even to '').
+    MATCH_THRESHOLD: '',
+    MIN_CONFIDENCE: '',
+    MIN_EMAIL_CONFIDENCE: '',
+    PRICE_TOLERANCE_PCT: '',
+    MISSING_ABN_POLICY: '',
     ...extra,
   });
 }

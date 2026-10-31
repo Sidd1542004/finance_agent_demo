@@ -261,6 +261,7 @@ test('the reset scope is the documented demo data; users, sessions, settings, sc
     'BankStatement',
     'IngestionItem',
     'Invoice',
+    'InvoiceDocument',
     'OutboxMessage',
     'Payment',
     'PaymentJob',

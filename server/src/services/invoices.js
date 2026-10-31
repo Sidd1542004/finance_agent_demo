@@ -17,6 +17,7 @@ import { HttpError, recordAudit } from './runs.js';
 import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 import { createCalendar } from '../agent/finance/businessDays.js';
 import { BANK_METHODS } from '../agent/finance/beneficiary.js';
+import { invoiceDocumentStatus } from './invoiceDocuments.js';
 
 // When bank payments may run: business days, bank holidays, cut-off, in TIME_ZONE.
 export const paymentCalendar = createCalendar({
@@ -83,10 +84,11 @@ const actions = createInvoiceActions({
 export async function getInvoiceDetail(id, actor = null) {
   const invoice = await Invoice.findById(id).lean();
   if (!invoice) throw new HttpError(404, 'That invoice no longer exists.');
-  const [run, payment, po] = await Promise.all([
+  const [run, payment, po, document] = await Promise.all([
     AgentRun.findOne({ invoiceId: id }).sort({ createdAt: -1 }).lean(),
     Payment.findOne({ invoiceId: id }).lean(),
     invoice.matchedPo ? sampleLedger.findPurchaseOrder(invoice.matchedPo) : null,
+    invoiceDocumentStatus(invoice), // the original PDF, if one was kept
   ]);
   const partial = AWAITING_DECISION.includes(invoice.status) ? receivedOnly(invoice, config.policy.gstRatePct) : null;
   const ctx = { payment: payment ? { ...payment, id: String(payment._id) } : null, receivedOnly: partial, roles: config.roles, policy: config.policy, actor };
@@ -127,6 +129,7 @@ export async function getInvoiceDetail(id, actor = null) {
     jobs,
     bankTransaction,
     notices,
+    document,
   };
 }
 

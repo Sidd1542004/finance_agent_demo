@@ -200,7 +200,8 @@ test('approvers and administrators approve or reject, each under their own accou
   assert.equal(rejected.status, 200, JSON.stringify(rejected.data));
   assert.equal(rejected.data.invoice.status, 'rejected');
 
-  const ok = await both.post(`/api/invoices/${invoiceA}/actions/approve`, {});
+  // Read at 90%, under the 99% minimum: approving it needs a note, as for any exception.
+  const ok = await both.post(`/api/invoices/${invoiceA}/actions/approve`, { note: 'Checked every field against the PDF.' });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.equal(ok.data.invoice.status, 'approved');
   assert.equal(ok.data.invoice.approval.decidedBy, 'Alex Both');

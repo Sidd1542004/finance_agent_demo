@@ -2006,3 +2006,47 @@ input[type='date'] {
 .tabs-wrap .tab {
   padding: 6px 8px;
 }
+
+/* Agent policy sliders (Admin) */
+.policy-row {
+  margin: 1rem 0;
+}
+.policy-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.policy-value {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+.policy-moved {
+  color: var(--gold-ink);
+}
+.policy-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--navy);
+}
+.policy-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The original invoice PDF, viewed in the app */
+.pdf-frame {
+  display: block;
+  width: 100%;
+  height: min(80vh, 900px);
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-alt);
+}
+.original-pdf a.btn {
+  text-decoration: none;
+}

@@ -10,6 +10,7 @@ import {
   PurchaseOrder,
   GoodsReceipt,
   Invoice,
+  InvoiceDocument,
   AgentRun,
   Payment,
   PaymentJob,
@@ -55,6 +56,7 @@ export const REFERENCE_MODELS = [Vendor, PurchaseOrder, GoodsReceipt, Beneficiar
 export const DEMO_DATA_MODELS = [
   IngestionItem,
   Invoice,
+  InvoiceDocument, // the original PDFs go with their invoices
   AgentRun,
   Payment,
   PaymentJob,

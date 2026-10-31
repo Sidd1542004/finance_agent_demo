@@ -211,6 +211,13 @@ actions you can take, the payment (if any) and the status history.
 | No purchase order quoted | Nothing to match against. **Needs Review**. |
 | The first one again | Possible duplicate. **Needs Review**; cannot be approved until a person clears it, and a second payment is refused anyway. |
 
+The table shows where the checks leave each sample when the invoice was read with enough
+confidence. With the default 99% minimum reading confidence, an invoice read with less
+(always the case without a Groq key: the basic reader is at most 90% confident) also fails
+"Invoice was read with enough confidence" and goes to **Needs Review** first; approving it
+then needs a note. To demo the statuses above without a Groq key, lower **Minimum invoice
+reading confidence** to 90% under Admin > Agent policy, then process the samples again.
+
 **2. Supplier emails.** Process each sample.
 
 | Sample | What happens |
@@ -248,7 +255,8 @@ six steps:
 ### Who approves invoices
 
 People do. The agent never approves an invoice and never creates a payment, whatever the
-score. **85% means eligible for approval review, not approval or payment.** See
+score or reading confidence. **A 99% match score means eligible for approval review, not
+approval or payment.** See
 "Invoice validation and PO matching" below for the score, the statuses and the actions.
 
 ### Design decisions worth knowing
@@ -288,7 +296,7 @@ Mandatory checks (any failure stops the invoice, whatever the score):
 | Check | Fails to |
 |---|---|
 | Required details (supplier, number, date, total, lines) | Needs Review |
-| Reader confidence | Needs Review |
+| Reader confidence at least the minimum (`MIN_CONFIDENCE`, default 99%) | Needs Review |
 | Amounts add up (line totals, subtotal, subtotal + tax = total) | Needs Review, approval blocked |
 | Tax rules identified (Australia or India, from the invoice itself) | Needs Review |
 | Supplier tax number: ABN (checksum; ABR lookup if `ABR_GUID` is set, otherwise "unverified") or GSTIN (format and check character) | Needs Review (`MISSING_ABN_POLICY=hold` makes a missing ABN On Hold). Never Rejected. |
@@ -307,7 +315,7 @@ unverified**, not as verified.
 
 ### Match score
 
-Out of 100, configurable threshold (`MATCH_THRESHOLD`, default 85). Separate from the
+Out of 100, configurable threshold (`MATCH_THRESHOLD`, default 99). Separate from the
 mandatory checks: a high score never overrides a failed check.
 
 | Part | Weight | How it is scored |
@@ -322,6 +330,44 @@ mandatory checks: a high score never overrides a failed check.
 With no PO only the amounts and tax parts can score, so the score is low and a reviewer
 links a PO. Suggestions (top 3, only POs sharing at least one item, provisional score
 ≥ 50%) are shown with an explanation and are never linked automatically.
+
+### Adjusting the policy (Admin screen)
+
+An administrator can move four values with sliders under **Admin > Agent policy**:
+
+| Setting | Default | Slider |
+|---|---|---|
+| Match score for approval review (`MATCH_THRESHOLD`) | 99% | 50% to 100%, steps of 1 |
+| Minimum invoice reading confidence (`MIN_CONFIDENCE`) | 99% | 50% to 100%, steps of 1 |
+| Unit price may differ from the purchase order by (`PRICE_TOLERANCE_PCT`) | 2% | 0% to 10%, steps of 0.5 |
+| Minimum supplier email reading confidence (`MIN_EMAIL_CONFIDENCE`) | 80% | 50% to 100%, steps of 1 |
+
+The environment variables stay the defaults. A saved value is kept in MongoDB (the
+`settings` collection, `_id: "policy"`) and laid over the same `config.policy` object the
+agents already use, so there is one policy, not two. Every warm Vercel instance re-reads
+it at most every 5 seconds; the instance that saved it applies it at once. The server
+refuses any value outside the slider's limits (nothing is saved), ignores a saved value
+that later falls outside narrower limits, and logs every change and reset in the audit log
+(subject `system`, id `policy`). **Reset to defaults** goes back to the environment's values.
+Invoices already processed keep their result until they are processed again. None of these
+values approves anything.
+
+Supplier emails used to share `MIN_CONFIDENCE` with invoices. They now have their own
+`MIN_EMAIL_CONFIDENCE` (80%), so the 99% invoice floor does not stop automatic status replies.
+
+### Viewing the original PDF
+
+An uploaded PDF, or a PDF imported from a mailbox, is kept (the `invoicedocuments`
+collection, one per invoice, at most 15 MB) and shown on the invoice page under
+**Original invoice (PDF)**: **View PDF** opens it inside the page, **Open in a new tab**
+opens it in the browser's PDF viewer. Nothing is downloaded. The file is served by
+`GET /api/invoices/:id/document` with the same sign-in and roles as the invoice itself, as
+`application/pdf`, inline, `nosniff`, `Cache-Control: private, no-store`, and only framed by
+this site. Images, text files, pasted text and samples are not kept (their text is on the
+invoice); the page says so instead. A PDF invoice added before this change says its PDF was
+not kept. A damaged PDF is refused at upload, as before. On Vercel, a PDF over 4.4 MB (only
+possible from a mailbox) cannot be sent back and the page says so. Reset and Load demo month
+delete the stored PDFs with their invoices.
 
 ### Statuses
 
@@ -388,12 +434,14 @@ invoice from also paying it, administrators included. The earlier typed-name lis
 | `POST /api/invoices/:id/actions/:action` | Any action above. Body: `{ note, ...fields }` (a `decidedBy` is ignored: the signed-in user acts). 400 bad input, 401 not signed in, 403 role, 409 not allowed now or changed meanwhile. |
 | `POST /api/auth/login`, `/logout`, `/setup`, `/password`; `GET /api/auth/me` | Sign-in. |
 | `/api/admin/users...` | Users and roles (administrators). |
+| `GET /api/admin/policy`, `PUT /api/admin/policy` `{ values }`, `POST /api/admin/policy/reset` | Administrators: the adjustable policy (the Admin screen's sliders): limits, current values and defaults; save (refused as a whole if any value is out of bounds); back to the defaults. Audited. |
+| `GET /api/invoices/:id/document` | The invoice's original PDF, inline (`application/pdf`). Same access as `GET /api/invoices/:id`. 404 with a `code` (`no_file`, `not_pdf`, `not_stored`) when there is none, 415 if the stored file is not a PDF, 413 on Vercel above 4.4 MB. |
 | `GET /api/suppliers`; `POST /api/suppliers/:abn/beneficiary-changes`; `POST /api/beneficiary-changes/:id/approve`, `/reject` | Supplier bank details (simulated), two people. |
 | `GET /api/payments?status=`, `GET /api/payments/:id`, `GET /api/payment-calendar` | Payments by status, one payment with its jobs, bank transaction and notices; the scheduling rules. |
 | `GET /api/payment-notices`; `POST /api/payments/:id/notices`; `POST /api/payment-notices/:id/send`, `/discard` | Payment notices to suppliers. |
 | `/api/sim-bank/...`; `/api/admin/sim-bank...`; `POST /api/admin/run-due` | The simulated bank, its settings, and "Run due payments now". |
 | `GET` or `POST /api/cron/tick` | The payment scheduler's tick; needs `Authorization: Bearer <CRON_SECRET>`. |
-| `GET /api/invoices/:id` | Adds `actions` (what is allowed and why not), `linkablePos`, `paymentMethods`, `payment`. |
+| `GET /api/invoices/:id` | Adds `actions` (what is allowed and why not), `linkablePos`, `paymentMethods`, `payment`, and `document` (whether the original PDF can be viewed, and if not, why). |
 | `GET /api/payables` | Overdue and due-soon invoices and cash needed (approved due in 7/30 days, awaiting a decision due in 7 days; AUD only). |
 | `POST /api/invoices/:id/approval` | Kept: `approve`, `approve_received`, `reject`. |
 | `POST /api/invoices/:id/rerun` | Kept: re-checks through the `rerun` action. |
@@ -450,8 +498,11 @@ To connect real systems, write a file with the same functions as
 - **Supplier payments only.** Money in, payroll, tax and fees are not reconciled.
 - **The report is an accounts payable summary,** not a month-end close. There is no general
   ledger, accruals or journals behind it. Months follow `TIME_ZONE` (Australia/Sydney by default).
-- **Policy values are placeholders.** The 85% threshold, score weights, 2% price tolerance
-  and 80% confidence floor are sample numbers; agree them with the finance team.
+- **Policy values are the client's.** The 99% match score threshold and 99% reading
+  confidence floor were asked for by the client; the score weights and the 2% price
+  tolerance are sample numbers. At 99% reading confidence, every invoice read without a
+  Groq key (the basic reader is at most 90% confident), and every AI reading the model is
+  less than 99% sure of, goes to Needs Review.
 - **Payments are simulated.** Scheduling, executing and recording a payment only writes
   records. No real bank or accounting system is touched.
 - **Tax numbers are not looked up by default.** ABNs are checked against the ABR only when

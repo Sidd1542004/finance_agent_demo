@@ -97,7 +97,8 @@ test('the simulated bank statement reconciles to the confirmed payment without p
   const approver = await t.signIn('approver');
   const payer = await t.signIn('payer');
   const id = (await reviewer.post('/api/invoices', { sampleId: 'clean' })).data.invoice._id;
-  await approver.post(`/api/invoices/${id}/actions/approve`, {});
+  // Read at 90%, under the 99% minimum: approving it needs a note.
+  assert.equal((await approver.post(`/api/invoices/${id}/actions/approve`, { note: 'Checked against the PDF.' })).status, 200);
   const { nextSlot } = (await payer.get('/api/payment-calendar')).data;
   assert.equal((await payer.post(`/api/invoices/${id}/actions/schedule_payment`, { method: 'EFT', scheduledFor: nextSlot.date, scheduledTime: nextSlot.time })).status, 200);
   await t.client().get('/api/cron/tick', { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } });

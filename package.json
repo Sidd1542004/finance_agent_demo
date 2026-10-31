@@ -13,7 +13,7 @@
     "build": "npm run build --prefix client",
     "start": "npm run start --prefix server",
     "seed": "npm run seed --prefix server",
-    "test": "npm test --prefix server",
+    "test": "npm test --prefix server && npm test --prefix client",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

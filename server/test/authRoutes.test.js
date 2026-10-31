@@ -138,13 +138,14 @@ test('roles are enforced on the server, and the session decides who acted', asyn
   const created = await reviewer.post('/api/invoices', { sampleId: 'clean' });
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const id = created.data.invoice._id;
-  assert.equal(created.data.invoice.status, 'under_review');
+  // Read by the basic reader (90% confident), under the 99% minimum: a person reviews it.
+  assert.equal(created.data.invoice.status, 'needs_review');
 
   // A reviewer cannot approve, whatever name they type.
-  const denied = await reviewer.post(`/api/invoices/${id}/actions/approve`, { decidedBy: 'Priya Approver' });
+  const denied = await reviewer.post(`/api/invoices/${id}/actions/approve`, { decidedBy: 'Priya Approver', note: 'Checked.' });
   assert.equal(denied.status, 403);
-  // The approver can; the typed name is ignored.
-  const ok = await approver.post(`/api/invoices/${id}/actions/approve`, { decidedBy: 'Mallory' });
+  // The approver can (with a note, for the open exception); the typed name is ignored.
+  const ok = await approver.post(`/api/invoices/${id}/actions/approve`, { decidedBy: 'Mallory', note: 'Checked every field against the PDF.' });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.equal(ok.data.invoice.approval.decidedBy, 'Priya Approver');
   assert.ok(ok.data.invoice.approval.decidedById);

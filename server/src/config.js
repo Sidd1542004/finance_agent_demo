@@ -148,17 +148,19 @@ export const config = {
     payers: list(process.env.PAYERS),
   },
 
-  // Sample defaults. Agree the real values with the client's finance team.
+  // Defaults. An administrator can adjust the numeric ones on the Admin screen
+  // (services/policySettings.js); a saved value replaces the default here.
   policy: {
     // Match score (0-100) at or above which a clean invoice is ELIGIBLE FOR APPROVAL REVIEW.
     // It is never approved automatically.
-    matchThreshold: num(process.env.MATCH_THRESHOLD, 85),
+    matchThreshold: num(process.env.MATCH_THRESHOLD, 99),
     // A missing ABN sends the invoice to Needs Review ("review") or On Hold ("hold").
     missingAbn: process.env.MISSING_ABN_POLICY === 'hold' ? 'hold' : 'review',
     // When true, the person who approved an invoice cannot also schedule or record its payment.
     segregateDuties: process.env.SEGREGATE_DUTIES === 'true',
     priceTolerancePct: num(process.env.PRICE_TOLERANCE_PCT, 2), // unit price may differ from the PO by this much
-    minConfidence: num(process.env.MIN_CONFIDENCE, 0.8), // below this, a person reviews the reading
+    minConfidence: num(process.env.MIN_CONFIDENCE, 0.99), // below this, a person reviews the invoice's reading
+    emailMinConfidence: num(process.env.MIN_EMAIL_CONFIDENCE, 0.8), // below this, a person reviews a supplier email
     gstRatePct: 10, // Australian GST
     roundingTolerance: 0.05, // dollars allowed for rounding differences
   },

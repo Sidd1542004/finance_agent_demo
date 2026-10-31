@@ -8,6 +8,7 @@ import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../
 import { resetEverything } from '../seed/seed.js';
 import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup, visionReader } from '../services/invoices.js';
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
+import { keepInvoiceDocument, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
 import { createDailySummaryHandler } from '../services/dailySummary.js';
 import { createMailer } from '../services/mailer.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
@@ -158,6 +159,18 @@ api.get(
   }),
 );
 
+// The invoice's original PDF, shown inline in the app. Same access as the
+// invoice itself: any signed-in user with a role. A clear JSON error (with a
+// `code`) when there is no PDF, it is not valid, or it is too large to send.
+api.get(
+  '/invoices/:id/document',
+  wrap(async (req, res) => {
+    const { buffer, filename } = await openInvoiceDocument(requireId(req));
+    res.set({ ...DOCUMENT_HEADERS, 'Content-Length': String(buffer.length), 'Content-Disposition': inlineDisposition(filename) });
+    res.end(buffer);
+  }),
+);
+
 // Add an invoice (sample, pasted text or uploaded file) and run the agent on it.
 api.post(
   '/invoices',
@@ -190,6 +203,8 @@ api.post(
     if (rawText.length > MAX_TEXT) throw new HttpError(400, 'That is too much text for one invoice.');
 
     const invoice = await Invoice.create({ source, rawText });
+    // The original PDF, so it can be viewed in the app (images and text are not kept).
+    if (req.file) await keepInvoiceDocument(invoice._id, { buffer: req.file.buffer, filename: req.file.originalname, mimetype: req.file.mimetype });
     await processInvoice(invoice, { reading });
     res.status(201).json(await getInvoiceDetail(invoice._id));
   }),
