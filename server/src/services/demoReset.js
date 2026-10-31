@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { Setting } from '../models/index.js';
 import { redactSecrets } from '../safeUri.js';
 import { HttpError } from './runs.js';
+import { requireActor } from './actor.js';
 
 export const RESET_CONFIRMATION = 'RESET';
 export const LOCK_ID = 'demo-reset-lock';
@@ -75,6 +76,7 @@ export function createDemoResetHandler({ blocked = demoResetBlocked, reset, audi
   };
 
   return async (req, res) => {
+    requireActor(req.user, 'admin');
     const reason = blocked();
     if (reason) {
       await tryAudit(entry(req, 'reset_refused', reason));
@@ -119,6 +121,7 @@ export function createDemoResetHandler({ blocked = demoResetBlocked, reset, audi
 
 /** Load demo month starts with the same wipe: the same boundary and lock apply. */
 export async function withDemoWipe(user, fn, { blocked = demoResetBlocked, lock = mongoLock } = {}) {
+  requireActor(user, 'admin');
   const reason = blocked();
   if (reason) throw new HttpError(403, reason.replace(/^Reset/, 'Load demo month'));
   const token = await lock.acquire(user);

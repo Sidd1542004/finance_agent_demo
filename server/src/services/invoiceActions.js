@@ -29,7 +29,7 @@ const CHANGED = 'This invoice changed while you were deciding. Reload it and try
  * confirms them. Without it (the earlier behaviour, and Cheque/Other always),
  * a payment is a record that a person completes with Record payment.
  */
-export function createInvoiceActions({ store, policy, roles = {}, rerun, now = () => new Date(), bank = null }) {
+export function createInvoiceActions({ store, policy, rerun, now = () => new Date(), bank = null }) {
   const bankRouted = (method) => Boolean(bank) && bank.methods.includes(method);
 
   // Check a bank payment before anything changes. Returns what to store.
@@ -73,13 +73,13 @@ export function createInvoiceActions({ store, policy, roles = {}, rerun, now = (
     };
   }
 
-  // `actor`: the signed-in user { id, name, roles }. The API always passes one.
+  // `actor`: an authenticated actor (auth/roles.js). Without one, nothing is done (401).
   async function perform(id, actionId, input = {}, actor = null) {
     const invoice = await store.getInvoice(id);
     if (!invoice) throw new ActionError(404, 'That invoice no longer exists.');
     const payment = await store.getPayment(invoice.id);
     const partial = receivedOnly(invoice, policy.gstRatePct);
-    const { who, actorId, note } = assertAction(invoice, actionId, input, { payment, receivedOnly: partial, roles, policy, actor });
+    const { who, actorId, note } = assertAction(invoice, actionId, input, { payment, receivedOnly: partial, policy, actor });
     // Who decided, on every decision record: the name, and the account when signed in.
     const by = { decidedBy: who, ...(actorId ? { decidedById: actorId } : {}) };
     const idOf = actorId ? { actorId } : {};

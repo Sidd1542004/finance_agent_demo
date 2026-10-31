@@ -14,10 +14,7 @@ import { writeReport, getReportDetail } from '../services/reports.js';
 import { loadDemoMonth } from '../services/demo.js';
 import { withDemoWipe } from '../services/demoReset.js';
 import { pageOf, pageParams } from './paging.js';
-import { requireRole } from '../auth/middleware.js';
-
-// The signed-in person decides; a typed name in the body is ignored.
-const asUser = (req) => ({ ...(req.body || {}), decidedBy: req.user.name, actorId: req.user.id });
+import { requireRole, actorOf } from '../auth/middleware.js';
 
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
@@ -95,7 +92,8 @@ export function registerFinanceRoutes(api, { upload, work }) {
     '/queries/:id/resolution',
     requireRole('reviewer'),
     wrap(async (req, res) => {
-      res.json(await resolveQuery(requireId(req, 'email'), asUser(req)));
+      // The signed-in person decides; a typed name in the body is ignored.
+      res.json(await resolveQuery(requireId(req, 'email'), req.body || {}, actorOf(req)));
     }),
   );
 
@@ -186,7 +184,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
     '/statements/:id/lines/:n/resolution',
     requireRole('payer'),
     wrap(async (req, res) => {
-      res.json(await resolveLine(requireId(req, 'statement'), req.params.n, asUser(req)));
+      res.json(await resolveLine(requireId(req, 'statement'), req.params.n, req.body || {}, actorOf(req)));
     }),
   );
 

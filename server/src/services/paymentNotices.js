@@ -13,6 +13,7 @@ import mongoose from 'mongoose';
 import { OutboxMessage, Payment, Invoice, Vendor } from '../models/index.js';
 import { composePaymentNotice, noticeBlock, noticeRef, NOTICE_KINDS } from '../agent/finance/paymentEmails.js';
 import { HttpError, recordAudit } from './runs.js';
+import { requireActor } from './actor.js';
 
 export function createPaymentNotices({ delivery, companyName, timeZone }) {
   async function loadPayment(paymentId) {
@@ -25,9 +26,10 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
   /**
    * Draft a notice. Returns { message, created }. An existing notice for the
    * same payment, kind and transaction is returned instead of a second one.
-   * `by`: the person who asked, or null for the automatic success notice.
+   * `by`: the person who asked, or null for the automatic success notice
+   * (only paymentConfirmed below drafts without a person).
    */
-  async function draft(paymentId, kind, by = null) {
+  async function createDraft(paymentId, kind, by) {
     if (!NOTICE_KINDS.includes(kind)) throw new HttpError(400, `Choose one of: ${NOTICE_KINDS.join(', ')}.`);
     const payment = await loadPayment(paymentId);
     const block = noticeBlock(kind, payment);
@@ -73,8 +75,14 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
     return { message, created: true };
   }
 
+  /** A person asks for a notice: an authenticated payer or reviewer. */
+  async function draft(paymentId, kind, by) {
+    requireActor(by, 'payer', 'reviewer');
+    return createDraft(paymentId, kind, by);
+  }
+
   /** The automatic success notice, after the bank confirmed the payment. */
-  const paymentConfirmed = (paymentId) => draft(paymentId, 'payment_success', null);
+  const paymentConfirmed = (paymentId) => createDraft(paymentId, 'payment_success', null);
 
   async function loadDraft(id) {
     if (!mongoose.isValidObjectId(id)) throw new HttpError(404, 'That message does not exist.');
@@ -85,6 +93,7 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
 
   /** A person approves a draft: it is delivered (safely) and marked sent. Only once. */
   async function approveAndSend(id, user) {
+    requireActor(user, 'payer', 'reviewer');
     const msg = await loadDraft(id);
     if (msg.status !== 'draft') throw new HttpError(409, `This message is already ${msg.status}.`);
     // The payment must still be in the state the notice describes (a success notice for a confirmed payment only).
@@ -129,6 +138,7 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
   }
 
   async function discard(id, user, note) {
+    requireActor(user, 'payer', 'reviewer');
     const msg = await loadDraft(id);
     const why = String(note || '')
       .trim()

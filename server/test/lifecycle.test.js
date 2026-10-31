@@ -14,6 +14,7 @@ import { detectJurisdiction } from '../src/agent/finance/validation.js';
 import { canTransition, TRANSITIONS, STATUSES, allowedActions, ActionError } from '../src/agent/finance/lifecycle.js';
 import { dueInfo, payablesSummary, parseTerms } from '../src/agent/finance/due.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
+import { person } from '../test-support/actors.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { vendors, purchaseOrders, goodsReceipts, renderInvoiceText, sampleTotals, findSample } from '../src/seed/data.js';
 
@@ -38,7 +39,8 @@ function setup({ policyPatch = {}, roles = {}, extraPos = [], extract = async (t
     const result = await runAgent(agent, { invoice });
     return { invoice, result };
   };
-  const act = (invoice, action, input = {}) => actions.perform(invoice.id, action, { decidedBy: 'Priya N', ...input });
+  // A signed-in person decides: by default Priya N, holding every working role; `decidedBy` picks another person.
+  const act = (invoice, action, { decidedBy = 'Priya N', ...input } = {}, actor = person(decidedBy)) => actions.perform(invoice.id, action, input, actor);
   return { ledger, invoices, submit, act };
 }
 
@@ -461,11 +463,14 @@ test('14b. the agent itself never approves: it cannot move an invoice past Under
   for (const to of ['approved', 'payment_pending', 'payment_completed']) assert.equal(canTransition('processing', to), false, to);
 });
 
-test('14c. names and roles: a decision needs a name; configured roles are enforced; duties can be segregated', async () => {
-  const { submit, act } = setup({ policyPatch: { segregateDuties: true }, roles: { approvers: ['Priya N'], payers: ['Priya N', 'Sam K'] } });
+test('14c. people and roles: a decision needs a signed-in actor holding the role; duties can be segregated', async () => {
+  const { submit, act } = setup({ policyPatch: { segregateDuties: true } });
   const { invoice } = await submit(renderInvoiceText(findSample('clean')));
-  await rejects(act(invoice, 'approve', { decidedBy: '' }), 400, /name/i);
-  await rejects(act(invoice, 'approve', { decidedBy: 'Sam K' }), 403);
+  // No actor, a typed name, or a look-alike object: never an actor, whatever the name lists said before.
+  await rejects(act(invoice, 'approve', {}, null), 401, /Sign in/);
+  await rejects(act(invoice, 'approve', {}, { id: 'u-priya-n', name: 'Priya N', roles: ['approver'] }), 401, /Sign in/);
+  await rejects(act(invoice, 'approve', {}, person('Sam K', ['payer'])), 403, /approver role/);
+  assert.equal(invoice.status, 'under_review', 'nothing changed');
   await act(invoice, 'approve');
   await rejects(act(invoice, 'schedule_payment'), 403, /approved/i);
   await act(invoice, 'schedule_payment', { decidedBy: 'Sam K' });

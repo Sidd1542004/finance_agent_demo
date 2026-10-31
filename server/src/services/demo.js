@@ -10,11 +10,12 @@ import { sampleInvoices, renderInvoiceText } from '../seed/data.js';
 import { resetEverything } from '../seed/seed.js';
 import { processInvoice, performInvoiceAction } from './invoices.js';
 import { recordAudit } from './runs.js';
+import { systemActor } from '../auth/roles.js';
 
 // Internal demo actors, used only by this loader (they are not accounts and
 // cannot sign in). Two people, so approving and paying stay separate.
-const DEMO_APPROVER = { id: 'demo:priya', name: 'Priya N (demo)', roles: ['approver'] };
-const DEMO_PAYER = { id: 'demo:sam', name: 'Sam K (demo)', roles: ['payer'] };
+const DEMO_APPROVER = systemActor({ id: 'demo:priya', name: 'Priya N (demo)', roles: ['approver'] });
+const DEMO_PAYER = systemActor({ id: 'demo:sam', name: 'Sam K (demo)', roles: ['payer'] });
 
 // `by`: the administrator who pressed Load demo month.
 export async function loadDemoMonth(by = null) {

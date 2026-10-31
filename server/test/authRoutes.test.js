@@ -10,6 +10,7 @@ testEnv(db.uri, { ADMIN_SETUP_TOKEN: 'setup-token-for-tests-only', LOGIN_MAX_FAI
 
 const { app, ensureDatabase } = await import('../src/app.js');
 const { createUser } = await import('../src/services/users.js');
+const { TEST_SETUP } = await import('../test-support/actors.js');
 const { Session, AuditEvent, User } = await import('../src/models/index.js');
 await ensureDatabase();
 await buildIndexes();
@@ -73,7 +74,7 @@ test('only the token hash is stored; the password hash is never returned', async
 });
 
 test('signing in: a wrong password and an unknown email get the same answer; repeated failures lock the account', async () => {
-  await createUser({ email: 'lock@test.example', name: 'Lou Lock', password: PASSWORD, roles: ['reviewer'] });
+  await createUser({ email: 'lock@test.example', name: 'Lou Lock', password: PASSWORD, roles: ['reviewer'] }, TEST_SETUP);
   const c = client(server.base);
   const bad = await c.post('/api/auth/login', { email: 'lock@test.example', password: 'wrong password!!' });
   const unknown = await c.post('/api/auth/login', { email: 'nobody@test.example', password: 'wrong password!!' });

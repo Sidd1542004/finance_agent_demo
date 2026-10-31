@@ -14,7 +14,7 @@ import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { config } from '../config.js';
 import { safeUri, redactSecrets } from '../safeUri.js';
-import { createUser } from '../services/users.js';
+import { createUser, COMMAND_LINE_ACTOR } from '../services/users.js';
 if (config.dnsServers.length) {
   dns.setServers(config.dnsServers);
 }
@@ -65,7 +65,7 @@ async function main() {
     process.exit(1);
   }
   try {
-    const user = await createUser({ email: values.email, name: values.name, password, roles: ['admin', ...extra] });
+    const user = await createUser({ email: values.email, name: values.name, password, roles: ['admin', ...extra] }, COMMAND_LINE_ACTOR);
     console.log(`Administrator created: ${user.name} <${user.email}> (${user.roles.join(', ')}).`);
   } catch (err) {
     console.error(err?.message || err);

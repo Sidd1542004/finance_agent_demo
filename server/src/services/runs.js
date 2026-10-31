@@ -77,19 +77,5 @@ export async function addHumanStep(id, summary, status) {
   await run.save();
 }
 
-// Name and note typed by the person deciding.
-export function whoAndWhy({ decidedBy, note }) {
-  const who = String(decidedBy || '')
-    .trim()
-    .slice(0, 120);
-  if (!who) throw new HttpError(400, 'Enter your name so the decision is on record.');
-  return {
-    who,
-    why: String(note || '')
-      .trim()
-      .slice(0, 1000),
-  };
-}
-
 // If even the escalate stage failed, do not leave the record looking fine.
 export const failedDecision = (result) => ({ outcome: 'failed', reasons: [`The agent could not finish: ${result.error?.message || 'unknown error'}`] });

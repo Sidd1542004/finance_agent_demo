@@ -32,6 +32,18 @@ what you cannot do. The name typed in a request body is ignored: decisions are r
 the signed-in account (name and id). `ACCESS_PASSWORD` still works as an
 optional outer gate in front of everything.
 
+The services check this too, not only the routes. Every service that decides
+something for a person (invoice actions, supplier-email replies, bank lines,
+bank-detail changes, payment notices, user accounts, mailbox connections, demo
+reset) refuses to act without an **authenticated actor** (`auth/roles.js`):
+an object the server built itself from the signed-in session, or a named
+system actor in code (the demo loader, the command-line `create-admin`, the
+first-administrator setup). An object built from data (a typed name, a request
+body, JSON from an AI model) is never an actor, whatever fields it has: 401.
+There is no longer any fallback to typed names or to the `REVIEWERS` /
+`APPROVERS` / `PAYERS` lists (read only by `npm run migrate`). Roles are denied
+by default: no roles, empty or unknown roles hold nothing (403).
+
 ## Statuses
 
 Invoice statuses keep their names. One is new: `payment_processing`.

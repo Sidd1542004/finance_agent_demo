@@ -17,7 +17,7 @@ import { registerFinanceRoutes } from './finance.js';
 import { pageOf, pageParams } from './paging.js';
 import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { createWorkLimiter } from '../rateLimit.js';
-import { requireUser, requireRole, requireAnyRole } from '../auth/middleware.js';
+import { requireUser, requireRole, requireAnyRole, actorOf } from '../auth/middleware.js';
 import { createDemoResetHandler, demoResetBlocked } from '../services/demoReset.js';
 import { registerIngestionPublicRoutes, registerIngestionRoutes } from './ingestion.js';
 import { createAuthRouter } from './auth.js';
@@ -56,9 +56,9 @@ async function invoiceCounts() {
 // Express 4 does not catch errors from async handlers on its own.
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
-// The signed-in person, as the actor of an action. Whatever name the request
-// body types is ignored: the session decides who acted.
-export const actorOf = (req) => ({ id: req.user.id, name: req.user.name, roles: req.user.roles });
+// The signed-in person, as the actor of an action (auth/middleware.js). Whatever
+// name the request body types is ignored: the session decides who acted.
+export { actorOf };
 export const withoutTypedName = (body) => {
   const { decidedBy: _ignored, ...rest } = body || {};
   return rest;
@@ -206,7 +206,7 @@ api.post(
     // The original PDF, so it can be viewed in the app (images and text are not kept).
     if (req.file) await keepInvoiceDocument(invoice._id, { buffer: req.file.buffer, filename: req.file.originalname, mimetype: req.file.mimetype });
     await processInvoice(invoice, { reading });
-    res.status(201).json(await getInvoiceDetail(invoice._id));
+    res.status(201).json(await getInvoiceDetail(invoice._id, actorOf(req)));
   }),
 );
 

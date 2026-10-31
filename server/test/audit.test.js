@@ -8,6 +8,7 @@ import { createInvoiceAgent } from '../src/agent/finance/invoiceAgent.js';
 import { extractWithRules } from '../src/agent/finance/extract.js';
 import { auditEntry, bankLineId } from '../src/agent/finance/audit.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
+import { person } from '../test-support/actors.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { AuditEvent, APPEND_ONLY } from '../src/models/index.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleInvoices, renderInvoiceText } from '../src/seed/data.js';
@@ -32,7 +33,8 @@ function setup() {
     await runAgent(agent, { invoice });
     return invoice;
   };
-  const act = (invoice, action, input = {}) => actions.perform(invoice.id, action, { decidedBy: 'Priya N', ...input });
+  // A signed-in person decides: by default Priya N, holding every working role; `decidedBy` picks another person.
+  const act = (invoice, action, { decidedBy = 'Priya N', ...input } = {}, actor = person(decidedBy)) => actions.perform(invoice.id, action, input, actor);
   return { ledger, submit, act };
 }
 

@@ -12,6 +12,7 @@ test.after(t.stop);
 
 const { Invoice, InvoiceDocument } = await import('../src/models/index.js');
 const { createUser } = await import('../src/services/users.js');
+const { TEST_SETUP } = await import('../test-support/actors.js');
 const { openInvoiceDocument, saveInvoiceDocument, inlineDisposition, looksLikePdf, MAX_RESPONSE_BYTES_ON_VERCEL } = await import('../src/services/invoiceDocuments.js');
 
 const PDF = fs.readFileSync(new URL('./fixtures/INV-000003-po.pdf', import.meta.url));
@@ -58,7 +59,7 @@ test('every role that can open the invoice can view its PDF: inline, as a PDF, n
 
 test('signed out, or an account with no role, cannot view a PDF', async () => {
   assert.equal((await fetch(`${t.base}/api/invoices/${uploadedId}/document`)).status, 401);
-  await createUser({ email: 'norole@test.example', name: 'No Role', password: PASSWORD, roles: [] });
+  await createUser({ email: 'norole@test.example', name: 'No Role', password: PASSWORD, roles: [] }, TEST_SETUP);
   const c = t.client();
   assert.equal((await c.post('/api/auth/login', { email: 'norole@test.example', password: PASSWORD })).status, 200);
   const res = await fetch(`${t.base}/api/invoices/${uploadedId}/document`, { headers: { cookie: c.cookie } });

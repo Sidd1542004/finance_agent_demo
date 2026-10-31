@@ -7,6 +7,12 @@ import { User, ROLES, Setting } from '../models/index.js';
 import { hashPassword, verifyPassword, dummyHash, passwordProblem } from '../auth/passwords.js';
 import { publicUser, revokeUserSessions } from '../auth/sessions.js';
 import { HttpError, recordAudit } from './runs.js';
+import { requireActor } from './actor.js';
+import { systemActor } from '../auth/roles.js';
+
+// Who creates the first administrator: the one-time setup form, or the command line.
+export const SETUP_ACTOR = systemActor({ id: 'system:first-admin-setup', name: 'First administrator setup', roles: ['admin'] });
+export const COMMAND_LINE_ACTOR = systemActor({ id: 'system:command-line', name: 'Command line (create-admin)', roles: ['admin'] });
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const LOGIN_FAILED = 'The email or password is incorrect.';
@@ -29,9 +35,11 @@ export function cleanRoles(roles) {
   return [...new Set(roles)];
 }
 
-const actorOf = (by) => (by ? { actor: by.name, actorId: by.id } : { actor: 'System' });
+const actorOf = (by) => ({ actor: by.name, actorId: by.id });
 
-export async function createUser({ email, name, password, roles = [] }, by = null) {
+// `by`: an authenticated administrator, or SETUP_ACTOR / COMMAND_LINE_ACTOR.
+export async function createUser({ email, name, password, roles = [] }, by) {
+  requireActor(by, 'admin');
   const e = cleanEmail(email);
   const n = cleanName(name);
   if (!EMAIL.test(e)) throw new HttpError(400, 'Enter a valid email address.');
@@ -41,7 +49,7 @@ export async function createUser({ email, name, password, roles = [] }, by = nul
   const r = cleanRoles(roles);
   let user;
   try {
-    user = await User.create({ email: e, name: n, passwordHash: await hashPassword(password), roles: r, createdBy: by?.id ?? null, passwordChangedAt: new Date() });
+    user = await User.create({ email: e, name: n, passwordHash: await hashPassword(password), roles: r, createdBy: by.system ? null : by.id, passwordChangedAt: new Date() });
   } catch (err) {
     if (err?.code === 11000) throw new HttpError(409, 'A user with that email already exists.');
     throw err;
@@ -96,6 +104,7 @@ const findUser = async (id) => {
 
 /** Change a user's name, roles or active flag. An admin cannot lock themselves out. */
 export async function updateUser(id, input, by) {
+  requireActor(by, 'admin');
   const user = await findUser(id);
   const set = {};
   const changes = [];
@@ -139,6 +148,7 @@ async function assertAnotherAdmin(exceptId) {
 
 /** An administrator sets a new password for someone. Signs them out everywhere. */
 export async function resetPassword(id, password, by) {
+  requireActor(by, 'admin');
   const user = await findUser(id);
   const problem = passwordProblem(password);
   if (problem) throw new HttpError(400, problem);
@@ -149,6 +159,7 @@ export async function resetPassword(id, password, by) {
 
 /** A user changes their own password. Other sessions are signed out. */
 export async function changeOwnPassword(user, current, next) {
+  requireActor(user);
   const doc = await findUser(user.id);
   if (!(await verifyPassword(String(current ?? ''), doc.passwordHash))) throw new HttpError(400, 'The current password is incorrect.');
   const problem = passwordProblem(next);
@@ -173,7 +184,7 @@ export async function createFirstAdmin(input) {
     throw err;
   }
   try {
-    return await createUser({ ...input, roles: ['admin'] });
+    return await createUser({ ...input, roles: ['admin'] }, SETUP_ACTOR);
   } catch (err) {
     await Setting.deleteOne({ _id: 'first_admin' });
     throw err;

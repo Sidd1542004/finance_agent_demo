@@ -2,6 +2,8 @@
 // invoice actions in bank mode, the simulated bank and the executor, all on
 // an injected clock (so business days and delays are deterministic).
 
+import { person } from './actors.js';
+
 import mongoose from 'mongoose';
 import { startTestDatabase, buildIndexes, testEnv } from './mongo.js';
 
@@ -9,8 +11,9 @@ export const HARBOUR = { abn: '57600410275', name: 'Harbour Office Supplies Pty 
 export const PALLETS = { abn: '37600518342', name: 'Southern Cross Pallets Pty Ltd' };
 export const BLUEGUM = { abn: '36600733916', name: 'Bluegum IT Services Pty Ltd' };
 
-export const payer = { id: 'u-pay', name: 'Sam Payer', roles: ['payer'] };
-export const approver = { id: 'u-app', name: 'Priya Approver', roles: ['approver'] };
+// Signed-in people, as the server builds them from a session (auth/roles.js).
+export const payer = person('Sam Payer', ['payer']);
+export const approver = person('Priya Approver', ['approver']);
 
 export async function startPayments({ delaySeconds = 20, delayedSeconds = 600, openingBalance = 100000, env = {} } = {}) {
   const db = await startTestDatabase();

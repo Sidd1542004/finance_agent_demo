@@ -12,12 +12,13 @@ import mongoose from 'mongoose';
 process.env.MONGODB_URI = 'mongodb://127.0.0.1:1/never-used';
 
 const { csrfGuard, requireRole, CSRF_REFUSED } = await import('../src/auth/middleware.js');
+const { trustActor } = await import('../src/auth/roles.js');
 const { createDemoResetHandler, demoResetBlocked, withDemoWipe, mongoLock, RESET_CONFIRMATION, LOCK_ID } = await import('../src/services/demoReset.js');
 const { HttpError } = await import('../src/services/runs.js');
 const { DEMO_DATA_MODELS, REFERENCE_MODELS } = await import('../src/seed/seed.js');
 const { serve, client, startTestDatabase } = await import('../test-support/mongo.js');
 
-const ADMIN = { id: 'u-admin', name: 'Ada Admin', roles: ['admin'] };
+const ADMIN = trustActor({ id: 'u-admin', name: 'Ada Admin', roles: ['admin'], sessionId: 's-admin' });
 const PAYER = { id: 'u-pay', name: 'Sam Payer', roles: ['payer'] };
 const ALLOWED = () => null;
 
@@ -49,7 +50,8 @@ async function resetApp({ blocked = ALLOWED, reset, audit, lock = memoryLock() }
   app.use(express.json());
   app.use('/api', csrfGuard());
   app.use('/api', (req, res, next) => {
-    req.user = req.headers['x-test-user'] ? JSON.parse(req.headers['x-test-user']) : null;
+    // Stands in for loadUser, which marks the session's user as an authenticated actor.
+    req.user = req.headers['x-test-user'] ? trustActor(JSON.parse(req.headers['x-test-user'])) : null;
     next();
   });
   const handler = createDemoResetHandler({

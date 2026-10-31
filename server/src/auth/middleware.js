@@ -1,6 +1,7 @@
 // Who is calling, and may they? Express middleware for the API.
 //
-//   loadUser      reads the session cookie and sets req.user (or null)
+//   loadUser      reads the session cookie and sets req.user (or null), an authenticated actor
+//   actorOf       the signed-in person as the actor of an action
 //   requireUser   401 unless signed in
 //   requireRole   403 unless the user holds one of the roles (see roles.js:
 //                 an administrator also holds reviewer, approver and payer)
@@ -10,9 +11,12 @@
 
 import { COOKIE_NAME, parseCookies, userForToken } from './sessions.js';
 import { ROLES } from '../models/index.js';
-import { hasRole } from './roles.js';
+import { hasRole, trustActor } from './roles.js';
 
 export { hasRole };
+
+/** The signed-in person, as the actor of an action. Whatever name a request body types is ignored. */
+export const actorOf = (req) => (req.user ? trustActor({ id: req.user.id, name: req.user.name, roles: req.user.roles, sessionId: req.user.sessionId }) : null);
 
 export const CSRF_HEADER = 'x-foa-request';
 
@@ -24,7 +28,9 @@ export function loadUser() {
   return async (req, res, next) => {
     try {
       const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
-      req.user = token ? await userForToken(token) : null;
+      const user = token ? await userForToken(token) : null;
+      // Built here from the session: the only way a request's user becomes an actor.
+      req.user = user ? trustActor(user) : null;
       req.sessionToken = req.user ? token : null;
       next();
     } catch (err) {

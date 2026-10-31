@@ -72,7 +72,6 @@ export async function processInvoice(invoice, { reading = null } = {}) {
 const actions = createInvoiceActions({
   store: sampleLedger,
   policy: config.policy,
-  roles: config.roles,
   // EFT, BPAY and Card go through the simulated bank (AUD only). Cheque and Other are recorded by hand.
   bank: { calendar: paymentCalendar, methods: BANK_METHODS, currencies: ['AUD'] },
   rerun: async (id) => {
@@ -91,7 +90,7 @@ export async function getInvoiceDetail(id, actor = null) {
     invoiceDocumentStatus(invoice), // the original PDF, if one was kept
   ]);
   const partial = AWAITING_DECISION.includes(invoice.status) ? receivedOnly(invoice, config.policy.gstRatePct) : null;
-  const ctx = { payment: payment ? { ...payment, id: String(payment._id) } : null, receivedOnly: partial, roles: config.roles, policy: config.policy, actor };
+  const ctx = { payment: payment ? { ...payment, id: String(payment._id) } : null, receivedOnly: partial, policy: config.policy, actor };
 
   // POs a reviewer can link: the supplier's when it is known, otherwise all.
   let linkablePos = [];

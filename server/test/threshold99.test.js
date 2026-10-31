@@ -19,6 +19,7 @@ const { runQueryChecks } = await import('../src/agent/finance/queryRules.js');
 const { createInvoiceActions } = await import('../src/services/invoiceActions.js');
 const { createMemoryLedger } = await import('../src/integrations/memoryLedger.js');
 const { vendors, purchaseOrders, goodsReceipts, renderInvoiceText, findSample } = await import('../src/seed/data.js');
+const { person } = await import('../test-support/actors.js');
 
 const policy = config.policy;
 
@@ -41,7 +42,7 @@ function setup(extract) {
     await runAgent(agent, { invoice });
     return invoice;
   };
-  const approver = { id: 'u-approver', name: 'Priya Approver', roles: ['approver'] };
+  const approver = person('Priya Approver', ['approver']);
   return { ledger, submit, act: (invoice, action, input = {}) => actions.perform(invoice.id, action, input, approver) };
 }
 

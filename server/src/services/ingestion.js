@@ -32,6 +32,7 @@ import { readUpload } from './uploads.js';
 import { processInvoice, visionReader } from './invoices.js';
 import { keepInvoiceDocument } from './invoiceDocuments.js';
 import { HttpError, recordAudit } from './runs.js';
+import { requireActor } from './actor.js';
 
 export const ACTOR = 'Email ingestion';
 const LOCK_MS = 90 * 1000; // longer than one sync's budget; a crashed sync frees it after this
@@ -160,6 +161,7 @@ export function createIngestion({
   // ----- connecting -----
 
   async function startConnect(name, user) {
+    requireActor(user, 'admin');
     const p = providerFor(name);
     const problem = configProblem(name);
     if (problem) throw new HttpError(409, problem);
@@ -176,6 +178,7 @@ export function createIngestion({
 
   /** The provider sent the person back. Returns { account } or throws ConnectError (with a safe code). */
   async function completeConnect(name, { code, state, error }, user) {
+    requireActor(user, 'admin');
     const p = providerFor(name);
     if (configProblem(name)) throw new ConnectError('config', configProblem(name));
     const hash = sha256Hex(String(state || ''));
@@ -232,6 +235,7 @@ export function createIngestion({
   }
 
   async function disconnect(name, user) {
+    requireActor(user, 'admin');
     const p = providerFor(name);
     const doc = await IngestionSource.findById(name).lean();
     let revoked = 'nothing stored';
@@ -254,6 +258,7 @@ export function createIngestion({
   }
 
   async function setEnabled(name, enabled, user) {
+    requireActor(user, 'admin');
     providerFor(name);
     const doc = await IngestionSource.findById(name).lean();
     if (enabled && !(doc?.status === 'connected' || doc?.status === 'error')) throw new HttpError(409, 'Connect the mailbox first.');
@@ -557,7 +562,9 @@ export function createIngestion({
 
   // ----- sync -----
 
+  // trigger 'cron': the scheduler (CRON_SECRET); anything else is an administrator's request.
   async function sync(name, { trigger = 'manual', user = null } = {}) {
+    if (trigger !== 'cron') requireActor(user, 'admin');
     providerFor(name);
     const doc = await IngestionSource.findById(name).lean();
     const result = {
@@ -716,6 +723,7 @@ export function createIngestion({
   }
 
   async function retry(id, user) {
+    requireActor(user, 'admin');
     const item = await IngestionItem.findById(id).lean();
     if (!item) throw new HttpError(404, 'That ingestion record does not exist.');
     providerFor(item.provider);

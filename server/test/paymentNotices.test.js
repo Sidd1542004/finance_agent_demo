@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { createEmailDelivery, deliveryMode } from '../src/services/emailDelivery.js';
 import { composePaymentNotice, noticeBlock } from '../src/agent/finance/paymentEmails.js';
 import { startPayments, PALLETS } from '../test-support/payments.js';
+import { trustActor } from '../src/auth/roles.js';
 
 const fakeMailer = () => {
   const sent = [];
@@ -82,7 +83,7 @@ test('templates: success only for a confirmed payment, with the verified details
 const h = await startPayments();
 test.after(h.stop);
 const { models } = h;
-const person = { id: 'u-rev', name: 'Rita Reviewer', roles: ['reviewer'] };
+const person = trustActor({ id: 'u-rev', name: 'Rita Reviewer', roles: ['reviewer'], sessionId: 's-rev' });
 
 test('one success notice per confirmed payment, however many ticks or requests', async () => {
   const { paymentId } = await h.scheduled({ total: 120 });

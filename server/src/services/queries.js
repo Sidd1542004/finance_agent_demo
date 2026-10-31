@@ -7,7 +7,8 @@ import { emailAddress } from '../agent/finance/queryRules.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { VendorQuery, OutboxMessage } from '../models/index.js';
 import { config } from '../config.js';
-import { HttpError, runAndRecord, latestRun, addHumanStep, whoAndWhy, failedDecision, auditFailed, recordAudit } from './runs.js';
+import { HttpError, runAndRecord, latestRun, addHumanStep, failedDecision, auditFailed, recordAudit } from './runs.js';
+import { requireActor } from './actor.js';
 
 const agent = createVendorQueryAgent({
   ledger: sampleLedger,
@@ -37,11 +38,16 @@ export async function getQueryDetail(id) {
 /**
  * A person sends a reply to, or closes, an email the agent handed over.
  * Only emails waiting for a person can be decided, and only once.
+ * `actor`: an authenticated actor with the reviewer role (a typed name is ignored).
  */
-export async function resolveQuery(id, input) {
-  const { action } = input;
+export async function resolveQuery(id, input, actor) {
+  requireActor(actor, 'reviewer');
+  const { action } = input || {};
   if (!['send', 'close'].includes(action)) throw new HttpError(400, 'Choose to send a reply or close the email.');
-  const { who, why } = whoAndWhy(input);
+  const who = actor.name;
+  const why = String(input.note || '')
+    .trim()
+    .slice(0, 1000);
   const body = String(input.body || '')
     .trim()
     .slice(0, 8000);
@@ -58,7 +64,7 @@ export async function resolveQuery(id, input) {
     subjectKind: 'query',
     subjectId: id,
     actor: who,
-    ...(input.actorId ? { actorId: input.actorId } : {}),
+    actorId: actor.id,
     action: action === 'send' ? 'reply_sent' : 'closed',
     from: 'needs_person',
     to: query.status,

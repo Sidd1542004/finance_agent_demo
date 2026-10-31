@@ -11,6 +11,7 @@ import { allowedActions, ActionError } from '../src/agent/finance/lifecycle.js';
 import { correctionChanges, latestCorrections, describeChange } from '../src/agent/finance/corrections.js';
 import { labelNear, hintsForText, hintsPrompt } from '../src/agent/finance/supplierHints.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
+import { person } from '../test-support/actors.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleInvoices, renderInvoiceText } from '../src/seed/data.js';
 
@@ -48,7 +49,8 @@ function setup({ misread, roles = {} } = {}) {
     await runAgent(agent, { invoice });
     return invoice;
   };
-  const act = (invoice, action, input = {}) => actions.perform(invoice.id, action, { decidedBy: 'Priya N', ...input });
+  // A signed-in person decides: by default Priya N, holding every working role; `decidedBy` picks another person.
+  const act = (invoice, action, { decidedBy = 'Priya N', ...input } = {}, actor = person(decidedBy)) => actions.perform(invoice.id, action, input, actor);
   return { ledger, invoices, groq, submit, act };
 }
 
@@ -164,14 +166,14 @@ test('an unidentified supplier gets no hint', async () => {
 });
 
 test('edit fields: role, note, status and value rules', async () => {
-  const s = setup({ roles: { reviewers: ['Priya N'] } });
+  const s = setup();
   const invoice = await s.submit(sampleText('clean'));
-  const tryEdit = (input) => s.act(invoice, 'edit_fields', { note: 'Fix.', ...input });
+  const tryEdit = (input) => s.act(invoice, 'edit_fields', { note: 'Fix.', ...input }, input.decidedBy === 'Sam K' ? person('Sam K', ['payer']) : undefined);
   const refused = async (input, status, message) => {
     await assert.rejects(tryEdit(input), (err) => err instanceof ActionError && err.status === status && message.test(err.message));
   };
 
-  await refused({ decidedBy: 'Sam K', fields: { total: 1 } }, 403, /Sam K is not allowed to edit fields/);
+  await refused({ decidedBy: 'Sam K', fields: { total: 1 } }, 403, /You need the reviewer role to edit fields/);
   await refused({ note: '', fields: { total: 1 } }, 400, /Add a note/);
   await refused({ fields: { invoiceDate: '14/09/2026' } }, 400, /YYYY-MM-DD/);
   await refused({ fields: { dueDate: '2026-02-30' } }, 400, /YYYY-MM-DD/);

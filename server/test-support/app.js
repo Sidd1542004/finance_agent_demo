@@ -27,8 +27,9 @@ export async function startApp(env = {}) {
   await appModule.ensureDatabase();
   await buildIndexes();
   const { createUser } = await import('../src/services/users.js');
+  const { TEST_SETUP } = await import('./actors.js');
   const users = {};
-  for (const [key, p] of Object.entries(PEOPLE)) users[key] = await createUser({ ...p, password: PASSWORD });
+  for (const [key, p] of Object.entries(PEOPLE)) users[key] = await createUser({ ...p, password: PASSWORD }, TEST_SETUP);
   const server = await serve(appModule.app);
 
   async function signIn(key) {

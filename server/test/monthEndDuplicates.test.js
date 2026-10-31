@@ -15,6 +15,7 @@ import { createReportAgent } from '../src/agent/finance/reportAgent.js';
 import { checkFigures, ungroundedNumbers, figuresToCsv } from '../src/agent/finance/reportFigures.js';
 import { allowedActions, ActionError } from '../src/agent/finance/lifecycle.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
+import { person } from '../test-support/actors.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleInvoices, renderInvoiceText, sampleStatement } from '../src/seed/data.js';
 
@@ -38,7 +39,8 @@ function setup() {
     await runAgent(agent, { invoice });
     return invoice;
   };
-  const act = (invoice, action, input = {}) => actions.perform(invoice.id, action, { decidedBy: 'Priya N', ...input });
+  // A signed-in person decides: by default Priya N, holding every working role; `decidedBy` picks another person.
+  const act = (invoice, action, { decidedBy = 'Priya N', ...input } = {}, actor = person(decidedBy)) => actions.perform(invoice.id, action, input, actor);
   const reconcile = async (csv) => {
     const n = statements.length + 1;
     const statement = { id: `st-${n}`, createdAt: new Date(2026, 9, 7, 9, n), source: { kind: 'sample', filename: sampleStatement.filename }, rawText: csv, status: 'received' };

@@ -13,6 +13,7 @@ import { normaliseAbn } from '../agent/finance/rules.js';
 import { hasRole } from '../auth/roles.js';
 import { config } from '../config.js';
 import { HttpError, recordAudit } from './runs.js';
+import { requireActor } from './actor.js';
 
 const who = (user) => ({ actor: user.name, actorId: user.id });
 
@@ -41,6 +42,7 @@ const changeView = (c, { full = false } = {}) => ({
 
 /** Every supplier with its masked details and any pending change. */
 export async function listSuppliers(user) {
+  requireActor(user);
   const [vendors, pending] = await Promise.all([Vendor.find().sort({ name: 1 }).lean(), BeneficiaryChange.find({ status: 'pending' }).lean()]);
   // Approvers and admins see a pending proposal in full, to check it before approving.
   const canReview = hasRole(user, 'approver', 'admin');
@@ -59,7 +61,8 @@ export async function listSuppliers(user) {
   });
 }
 
-export async function supplierHistory(abn) {
+export async function supplierHistory(abn, user) {
+  requireActor(user);
   const vendor = await vendorByAbn(abn);
   const changes = await BeneficiaryChange.find({ vendorAbn: vendor.abn }).sort({ createdAt: -1 }).lean();
   return { abn: vendor.abn, name: vendor.name, changes: changes.map((c) => changeView(c)) };
@@ -67,6 +70,7 @@ export async function supplierHistory(abn) {
 
 /** Propose new details. One pending change per supplier. Blocks payments until decided. */
 export async function proposeChange(abn, input, user) {
+  requireActor(user, 'payer', 'admin');
   const vendor = await vendorByAbn(abn);
   const { details, problems } = normaliseDetails(input, { bsbPrefix: config.simBank.bsbPrefix });
   if (problems.length) throw new HttpError(400, problems.join(' '));
@@ -112,6 +116,7 @@ async function pendingChange(id) {
 
 /** A second person approves: the details become the supplier's verified details. */
 export async function approveChange(id, user, note = '') {
+  requireActor(user, 'approver', 'admin');
   const change = await pendingChange(id);
   if (change.proposedById === user.id) throw new HttpError(403, 'You proposed this change, so someone else must approve it.');
   const at = new Date();
@@ -157,6 +162,7 @@ export async function approveChange(id, user, note = '') {
 
 /** Reject (a second person) or withdraw (the proposer). The current details stay. */
 export async function rejectChange(id, user, note = '') {
+  requireActor(user, 'payer', 'approver', 'admin');
   const change = await pendingChange(id);
   const own = change.proposedById === user.id;
   if (!own && !hasRole(user, 'approver', 'admin')) throw new HttpError(403, 'Only an approver or administrator can reject someone else’s proposal.');

@@ -23,7 +23,7 @@
 // threshold with no exceptions. It is never approved without a person.
 
 import { namesEqual } from './rules.js';
-import { effectiveRoles } from '../../auth/roles.js';
+import { effectiveRoles, actorProblem, isTrustedActor } from '../../auth/roles.js';
 
 export const STATUS_LABEL = {
   received: 'Received',
@@ -124,7 +124,7 @@ export function statusFromChecks(checks) {
  *   from   statuses the action is allowed in
  *   to     resulting status (null = unchanged, or decided by re-running the agent)
  *   note   'required' | 'optional' | 'if_exceptions' (required when checks failed)
- *   role   'reviewer' | 'approver' | 'payer' (see config.roles)
+ *   role   'reviewer' | 'approver' | 'payer' (the signed-in actor's roles; see auth/roles.js)
  */
 export const ACTIONS = {
   approve: { label: 'Approve', from: AWAITING_DECISION, to: 'approved', note: 'if_exceptions', role: 'approver', confirm: true },
@@ -172,11 +172,9 @@ export class ActionError extends Error {
   }
 }
 
-const inRole = (name, list) => !list || !list.length || list.some((n) => n.toLowerCase() === String(name).trim().toLowerCase());
-
 /**
  * Why an action cannot be taken right now, or null if it can.
- * `ctx` = { payment, receivedOnly, roles, decidedBy, policy }
+ * `ctx` = { payment, receivedOnly, policy }
  */
 export function blockedReason(invoice, actionId, ctx = {}) {
   const a = ACTIONS[actionId];
@@ -247,8 +245,8 @@ export function allowedActions(invoice, ctx = {}) {
         noteRequired: a.note === 'required' || (a.note === 'if_exceptions' && exceptions),
         confirm: Boolean(a.confirm),
         role: a.role,
-        // Whether the signed-in person holds the role (always true without one).
-        permitted: ctx.actor ? effectiveRoles(ctx.actor.roles).includes(a.role) : true,
+        // Whether the signed-in person holds the role. No authenticated actor: not permitted.
+        permitted: isTrustedActor(ctx.actor) ? effectiveRoles(ctx.actor.roles).includes(a.role) : false,
       };
     })
     .filter((x) => x.enabled || ['approve', 'approve_received', 'clear_duplicate', 'reopen', 'reverse_approval', 'cancel_payment', 'reschedule_payment'].includes(x.id));
@@ -258,27 +256,18 @@ export function allowedActions(invoice, ctx = {}) {
  * Check a person may take an action, before anything is changed.
  * Throws ActionError with a message that can be shown to the user.
  *
- * ctx.actor = { id, name, roles }: the signed-in user. Every API call passes
- * one, and then only the user's roles count. Without an actor (internal
- * callers and the tests) the typed name is checked against ctx.roles lists.
+ * ctx.actor = { id, name, roles }: an AUTHENTICATED actor (auth/roles.js), built
+ * from the signed-in session or as a named system actor. Without one, nothing
+ * is allowed: there is no fallback to a typed name or to name lists.
  */
 export function assertAction(invoice, actionId, input, ctx = {}) {
   const a = ACTIONS[actionId];
   if (!a) throw new ActionError(400, 'Unknown action.');
-  let who;
-  let actorId = null;
-  if (ctx.actor) {
-    who = String(ctx.actor.name || '').trim();
-    actorId = ctx.actor.id ? String(ctx.actor.id) : null;
-    if (!who || !actorId) throw new ActionError(401, 'Sign in to continue.');
-    if (!effectiveRoles(ctx.actor.roles).includes(a.role)) throw new ActionError(403, `You need the ${a.role} role to ${a.label.toLowerCase()}.`);
-  } else {
-    who = String(input.decidedBy || '').trim();
-    if (!who) throw new ActionError(400, 'Enter your name so the decision is on record.');
-    const roles = ctx.roles || {};
-    const list = a.role === 'approver' ? roles.approvers : a.role === 'payer' ? roles.payers : roles.reviewers;
-    if (!inRole(who, list)) throw new ActionError(403, `${who} is not allowed to ${a.label.toLowerCase()}. Allowed: ${list.join(', ')}.`);
-  }
+  const problem = actorProblem(ctx.actor);
+  if (problem) throw new ActionError(problem.status, problem.message);
+  const who = String(ctx.actor.name).trim();
+  const actorId = String(ctx.actor.id);
+  if (!effectiveRoles(ctx.actor.roles).includes(a.role)) throw new ActionError(403, `You need the ${a.role} role to ${a.label.toLowerCase()}.`);
   if (ctx.policy?.segregateDuties && a.role === 'payer' && approvedBySamePerson(invoice.approval, actorId, who)) {
     throw new ActionError(403, SAME_PERSON_PAYS);
   }

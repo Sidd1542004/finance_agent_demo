@@ -12,6 +12,7 @@ import { ActionError, allowedActions } from '../src/agent/finance/lifecycle.js';
 import { createCalendar } from '../src/agent/finance/businessDays.js';
 import { remainingToPay, bankAmountProblem, canMovePayment, idempotencyKey } from '../src/agent/finance/paymentRules.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
+import { trustActor } from '../src/auth/roles.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleBeneficiaries, renderInvoiceText, findSample } from '../src/seed/data.js';
 
@@ -20,8 +21,8 @@ const calendar = createCalendar({ timeZone: 'Australia/Sydney', holidays: [], cu
 // Thursday 22 October 2026, 10:00 in Sydney.
 const NOW = calendar.instant('2026-10-22', '10:00');
 
-const approver = { id: 'u-app', name: 'Priya Approver', roles: ['approver'] };
-const payer = { id: 'u-pay', name: 'Sam Payer', roles: ['payer'] };
+const approver = trustActor({ id: 'u-app', name: 'Priya Approver', roles: ['approver'], sessionId: 's-app' });
+const payer = trustActor({ id: 'u-pay', name: 'Sam Payer', roles: ['payer'], sessionId: 's-pay' });
 
 function setup({ now = () => NOW, beneficiaryChanges = [] } = {}) {
   const invoices = [];

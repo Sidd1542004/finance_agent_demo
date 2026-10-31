@@ -17,7 +17,7 @@ export function registerSupplierRoutes(api) {
   api.get(
     '/suppliers/:abn/history',
     wrap(async (req, res) => {
-      res.json(await supplierHistory(req.params.abn));
+      res.json(await supplierHistory(req.params.abn, req.user));
     }),
   );
 
