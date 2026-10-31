@@ -144,17 +144,19 @@ Every one of these is in the audit log (subject `ingestion`), with who and when.
 ### 4. Scheduling (Vercel)
 
 Vercel functions do not run in the background, and on the Hobby plan Vercel
-cron jobs run at most once a day. So the polling is an endpoint for a scheduler
-(`vercel.json` is unchanged):
+cron jobs run at most once a day. So the polling is an endpoint for a scheduler.
+`vercel.json` calls it once a day (21:30 UTC) as a safety net only:
 
 ```
 GET or POST https://<your-app>/api/cron/ingest
 Authorization: Bearer <CRON_SECRET>
 ```
 
-Point an external scheduler (cron-job.org, GitHub Actions, Upstash QStash, your
-own server) at it every 5 minutes, like the payment tick (see
-[payments.md](payments.md#how-often-and-the-vercel-plan)). Calling it more often
+Point an external scheduler (cron-job.org, Upstash QStash, your own server) at it
+every 5 minutes, like the payment tick (see
+[payments.md](payments.md#how-often-and-the-vercel-plan)).
+`.github/workflows/payment-tick.yml` calls it every 5 minutes as a backup once the
+repository secrets `INGEST_URL` and `CRON_SECRET` are set. Calling it more often
 is harmless: each mailbox is synced at most every `INGESTION_POLL_MINUTES`. A daily
 cron alone would mean invoices arrive up to a day late.
 

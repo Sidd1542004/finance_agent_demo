@@ -128,7 +128,7 @@ export function testEnv(uri, extra = {}) {
     DEMO_MODE: 'true',
     RATE_LIMIT_MAX: '0',
     LOGIN_RATE_LIMIT_MAX: '0',
-    CRON_SECRET: 'test-cron-secret-0123456789',
+    CRON_SECRET: 'test-cron-secret-0123456789-abcdefgh',
     TIME_ZONE: 'Australia/Sydney',
     REVIEWERS: '',
     APPROVERS: '',

@@ -194,6 +194,6 @@ test('role changes take effect immediately; unknown roles are refused', async ()
 test('the cron endpoint takes CRON_SECRET, not a session', async () => {
   const admin = await signedIn('admin@test.example');
   assert.equal((await admin.get('/api/cron/daily-summary?preview=1')).status, 401, 'a session is not enough');
-  const res = await client(server.base).get('/api/cron/daily-summary?preview=1', { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } });
+  const res = await client(server.base).get('/api/cron/daily-summary?preview=1', { headers: { Authorization: 'Bearer test-cron-secret-0123456789-abcdefgh' } });
   assert.equal(res.status, 200);
 });

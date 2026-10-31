@@ -155,7 +155,10 @@ Daily summary email (optional):
   and either `RESEND_API_KEY` (with `ALERT_FROM` on a domain verified in Resend) or
   `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`. Without an email
   service or recipients, nothing is sent.
-- `vercel.json` schedules `GET /api/cron/daily-summary` at 03:00 UTC every day (1 or 2 pm
+- `vercel.json` schedules `GET /api/cron/daily-summary` (03:00 UTC), `/api/cron/tick` (22:00 UTC)
+  and `/api/cron/ingest` (21:30 UTC) once a day each; the tick and ingestion also need an external
+  5-minute scheduler (see docs/payments.md). `CRON_SECRET` must be at least 32 characters.
+- The daily summary runs at 03:00 UTC every day (1 or 2 pm
   in Sydney). Vercel sends `Authorization: Bearer <CRON_SECRET>` itself; any other caller
   without it gets 401. **The Vercel Hobby plan allows daily cron jobs only** (and may run
   them at any time within the hour).

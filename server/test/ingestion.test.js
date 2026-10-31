@@ -321,7 +321,7 @@ test('before connecting: the status says what is needed, and nothing touches a m
   assert.equal(gmail.state, 'disconnected');
   assert.equal(gmail.enabled, false);
   assert.equal((await admin.post('/api/ingestion/gmail/sync')).status, 409, 'cannot sync before connecting');
-  const cron = await t.client().get('/api/cron/ingest', { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } });
+  const cron = await t.client().get('/api/cron/ingest', { headers: { Authorization: 'Bearer test-cron-secret-0123456789-abcdefgh' } });
   assert.equal(cron.status, 200);
   assert.equal(google.calls.length, 0, 'no call to Google');
 });
@@ -386,7 +386,7 @@ test('a sign-in that is denied or too old is refused', async () => {
 test('a sync imports invoice attachments for review, refuses other files, and never approves or pays', async () => {
   // Disabled: the scheduler leaves it alone.
   const before = google.calls.length;
-  await t.client().get('/api/cron/ingest', { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } });
+  await t.client().get('/api/cron/ingest', { headers: { Authorization: 'Bearer test-cron-secret-0123456789-abcdefgh' } });
   assert.equal(google.calls.length, before);
   assert.equal((await admin.put('/api/ingestion/gmail/enabled', { enabled: true })).status, 200);
   assert.equal((await admin.put('/api/ingestion/gmail/enabled', { enabled: 'yes' })).status, 400);
@@ -662,7 +662,7 @@ test('revoked or expired access: polling stops, the administrator is told, and i
 });
 
 test('the scheduler syncs an enabled mailbox when it is due, and not more often', async () => {
-  const secret = { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } };
+  const secret = { headers: { Authorization: 'Bearer test-cron-secret-0123456789-abcdefgh' } };
   clockOffset = 10 * 60 * 1000;
   try {
     google.add({ id: 'm14', parts: [] });

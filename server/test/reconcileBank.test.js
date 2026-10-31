@@ -101,7 +101,7 @@ test('the simulated bank statement reconciles to the confirmed payment without p
   assert.equal((await approver.post(`/api/invoices/${id}/actions/approve`, { note: 'Checked against the PDF.' })).status, 200);
   const { nextSlot } = (await payer.get('/api/payment-calendar')).data;
   assert.equal((await payer.post(`/api/invoices/${id}/actions/schedule_payment`, { method: 'EFT', scheduledFor: nextSlot.date, scheduledTime: nextSlot.time })).status, 200);
-  await t.client().get('/api/cron/tick', { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } });
+  await t.client().get('/api/cron/tick', { headers: { Authorization: 'Bearer test-cron-secret-0123456789-abcdefgh' } });
   const paid = await Payment.findOne({ invoiceId: id }).lean();
   assert.equal(paid.status, 'paid');
 

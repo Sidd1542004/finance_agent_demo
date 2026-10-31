@@ -19,7 +19,7 @@ const t = await startApp({
 });
 test.after(t.stop);
 const { AuditEvent, OutboxMessage } = await import('../src/models/index.js');
-const CRON = { headers: { Authorization: 'Bearer test-cron-secret-0123456789' } };
+const CRON = { headers: { Authorization: 'Bearer test-cron-secret-0123456789-abcdefgh' } };
 
 async function approvedInvoice(sampleId = 'clean') {
   const reviewer = await t.signIn('reviewer');

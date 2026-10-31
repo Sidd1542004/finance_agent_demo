@@ -9,8 +9,6 @@ import { resetEverything } from '../seed/seed.js';
 import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup, visionReader } from '../services/invoices.js';
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
 import { keepInvoiceDocument, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
-import { createDailySummaryHandler } from '../services/dailySummary.js';
-import { createMailer } from '../services/mailer.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { HttpError, recordAudit } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
@@ -23,7 +21,8 @@ import { registerIngestionPublicRoutes, registerIngestionRoutes } from './ingest
 import { createAuthRouter } from './auth.js';
 import { createAdminRouter } from './admin.js';
 import { registerSupplierRoutes } from './suppliers.js';
-import { registerPaymentCron, registerPaymentRoutes, registerAdminPaymentRoutes } from './payments.js';
+import { registerPaymentRoutes, registerAdminPaymentRoutes } from './payments.js';
+import { createCronRouter } from './cron.js';
 
 const MAX_TEXT = 200_000;
 // Vercel refuses request bodies over 4.5 MB before they reach the app, so uploads stop at 4 MB.
@@ -89,27 +88,11 @@ api.get('/health', (req, res) => {
 // Sign in / out. Open: these are how a person gets a session.
 api.use('/auth', createAuthRouter());
 
-// The daily summary email, called once a day by a Vercel cron job with
-// Authorization: Bearer CRON_SECRET. ?preview=1 returns the email without sending it.
-// Open to the scheduler: CRON_SECRET is checked instead of a session.
-api.get(
-  '/cron/daily-summary',
-  wrap(
-    createDailySummaryHandler({
-      secret: config.alerts.cronSecret,
-      recipients: config.alerts.recipients,
-      appUrl: config.alerts.appUrl,
-      companyName: config.companyName,
-      mailer: createMailer(config.alerts),
-    }),
-  ),
-);
+// Every scheduler endpoint (daily summary, payment tick, mailbox ingestion),
+// behind one CRON_SECRET guard that covers every /api/cron path. See routes/cron.js.
+api.use('/cron', createCronRouter());
 
-// The payment scheduler's tick: CRON_SECRET, not a session.
-registerPaymentCron(api);
-
-// Mailbox ingestion: the scheduler's endpoint (CRON_SECRET) and the OAuth
-// callback (checks the signed-in administrator and the one-time state itself).
+// The mailbox OAuth callback: checks the signed-in administrator and the one-time state itself.
 registerIngestionPublicRoutes(api);
 
 // Everything below needs a signed-in user with at least one role. Each route

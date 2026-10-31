@@ -1,17 +1,16 @@
 // Automatic invoice ingestion: the administrator's controls, the OAuth
 // callback and the scheduler's endpoint. See services/ingestion.js.
 //
+//   registerIngestionCron(router)        on the cron router (routes/cron.js), CRON_SECRET:
+//     GET|POST /api/cron/ingest                 the scheduler
 //   registerIngestionPublicRoutes(api)   before sign-in is required:
-//     GET|POST /cron/ingest                     CRON_SECRET (the scheduler)
 //     GET /ingestion/oauth/:provider/callback   the provider's redirect; checks the
 //                                               signed-in administrator and the one-time state
 //   registerIngestionRoutes(api, { work })      after sign-in, administrators only
 
 import mongoose from 'mongoose';
-import { config } from '../config.js';
 import { requireRole } from '../auth/middleware.js';
 import { hasRole } from '../auth/roles.js';
-import { cronAuthorized } from '../services/dailySummary.js';
 import { ingestion, ConnectError } from '../services/ingestion.js';
 import { HttpError } from '../services/runs.js';
 
@@ -24,17 +23,16 @@ function providerParam(req) {
   return p;
 }
 
-export function registerIngestionPublicRoutes(api) {
+// Behind the cron router's CRON_SECRET guard.
+export function registerIngestionCron(router) {
   const tick = wrap(async (req, res) => {
-    const secret = config.alerts.cronSecret;
-    if (!secret) return res.status(503).json({ error: 'The scheduler is not set up: set CRON_SECRET.' });
-    if (!cronAuthorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Not authorised.' });
-    res.set('Cache-Control', 'no-store');
     res.json(await ingestion().cronTick());
   });
-  api.get('/cron/ingest', tick);
-  api.post('/cron/ingest', tick);
+  router.get('/ingest', tick);
+  router.post('/ingest', tick);
+}
 
+export function registerIngestionPublicRoutes(api) {
   // The provider sends the administrator back here. A plain browser redirect
   // (GET), so it answers with a redirect to the dashboard, never with tokens.
   api.get(

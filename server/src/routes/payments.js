@@ -1,13 +1,11 @@
 // Payments, the cron tick, payment notices and the simulated bank.
 //
-//   registerPaymentCron(api)          before sign-in: CRON_SECRET only
+//   registerPaymentCron(router)       on the cron router (routes/cron.js): CRON_SECRET only
 //   registerPaymentRoutes(api)        after sign-in
 //   registerAdminPaymentRoutes(r)     on the admin router (admin role)
 
 import mongoose from 'mongoose';
-import { config } from '../config.js';
 import { requireRole } from '../auth/middleware.js';
-import { cronAuthorized } from '../services/dailySummary.js';
 import { Payment, PaymentJob } from '../models/index.js';
 import { HttpError, recordAudit } from '../services/runs.js';
 import { simBank, paymentExecutor, paymentNotices, emailDelivery } from '../services/paymentSystem.js';
@@ -27,17 +25,14 @@ const bankCall = async (fn) => {
   }
 };
 
-export function registerPaymentCron(api) {
+// On the cron router (routes/cron.js), behind its CRON_SECRET guard: /api/cron/tick.
+export function registerPaymentCron(router) {
   // Called every few minutes by an external scheduler (or Vercel Cron, daily on Hobby).
   const tick = wrap(async (req, res) => {
-    const secret = config.alerts.cronSecret;
-    if (!secret) return res.status(503).json({ error: 'The payment scheduler is not set up: set CRON_SECRET.' });
-    if (!cronAuthorized(req.headers.authorization, secret)) return res.status(401).json({ error: 'Not authorised.' });
-    res.set('Cache-Control', 'no-store');
     res.json(await paymentExecutor.tick({ trigger: 'cron' }));
   });
-  api.get('/cron/tick', tick);
-  api.post('/cron/tick', tick);
+  router.get('/tick', tick);
+  router.post('/tick', tick);
 }
 
 const listItem = (p) => ({

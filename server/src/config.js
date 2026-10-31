@@ -61,6 +61,13 @@ export const config = {
     },
   },
 
+  // The scheduler endpoints (/api/cron/*, routes/cron.js): refused requests from one
+  // address before it is slowed down (429). CRON_FAILURE_LIMIT=0 turns it off.
+  cron: {
+    failureLimit: num(process.env.CRON_FAILURE_LIMIT, 20),
+    failureWindowMinutes: num(process.env.CRON_FAILURE_WINDOW_MINUTES, 15),
+  },
+
   // Optional shared password for the whole site (HTTP Basic auth, any user name).
   accessPassword: process.env.ACCESS_PASSWORD || '',
 

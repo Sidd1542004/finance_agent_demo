@@ -158,14 +158,19 @@ Vercel plan the project is on; the README assumes Hobby.
   GET, with a request header `Authorization: Bearer <CRON_SECRET>`, timeout 60
   seconds. Any scheduler that can send that header works (Upstash QStash, a
   server's crontab with `curl`, and so on).
-- `.github/workflows/payment-tick.yml` can call it from GitHub Actions every 5
-  minutes once the repository secrets `PAYMENT_TICK_URL` and `CRON_SECRET` are
-  set. GitHub's schedules are best-effort (often late, sometimes skipped), so
+- `.github/workflows/payment-tick.yml` can call it (and `/api/cron/ingest`) from
+  GitHub Actions every 5 minutes once the repository secrets `PAYMENT_TICK_URL`
+  (and `INGEST_URL`) and `CRON_SECRET` are set. GitHub's schedules are best-effort (often late, sometimes skipped), so
   use it as a backup only.
 - **Vercel Pro** supports per-minute cron: change the tick's schedule in
   `vercel.json` to `*/5 * * * *` instead of using an external scheduler.
 
-`CRON_SECRET` is the same secret as the daily summary's. It is only read on the
+`CRON_SECRET` is the same secret as the daily summary's. Every `/api/cron/*` path,
+including one that does not exist, goes through one guard (`server/src/routes/cron.js`):
+503 when `CRON_SECRET` is unset or **shorter than 32 characters**, 401 without
+`Authorization: Bearer <CRON_SECRET>` (the secret is never read from the URL),
+`Cache-Control: no-store`, and after `CRON_FAILURE_LIMIT` (default 20) refused requests
+from one address in `CRON_FAILURE_WINDOW_MINUTES` (15), 429 for the rest of the window. It is only read on the
 server and never sent to the browser. `ACCESS_PASSWORD` and the Vercel
 middleware leave `/api/cron/*` open so the scheduler can reach it; the secret
 protects it.
