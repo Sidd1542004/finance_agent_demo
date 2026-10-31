@@ -143,6 +143,11 @@ export default function App() {
           <span className="brand-name">Finance Operations Agent</span>
           <div className="topbar-right">
             {health && <span className={`reader reader-${health.reader.mode}`}>{health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}</span>}
+            {health?.reader.fallback?.invoicesWaiting > 0 && (
+              <span className="reader reader-rules" title={`Last at ${health.reader.fallback.lastAt} (${health.reader.fallback.lastCode})`}>
+                AI reader unavailable: {health.reader.fallback.invoicesWaiting} invoice{health.reader.fallback.invoicesWaiting === 1 ? '' : 's'} read by the rules reader
+              </span>
+            )}
             {user && health?.demoReset && hasRole(user, 'admin') && (
               <>
                 <button className="btn btn-on-navy" onClick={loadDemo} disabled={Boolean(busy)}>

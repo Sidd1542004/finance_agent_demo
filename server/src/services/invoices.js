@@ -4,7 +4,7 @@
 
 import { runAgent } from '../agent/core/loop.js';
 import { createInvoiceAgent } from '../agent/finance/invoiceAgent.js';
-import { createExtractor, createVisionReader } from '../agent/finance/extract.js';
+import { createExtractor, createVisionReader, extractWithRules } from '../agent/finance/extract.js';
 import { createAbrLookup } from '../agent/finance/abr.js';
 import { receivedOnly, normaliseAbn } from '../agent/finance/rules.js';
 import { allowedActions, ActionError, AWAITING_DECISION } from '../agent/finance/lifecycle.js';
@@ -33,9 +33,21 @@ export const extractor = createExtractor(config);
 export const visionReader = createVisionReader(config);
 export const abrLookup = createAbrLookup(config);
 
+// When the AI reader is configured but fails (unavailable, timed out, invalid
+// answer), the rules reader stands in for it. The invoice then goes to Needs
+// Review with approval blocked (invoiceAgent.js ai_reader_unavailable).
+export function readerFallback(log = console) {
+  return async (text, fb) => {
+    if (fb.code === 'auth') log.error?.('The AI reader is not working: Groq rejected GROQ_API_KEY. Invoices are being read by the rules reader.');
+    else log.warn?.(`AI reader unavailable (${fb.code}); invoice read by the rules reader.`);
+    return extractWithRules(text, { fallback: fb });
+  };
+}
+
 const agent = createInvoiceAgent({
   ledger: sampleLedger,
   extract: extractor.extract,
+  fallback: extractor.mode === 'groq' ? readerFallback() : null,
   abr: abrLookup,
   policy: config.policy,
   save: (invoice) => invoice.save(),
@@ -158,6 +170,19 @@ export async function performInvoiceAction(id, action, input, actor = null) {
 export function applyHumanDecision(id, { decision, decidedBy, note }, actor = null) {
   if (!['approve', 'approve_received', 'reject'].includes(decision)) throw new HttpError(400, 'Choose approve, approve the received quantity only, or reject.');
   return performInvoiceAction(id, decision, { decidedBy, note }, actor);
+}
+
+/** For /api/health: invoices read by the rules reader because the AI reader failed, still waiting for a person. */
+export async function readerFallbackStatus() {
+  const filter = { aiFallback: { $ne: null }, status: { $in: [...AWAITING_DECISION, 'failed'] } };
+  const [count, latest] = await Promise.all([
+    Invoice.countDocuments(filter),
+    Invoice.findOne({ aiFallback: { $ne: null } })
+      .sort({ 'aiFallback.at': -1 })
+      .select('aiFallback.at aiFallback.code')
+      .lean(),
+  ]);
+  return { invoicesWaiting: count, lastAt: latest?.aiFallback?.at || null, lastCode: latest?.aiFallback?.code || null };
 }
 
 // Overdue and due-soon invoices and the cash needed.

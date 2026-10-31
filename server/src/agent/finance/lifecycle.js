@@ -78,6 +78,8 @@ export function approvedBySamePerson(approval, actorId, who) {
 // be cleared first; sums that don't add up need a corrected invoice; goods not
 // received can only be approved for the received quantity.
 export const APPROVAL_BLOCKERS = {
+  ai_reader_unavailable:
+    'It was read by the basic rules reader because the AI reader was unavailable. Process it again when the AI reader is back, or check it against the original and correct its fields with Edit fields.',
   duplicate: 'It may be a duplicate. Confirm it is not a duplicate first.',
   arithmetic: "The invoice's amounts don't add up. Request a corrected invoice.",
   quantity_match: 'More is invoiced than can be paid for. Approve the received quantity only, or request a corrected invoice.',

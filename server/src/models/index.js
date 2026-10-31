@@ -172,6 +172,9 @@ const invoiceSchema = new Schema(
     cancellation: { type: Mixed, default: null }, // { decidedBy, note, at, from }
     reopened: { type: Mixed, default: null }, // accidental decision undone: { decidedBy, note, at, from, priorDecision }
     recovery: { type: Mixed, default: null }, // money already paid being recovered: { status, opened, closed }
+    // Read by the rules reader because the AI reader failed: { code, reason, at, since }. Cleared when
+    // the AI reader reads it again. See invoiceAgent.js (ai_reader_unavailable).
+    aiFallback: { type: Mixed, default: null },
     // Set only when the (simulated) bank confirmed the payment: { txnRef, confirmedAt, amount, simulated }
     paymentConfirmation: { type: Mixed, default: null },
     corrections: { type: [Mixed], default: [] }, // fields a reviewer corrected: { field, from, to, by, note, at }. Append only.
@@ -181,6 +184,7 @@ const invoiceSchema = new Schema(
 );
 // The same attachment never becomes two invoices, even with two workers at once.
 // Partial: only invoices imported from a mailbox carry a file hash.
+invoiceSchema.index({ 'aiFallback.at': -1 }, { name: 'ai_fallback', sparse: true });
 invoiceSchema.index({ 'source.fileHash': 1 }, { name: 'one_invoice_per_file', unique: true, partialFilterExpression: { 'source.fileHash': { $type: 'string' } } });
 export const Invoice = model('Invoice', invoiceSchema);
 

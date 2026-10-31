@@ -5,6 +5,11 @@
 //   ledger  - the accounting system (suppliers, purchase orders, goods
 //             received, other invoices). Sample data today, Xero/MYOB later.
 //   extract - the invoice reader (Groq, or the basic pattern reader).
+//   fallback - optional: the reader used when `extract` fails or returns nothing
+//             (the rules reader, when the AI reader is configured). An invoice read
+//             this way gets the ai_reader_unavailable check: Needs Review, and
+//             approval blocked until it is read again by the AI reader or a person
+//             corrects its fields.
 //   abr     - optional Australian Business Register lookup (null when not configured).
 //   policy  - thresholds and tolerances.
 //   save    - persists the invoice record.
@@ -19,7 +24,7 @@ import { matchToPo, suggestPurchaseOrders, resolvePurchaseOrder } from './matchi
 import { fingerprints, duplicateCheck } from './duplicates.js';
 import { statusFromChecks, STATUS_LABEL } from './lifecycle.js';
 import { dueInfo } from './due.js';
-import { applyCorrections } from './extract.js';
+import { applyCorrections, isEmptyReading } from './extract.js';
 
 const SOURCE = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text', email: 'as an email attachment' };
 
@@ -28,7 +33,32 @@ export function pushEvent(invoice, event) {
   invoice.events.push({ at: new Date().toISOString(), ...event });
 }
 
-export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, today }) {
+/** The fallback check, from the invoice's aiFallback record and the corrections made since. */
+export function fallbackCheck(invoice) {
+  const fb = invoice.aiFallback;
+  if (!fb) return null;
+  const since = (invoice.corrections || []).filter((c) => c?.at && c.at >= fb.since);
+  const base = `The AI reader was unavailable (${fb.reason}), so the invoice was read by the basic rules reader, which only understands simple layouts.`;
+  if (since.length) {
+    const who = [...new Set(since.map((c) => c.by).filter(Boolean))].join(', ') || 'a person';
+    return {
+      id: 'ai_reader_unavailable',
+      label: 'Read by the AI reader',
+      status: 'pass',
+      severity: 'review',
+      detail: `${base} ${who} corrected its fields since then, and every check was run again on them.`,
+    };
+  }
+  return {
+    id: 'ai_reader_unavailable',
+    label: 'Read by the AI reader',
+    status: 'fail',
+    severity: 'review',
+    detail: `${base} Approval is blocked until it is processed again with the AI reader, or a person checks it against the original and corrects its fields with Edit fields.`,
+  };
+}
+
+export function createInvoiceAgent({ ledger, extract, fallback = null, abr = null, policy, save, today }) {
   return {
     name: 'finance.invoice-processing',
 
@@ -66,7 +96,21 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         const hints = ledger.supplierHintsFor ? await ledger.supplierHintsFor(invoice.rawText) : [];
         // A scan or photo arrives already read by the vision reader; processing it
         // again reads its transcription (the invoice text) with the text reader.
-        const reading = state.input.reading || (await extract(invoice.rawText, { hints }));
+        let reading = state.input.reading;
+        let fellBack = null;
+        if (!reading) {
+          try {
+            reading = await extract(invoice.rawText, { hints });
+            if (fallback && isEmptyReading(reading)) throw Object.assign(new Error('The AI reader returned no invoice fields.'), { code: 'bad_output' });
+          } catch (err) {
+            if (!fallback) throw err;
+            // Never a dead end, never an approval: the rules reader reads it, and a person checks it.
+            fellBack = { code: err?.code || 'error', reason: String(err?.message || err).slice(0, 300), at: new Date().toISOString() };
+            reading = await fallback(invoice.rawText, fellBack);
+          }
+        }
+        // Kept across runs (since when), so a person's later corrections can clear the check.
+        invoice.aiFallback = fellBack ? { ...fellBack, since: invoice.aiFallback?.since || fellBack.at } : null;
         const { extracted, extraction } = applyCorrections(reading, invoice.corrections, invoice.rawText);
         invoice.extracted = extracted;
         invoice.extraction = extraction;
@@ -74,8 +118,9 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         invoice.dupKey = invoice.fingerprints.numberKey;
         invoice.due = dueInfo(extracted, today?.());
         await save(invoice);
-        const reader =
-          extraction.method === 'groq-vision'
+        const reader = fellBack
+          ? `basic rules reader, because the AI reader was unavailable (${fellBack.reason})`
+          : extraction.method === 'groq-vision'
             ? `AI vision reader (${extraction.model}), from an image`
             : extraction.method === 'groq'
               ? `AI reader (${extraction.model})`
@@ -151,6 +196,8 @@ export function createInvoiceAgent({ ledger, extract, abr = null, policy, save, 
         const checks = [...validation.checks, dup, ...match.checks];
         // Read from a scan or photo: the same model wrote the text and read the
         // fields from it, so a person always confirms them. Never straight to Under Review.
+        const fb = fallbackCheck(invoice);
+        if (fb) checks.unshift(fb);
         const scan = invoice.source?.scan;
         if (scan) {
           checks.unshift({

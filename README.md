@@ -358,6 +358,29 @@ values approves anything.
 Supplier emails used to share `MIN_CONFIDENCE` with invoices. They now have their own
 `MIN_EMAIL_CONFIDENCE` (80%), so the 99% invoice floor does not stop automatic status replies.
 
+### When the AI reader fails
+
+With `GROQ_API_KEY` set, an invoice whose AI reading fails is read by the basic rules
+reader instead of stopping at "Could not process". Failures include Groq unavailable
+(5xx), rate limited (429) after its retries, timed out, unreachable, a rejected key
+(401), an answer that is not JSON, or an empty answer. The invoice then:
+
+- gets the check **"Read by the AI reader"** failed, with the reason, and goes to
+  **Needs Review** whatever the confidence slider says;
+- **cannot be approved** (approve or approve the received quantity) until it is
+  processed again and the AI reader reads it, or a person checks it against the
+  original and corrects its fields with **Edit fields** (a correction made after the
+  AI reader first failed clears it; the checks then run again). Rejecting it is still
+  possible. Nothing is approved or paid because of the fallback;
+- shows "basic rules reader, because the AI reader was unavailable" on the invoice page.
+
+`GET /api/health` reports `reader.fallback`: how many invoices read this way are
+still waiting for a person, and when and why it last happened. The dashboard header
+shows a warning while that count is above zero. A rejected key is also logged as an
+error, so a broken key does not go unnoticed. Scans and photos have no text for the
+rules reader, so they still need the AI vision reader, as before. Without a Groq key
+the rules reader is simply the reader, and this does not apply.
+
 ### Viewing the original PDF
 
 An uploaded PDF, or a PDF imported from a mailbox, is kept (the `invoicedocuments`

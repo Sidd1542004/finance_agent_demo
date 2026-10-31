@@ -28,6 +28,21 @@ export function retryAfterMs(value, now = Date.now()) {
 const retryable = (status) => status === 429 || (status >= 500 && status <= 599);
 
 /**
+ * A Groq call that did not give a usable answer. `code` says why, for the
+ * invoice reader's fallback and its explanation:
+ *   not_configured  no GROQ_API_KEY        auth         the key was rejected (401)
+ *   rate_limit      429 after the retries  server       5xx after the retries
+ *   timeout         no answer in time      network      Groq could not be reached
+ *   bad_request     another 4xx            bad_output   the answer was not a JSON object
+ */
+export class GroqError extends Error {
+  constructor(code, message) {
+    super(message); // still shown as "Error: ...", as before
+    this.code = code;
+  }
+}
+
+/**
  * Send one chat request. `body` is the request body without the model.
  * @returns the parsed object from the message content
  */
@@ -42,7 +57,7 @@ export async function groqChat({
   sleep = sleepFor,
   now = Date.now,
 }) {
-  if (!apiKey) throw new Error('GROQ_API_KEY is not set.');
+  if (!apiKey) throw new GroqError('not_configured', 'GROQ_API_KEY is not set.');
 
   const deadline = now() + budgetMs;
   let attempt = 0;
@@ -50,6 +65,7 @@ export async function groqChat({
     const left = deadline - now();
     let res = null;
     let failure = null; // a message for an error that may be retried
+    let failureCode = null;
     let wait = null;
     try {
       res = await fetchImpl(GROQ_URL, {
@@ -60,6 +76,7 @@ export async function groqChat({
       });
     } catch (err) {
       failure = `Could not reach Groq (${err?.name === 'TimeoutError' ? 'timed out' : err?.message || 'network error'}).`;
+      failureCode = err?.name === 'TimeoutError' ? 'timeout' : 'network';
     }
 
     if (res && !res.ok) {
@@ -69,11 +86,12 @@ export async function groqChat({
       } catch {
         /* body was not JSON */
       }
-      if (res.status === 401) throw new Error('Groq rejected the API key. Check GROQ_API_KEY in server/.env.');
+      if (res.status === 401) throw new GroqError('auth', 'Groq rejected the API key. Check GROQ_API_KEY in server/.env.');
       const text =
         res.status === 429 ? 'Groq rate limit reached. Wait a moment and process the invoice again.' : `Groq returned an error (${res.status})${message ? `: ${message}` : '.'}`;
-      if (!retryable(res.status)) throw new Error(text);
+      if (!retryable(res.status)) throw new GroqError('bad_request', text);
       failure = text;
+      failureCode = res.status === 429 ? 'rate_limit' : 'server';
       wait = retryAfterMs(res.headers?.get?.('retry-after'));
     }
 
@@ -82,7 +100,7 @@ export async function groqChat({
     // Try again only if there is time for the wait and a reasonable attempt after it.
     attempt += 1;
     const delay = Math.min(RETRY.maxDelayMs, wait ?? RETRY.baseDelayMs * 2 ** (attempt - 1) + Math.floor(Math.random() * 200));
-    if (attempt > retries || now() + delay + MIN_ATTEMPT_MS > deadline) throw new Error(failure);
+    if (attempt > retries || now() + delay + MIN_ATTEMPT_MS > deadline) throw new GroqError(failureCode, failure);
     await sleep(delay);
   }
 }
@@ -92,7 +110,7 @@ async function readContent(res) {
   try {
     data = await res.json();
   } catch (err) {
-    throw new Error(`Could not read Groq's response (${err?.message || 'network error'}).`);
+    throw new GroqError('network', `Could not read Groq's response (${err?.message || 'network error'}).`);
   }
   const content = data?.choices?.[0]?.message?.content;
   try {
@@ -100,7 +118,7 @@ async function readContent(res) {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
     return parsed;
   } catch {
-    throw new Error('The AI reader returned an answer that was not valid JSON.');
+    throw new GroqError('bad_output', 'The AI reader returned an answer that was not valid JSON.');
   }
 }
 

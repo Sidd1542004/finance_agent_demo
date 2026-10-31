@@ -695,11 +695,13 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
             {invoice.extraction && (
               <p className="hint">
                 Read by the{' '}
-                {invoice.extraction.method === 'groq-vision'
-                  ? `AI vision reader (${invoice.extraction.model}), from an image`
-                  : invoice.extraction.method === 'groq'
-                    ? `AI reader (${invoice.extraction.model})`
-                    : 'basic pattern reader'}
+                {invoice.extraction.fallback
+                  ? 'basic rules reader, because the AI reader was unavailable'
+                  : invoice.extraction.method === 'groq-vision'
+                    ? `AI vision reader (${invoice.extraction.model}), from an image`
+                    : invoice.extraction.method === 'groq'
+                      ? `AI reader (${invoice.extraction.model})`
+                      : 'basic pattern reader'}
                 , {Math.round(invoice.extraction.confidence * 100)}% confident.
                 {invoice.extraction.notes ? ` ${invoice.extraction.notes}` : ''}
               </p>

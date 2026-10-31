@@ -6,7 +6,17 @@ import { config } from '../config.js';
 import { Invoice, Vendor, PurchaseOrder, GoodsReceipt } from '../models/index.js';
 import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../seed/data.js';
 import { resetEverything } from '../seed/seed.js';
-import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup, visionReader } from '../services/invoices.js';
+import {
+  processInvoice,
+  getInvoiceDetail,
+  applyHumanDecision,
+  performInvoiceAction,
+  getPayables,
+  extractor,
+  abrLookup,
+  visionReader,
+  readerFallbackStatus,
+} from '../services/invoices.js';
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
 import { referenceVendor, auditEntryFor } from '../services/bankViews.js';
 import { keepInvoiceDocument, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
@@ -71,20 +81,25 @@ const requireId = (req) => {
 
 export const api = Router();
 
-api.get('/health', (req, res) => {
-  res.json({
-    ok: true,
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null },
-    policy: config.policy,
-    abr: Boolean(abrLookup),
-    auth: 'accounts',
-    demoMode: config.demoMode,
-    // Whether Reset and Load demo month are allowed here (demo mode, not Production).
-    demoReset: demoResetBlocked() === null,
-    timeZone: config.timeZone,
-  });
-});
+api.get(
+  '/health',
+  wrap(async (req, res) => {
+    // fallback: invoices the rules reader read because the AI reader failed, waiting for a person.
+    const fallback = extractor.mode === 'groq' && mongoose.connection.readyState === 1 ? await readerFallbackStatus() : null;
+    res.json({
+      ok: true,
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null, fallback },
+      policy: config.policy,
+      abr: Boolean(abrLookup),
+      auth: 'accounts',
+      demoMode: config.demoMode,
+      // Whether Reset and Load demo month are allowed here (demo mode, not Production).
+      demoReset: demoResetBlocked() === null,
+      timeZone: config.timeZone,
+    });
+  }),
+);
 
 // Sign in / out. Open: these are how a person gets a session.
 api.use('/auth', createAuthRouter());
