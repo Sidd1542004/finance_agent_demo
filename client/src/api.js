@@ -64,6 +64,14 @@ export const api = {
   resetPassword: (id, password) => request(`/admin/users/${id}/password`, json({ password })),
   runDuePayments: () => request('/admin/run-due', json({})),
   simBankAdmin: () => request('/admin/sim-bank'),
+  // Automatic invoice ingestion (administrators). No tokens ever reach the dashboard.
+  ingestion: () => request('/ingestion'),
+  ingestionItems: (params) => request(`/ingestion/items${query(params)}`),
+  connectMailbox: (provider) => request(`/ingestion/${provider}/connect`, json({})),
+  disconnectMailbox: (provider) => request(`/ingestion/${provider}/disconnect`, json({})),
+  setIngestionEnabled: (provider, enabled) => request(`/ingestion/${provider}/enabled`, json({ enabled }, 'PUT')),
+  syncMailbox: (provider) => request(`/ingestion/${provider}/sync`, json({})),
+  retryIngestion: (id) => request(`/ingestion/items/${id}/retry`, json({})),
   setSimBalance: (balance) => request('/admin/sim-bank/balance', json({ balance }, 'PUT')),
   setSimScenario: (abn, scenario) => request(`/admin/sim-bank/scenarios/${abn}`, json({ scenario }, 'PUT')),
 
@@ -102,7 +110,8 @@ export const api = {
   // Any person's action on an invoice: approve, reject, link_po, schedule_payment, ...
   action: (id, action, body) => request(`/invoices/${id}/actions/${action}`, json(body)),
   payables: () => request('/payables'),
-  reset: () => request('/reset', { method: 'POST' }),
+  // `confirm` must be the typed word RESET; the server checks it too.
+  reset: (confirm) => request('/reset', json({ confirm })),
   loadDemo: () => request('/demo/load', { method: 'POST' }),
 
   // Supplier emails

@@ -2,15 +2,22 @@
 //
 //   loadUser      reads the session cookie and sets req.user (or null)
 //   requireUser   401 unless signed in
-//   requireRole   403 unless the user holds one of the roles
+//   requireRole   403 unless the user holds one of the roles (see roles.js:
+//                 an administrator also holds reviewer, approver and payer)
+//   requireAnyRole 403 unless the user holds at least one known role
 //   csrfGuard     refuses state-changing requests that did not come from the
 //                 dashboard itself (custom header + same-origin check)
 
 import { COOKIE_NAME, parseCookies, userForToken } from './sessions.js';
+import { ROLES } from '../models/index.js';
+import { hasRole } from './roles.js';
+
+export { hasRole };
 
 export const CSRF_HEADER = 'x-foa-request';
 
 export const NOT_SIGNED_IN = 'Sign in to continue.';
+export const NO_ROLE = 'Your account has no role yet. Ask an administrator to give you one.';
 export const CSRF_REFUSED = 'This request was refused because it did not come from the dashboard. Reload the page and try again.';
 
 export function loadUser() {
@@ -26,8 +33,6 @@ export function loadUser() {
   };
 }
 
-export const hasRole = (user, ...roles) => Boolean(user) && roles.some((r) => user.roles.includes(r));
-
 export function requireUser(req, res, next) {
   if (!req.user) return res.status(401).json({ error: NOT_SIGNED_IN });
   next();
@@ -39,6 +44,13 @@ export function requireRole(...roles) {
     if (!hasRole(req.user, ...roles)) return res.status(403).json({ error: `This needs the ${roles.join(' or ')} role.` });
     next();
   };
+}
+
+// An account with no role can sign in and out, but sees no financial records.
+export function requireAnyRole(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: NOT_SIGNED_IN });
+  if (!hasRole(req.user, ...ROLES)) return res.status(403).json({ error: NO_ROLE });
+  next();
 }
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);

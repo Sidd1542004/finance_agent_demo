@@ -10,6 +10,7 @@ import mongoose from 'mongoose';
 import { Vendor, BeneficiaryChange } from '../models/index.js';
 import { normaliseDetails, mask, maskedText, beneficiaryState, methodsOf } from '../agent/finance/beneficiary.js';
 import { normaliseAbn } from '../agent/finance/rules.js';
+import { hasRole } from '../auth/roles.js';
 import { config } from '../config.js';
 import { HttpError, recordAudit } from './runs.js';
 
@@ -42,7 +43,7 @@ const changeView = (c, { full = false } = {}) => ({
 export async function listSuppliers(user) {
   const [vendors, pending] = await Promise.all([Vendor.find().sort({ name: 1 }).lean(), BeneficiaryChange.find({ status: 'pending' }).lean()]);
   // Approvers and admins see a pending proposal in full, to check it before approving.
-  const canReview = user.roles.includes('approver') || user.roles.includes('admin');
+  const canReview = hasRole(user, 'approver', 'admin');
   return vendors.map((v) => {
     const p = pending.find((c) => c.vendorAbn === v.abn) || null;
     return {
@@ -158,7 +159,7 @@ export async function approveChange(id, user, note = '') {
 export async function rejectChange(id, user, note = '') {
   const change = await pendingChange(id);
   const own = change.proposedById === user.id;
-  if (!own && !user.roles.includes('approver') && !user.roles.includes('admin')) throw new HttpError(403, 'Only an approver or administrator can reject someone else’s proposal.');
+  if (!own && !hasRole(user, 'approver', 'admin')) throw new HttpError(403, 'Only an approver or administrator can reject someone else’s proposal.');
   const why = String(note || '')
     .trim()
     .slice(0, 500);

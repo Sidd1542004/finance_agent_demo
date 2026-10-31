@@ -162,4 +162,37 @@ export const config = {
     gstRatePct: 10, // Australian GST
     roundingTolerance: 0.05, // dollars allowed for rounding differences
   },
+
+  // Automatic invoice ingestion from a mailbox (see docs/ingestion.md). Off
+  // unless INGESTION_PROVIDERS lists a provider whose OAuth client is set and
+  // INGESTION_ENCRYPTION_KEY is set. Secrets stay on the server.
+  ingestion: {
+    providers: list(process.env.INGESTION_PROVIDERS)
+      .map((p) => p.toLowerCase())
+      .filter((p) => ['gmail', 'outlook'].includes(p)),
+    // 32 random bytes, base64 or hex: encrypts the stored refresh tokens (AES-256-GCM).
+    encryptionKey: (process.env.INGESTION_ENCRYPTION_KEY || '').trim(),
+    // Where the provider sends the person back: <base>/api/ingestion/oauth/<provider>/callback.
+    redirectBase: (process.env.INGESTION_REDIRECT_BASE || process.env.APP_URL || '').trim().replace(/\/+$/, ''),
+    gmail: {
+      clientId: (process.env.GMAIL_CLIENT_ID || '').trim(),
+      clientSecret: (process.env.GMAIL_CLIENT_SECRET || '').trim(),
+      label: (process.env.GMAIL_LABEL || 'INBOX').trim(), // a label name or id, e.g. "Invoices"
+      query: (process.env.GMAIL_QUERY || 'has:attachment').trim(), // Gmail search, added to the date filter
+    },
+    outlook: {
+      clientId: (process.env.OUTLOOK_CLIENT_ID || '').trim(),
+      clientSecret: (process.env.OUTLOOK_CLIENT_SECRET || '').trim(),
+      tenant: (process.env.OUTLOOK_TENANT || 'organizations').trim(),
+      folder: (process.env.OUTLOOK_FOLDER || 'inbox').trim(), // a well-known name or a folder id
+    },
+    // Optional: only these senders (addresses or @domains). Empty: anyone.
+    allowedSenders: list(process.env.INGESTION_ALLOWED_SENDERS).map((s) => s.toLowerCase()),
+    pollMinutes: Math.max(1, num(process.env.INGESTION_POLL_MINUTES, 5)), // the scheduler may call more often; syncs are spaced by this
+    maxAttachmentBytes: Math.max(1, num(process.env.INGESTION_MAX_ATTACHMENT_MB, 10)) * 1024 * 1024,
+    lookbackDays: Math.max(1, num(process.env.INGESTION_LOOKBACK_DAYS, 7)), // the first sync looks this far back
+    maxPerRun: Math.max(1, num(process.env.INGESTION_MAX_PER_RUN, 5)), // attachments processed per sync
+    budgetSeconds: Math.max(5, num(process.env.INGESTION_BUDGET_SECONDS, 40)), // stop starting new work after this (Vercel: 60 s per request)
+    maxAttempts: Math.max(1, num(process.env.INGESTION_MAX_ATTEMPTS, 5)),
+  },
 };

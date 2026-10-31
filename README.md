@@ -12,14 +12,21 @@ It covers the Finance tasks the page lists, as four workflows:
 
 Stack: MongoDB, Express, React (Vite), Node. AI steps use Groq.
 
-Everything runs on made-up sample data. No accounting system, mailbox or real bank is
-connected. No money moves: EFT, BPAY and Card payments go to a **simulated bank** inside
+Everything runs on made-up sample data. No accounting system or real bank is
+connected, and no mailbox unless an administrator connects one (below). No money moves:
+EFT, BPAY and Card payments go to a **simulated bank** inside
 the app, and every payment, transaction and balance is labelled **simulated**. People
 sign in with an email and password and act under their own account and roles.
 
 **Accounts, payments and the simulated bank** (roles, statuses, the scheduler, the
 simulated bank, supplier notices, environment variables and one-time setup) are
 described in [docs/payments.md](docs/payments.md).
+
+**Automatic invoice ingestion** (optional, off by default): an administrator can connect
+a Gmail or Outlook mailbox, read-only, and the app imports PDF, JPG and PNG invoice
+attachments into Invoices for review through the same agent as uploads. It never
+approves or pays. Architecture, Google and Microsoft OAuth setup, permissions, scheduling
+on Vercel, security and troubleshooting: [docs/ingestion.md](docs/ingestion.md).
 
 ## Run it
 
@@ -120,9 +127,16 @@ Protecting a public demo:
   The password is compared in constant time. It is one shared password, not user accounts.
 - **Vercel Deployment Protection** (Project Settings > Deployment Protection) can protect
   preview deployments, or every deployment, behind a Vercel login as well.
-- **Demo buttons.** Load demo month and Reset only work when `DEMO_MODE=true`, and only for
-  administrators; the server refuses them otherwise, whatever the dashboard shows. They
-  keep users, sessions and the audit log.
+- **Demo buttons.** Load demo month and Reset only work when `DEMO_MODE=true`, only for
+  administrators, and **never on Production**: `APP_ENV=production` or a Vercel Production
+  deployment (`VERCEL_ENV=production`, set by Vercel) refuses them whatever `DEMO_MODE` says.
+  The server refuses them otherwise, whatever the dashboard shows. Reset asks twice (the
+  second time you type `RESET`, which the server checks), runs one at a time, and writes
+  its outcome to the audit log. They delete invoices, payments and payment jobs, supplier
+  emails and the outbox, bank statements, reports, supplier hints, agent runs and the
+  simulated bank's account and transactions; reload the sample suppliers, purchase orders
+  and deliveries (removing bank-detail proposals); and keep users, sessions, settings, the
+  simulated bank's test scenarios and the audit log.
 - **Rate limits.** Requests that call Groq or process a file (adding or re-processing an
   invoice, supplier email or bank statement, a person's action that re-runs the agent,
   writing a report, loading the demo month) are limited per IP address: 30 per 10 minutes
@@ -362,8 +376,9 @@ changes it, and Reset and Load demo month keep it (they add an entry saying so).
 payment per invoice (unique index), so two people clicking at once cannot both succeed.
 
 Roles come from user accounts (reviewer, approver, payer, administrator), checked on the
-server for every action. `SEGREGATE_DUTIES=true` stops the account that approved an
-invoice from also paying it. The earlier typed-name lists (`REVIEWERS`, `APPROVERS`,
+server for every action. An administrator also holds the reviewer, approver and payer
+roles (`server/src/auth/roles.js`). `SEGREGATE_DUTIES=true` stops the account that approved an
+invoice from also paying it, administrators included. The earlier typed-name lists (`REVIEWERS`, `APPROVERS`,
 `PAYERS`) are moved onto accounts once by `npm run migrate --prefix server`.
 
 ### API
@@ -386,6 +401,10 @@ invoice from also paying it. The earlier typed-name lists (`REVIEWERS`, `APPROVE
 | `GET /api/invoices`, `/api/queries`, `/api/statements`, `/api/reports` | One page at a time, newest first: `?before=<nextCursor>&limit=<n>` (default 50, at most 200). Answers `{ items, nextCursor }`; `nextCursor` is null on the last page. Invoices also take `?filter=waiting|pay` and return `counts` (tabs and KPIs) over every invoice. |
 | `GET /api/audit?subjectId=<id>` | The append-only audit log for one invoice, payment, supplier email, report, or bank line (`<statement id>:<line number>`), oldest first. Without `subjectId`, the latest entries. |
 | `GET /api/cron/daily-summary` | The daily summary email; needs `Authorization: Bearer <CRON_SECRET>`. `?preview=1` returns it without sending. |
+| `GET` or `POST /api/cron/ingest` | Syncs each connected mailbox with polling on, when due; needs `Authorization: Bearer <CRON_SECRET>`. See [docs/ingestion.md](docs/ingestion.md). |
+| `GET /api/ingestion`, `GET /api/ingestion/items` | Administrators: mailbox status and counts; what happened to each attachment. Never returns tokens. |
+| `POST /api/ingestion/:provider/connect` · `/disconnect` · `/sync`, `PUT /api/ingestion/:provider/enabled`, `POST /api/ingestion/items/:id/retry` | Administrators: connect (returns the provider's sign-in URL), disconnect, sync now, polling on/off, retry a failed attachment. |
+| `GET /api/ingestion/oauth/:provider/callback` | Where Google or Microsoft sends the administrator back; redirects to the dashboard with a result code. |
 
 `AUTO_APPROVE_LIMIT` is gone; the new settings are `MATCH_THRESHOLD`,
 `MISSING_ABN_POLICY`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`,

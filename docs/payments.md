@@ -18,11 +18,17 @@ account for a while; sign-ins are also rate-limited per IP address.
 | Reviewer | Add and correct invoices, hold them, handle supplier emails, approve payment notices |
 | Approver | Approve, reject, reverse, cancel and reopen invoices; approve or reject bank-detail changes |
 | Payer | Schedule, reschedule, cancel and record payments; propose bank-detail changes; reconcile the bank; approve payment notices |
-| Administrator | Users and roles, the simulated bank's settings, "Run due payments now", Load demo month and Reset |
+| Administrator | Users and roles, the simulated bank's settings, "Run due payments now", Load demo month and Reset; and everything the other three roles can do |
 
-Administrator does not include the other roles; give them separately. The
-server checks roles on every request; the dashboard only hides what you cannot
-do. The name typed in a request body is ignored: decisions are recorded under
+An administrator also holds the reviewer, approver and payer roles
+(`server/src/auth/roles.js`), so they can work in every module. Every other
+control still applies to them: with `SEGREGATE_DUTIES=true` the person who
+approved an invoice cannot schedule, record or reconcile its payment;
+bank-detail changes need a different person to approve them; status checks,
+notes and payment idempotency are unchanged; and every action is recorded under
+the administrator's own account. An account with no role, or only unknown roles,
+sees nothing. The server checks roles on every request; the dashboard only hides
+what you cannot do. The name typed in a request body is ignored: decisions are recorded under
 the signed-in account (name and id). `ACCESS_PASSWORD` still works as an
 optional outer gate in front of everything.
 

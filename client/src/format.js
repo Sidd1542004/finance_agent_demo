@@ -74,7 +74,15 @@ export const BANK_STATUS = {
 export const NOTICE_KIND = { payment_success: 'Payment made', payment_processing: 'Payment in progress', payment_failed: 'Payment not completed' };
 
 export const ROLE_LABEL = { reviewer: 'Reviewer', approver: 'Approver', payer: 'Payer', admin: 'Administrator' };
-export const hasRole = (user, ...roles) => Boolean(user) && roles.some((r) => user.roles.includes(r));
+// An administrator also holds the reviewer, approver and payer roles. Mirrors
+// server/src/auth/roles.js, which the server enforces; this only decides what to show.
+const IMPLIED_ROLES = { admin: ['reviewer', 'approver', 'payer'] };
+export const effectiveRoles = (roles) => [...new Set((roles || []).flatMap((r) => [r, ...(Object.hasOwn(IMPLIED_ROLES, r) ? IMPLIED_ROLES[r] : [])]))];
+export const hasRole = (user, ...roles) => {
+  if (!user) return false;
+  const held = effectiveRoles(user.roles);
+  return roles.some((r) => held.includes(r));
+};
 
 // A date and time in the business's time zone, e.g. "23 Oct 2026, 09:30 (Australia/Sydney)".
 export const zoned = (iso, timeZone) => {

@@ -16,7 +16,9 @@ import { registerFinanceRoutes } from './finance.js';
 import { pageOf, pageParams } from './paging.js';
 import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { createWorkLimiter } from '../rateLimit.js';
-import { requireUser, requireRole } from '../auth/middleware.js';
+import { requireUser, requireRole, requireAnyRole } from '../auth/middleware.js';
+import { createDemoResetHandler, demoResetBlocked } from '../services/demoReset.js';
+import { registerIngestionPublicRoutes, registerIngestionRoutes } from './ingestion.js';
 import { createAuthRouter } from './auth.js';
 import { createAdminRouter } from './admin.js';
 import { registerSupplierRoutes } from './suppliers.js';
@@ -77,6 +79,8 @@ api.get('/health', (req, res) => {
     abr: Boolean(abrLookup),
     auth: 'accounts',
     demoMode: config.demoMode,
+    // Whether Reset and Load demo month are allowed here (demo mode, not Production).
+    demoReset: demoResetBlocked() === null,
     timeZone: config.timeZone,
   });
 });
@@ -103,8 +107,14 @@ api.get(
 // The payment scheduler's tick: CRON_SECRET, not a session.
 registerPaymentCron(api);
 
-// Everything below needs a signed-in user.
+// Mailbox ingestion: the scheduler's endpoint (CRON_SECRET) and the OAuth
+// callback (checks the signed-in administrator and the one-time state itself).
+registerIngestionPublicRoutes(api);
+
+// Everything below needs a signed-in user with at least one role. Each route
+// that changes something also checks the specific role it needs.
 api.use(requireUser);
+api.use(requireAnyRole);
 
 const adminRouter = createAdminRouter();
 registerAdminPaymentRoutes(adminRouter);
@@ -233,27 +243,15 @@ api.get(
   }),
 );
 
-api.post(
-  '/reset',
-  requireRole('admin'),
-  wrap(async (req, res) => {
-    if (!config.demoMode) throw new HttpError(403, 'Reset is only available in demo mode.');
-    await resetEverything();
-    await recordAudit({
-      subjectKind: 'system',
-      subjectId: 'demo',
-      actor: req.user.name,
-      actorId: req.user.id,
-      action: 'reset',
-      detail: 'Every invoice, email, statement and report was deleted. The audit log is kept.',
-    });
-    res.json({ ok: true });
-  }),
-);
+// Demo Reset: administrators only (and CSRF, as every change). Refused on
+// Production and outside demo mode; needs { confirm: 'RESET' }; one at a time;
+// audited. Scope and rules: services/demoReset.js.
+api.post('/reset', requireRole('admin'), wrap(createDemoResetHandler({ reset: resetEverything, audit: recordAudit })));
 
 registerFinanceRoutes(api, { upload, work });
 registerSupplierRoutes(api);
 registerPaymentRoutes(api);
+registerIngestionRoutes(api, { work });
 
 api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

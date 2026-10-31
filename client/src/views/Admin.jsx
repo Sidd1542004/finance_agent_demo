@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { money, when, ROLE_LABEL } from '../format.js';
 import { useBusy } from '../shared.jsx';
+import Ingestion from './Ingestion.jsx';
 
 // Administrators: user accounts and roles, and the simulated bank's settings
 // (balance, per-supplier test scenarios). Everything here is logged.
@@ -15,7 +16,7 @@ const SCENARIO_LABEL = {
   temporary_failure: 'Temporary failure (first attempt)',
 };
 
-export default function AdminView({ user, onError }) {
+export default function AdminView({ user, onError, onNotice, openInvoice }) {
   const [users, setUsers] = useState({ items: [], roles: [] });
   const [bank, setBank] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
@@ -42,6 +43,7 @@ export default function AdminView({ user, onError }) {
     <div className="admin">
       <Users users={users} me={user} busy={busy} act={act} />
       {bank && <SimBank bank={bank} suppliers={suppliers} busy={busy} act={act} />}
+      <Ingestion onError={onError} onNotice={onNotice} openInvoice={openInvoice} />
     </div>
   );
 }
@@ -56,8 +58,9 @@ function Users({ users, me, busy, act }) {
     <section className="panel">
       <h2>Users and roles</h2>
       <p className="hint">
-        Reviewer: checks invoices and supplier emails. Approver: approves invoices and bank-detail changes. Payer: schedules payments and reconciles the bank. Administrator: users
-        and the simulated bank only.
+        Reviewer: checks invoices and supplier emails. Approver: approves invoices and bank-detail changes. Payer: schedules payments and reconciles the bank. Administrator: users,
+        the simulated bank and the demo data, and everything the other roles can do. The same checks still apply: with SEGREGATE_DUTIES=true nobody pays an invoice they approved,
+        and bank-detail changes always need a second person.
       </p>
       <div className="table-scroll">
         <table className="lines">

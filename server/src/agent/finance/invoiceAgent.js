@@ -21,7 +21,7 @@ import { statusFromChecks, STATUS_LABEL } from './lifecycle.js';
 import { dueInfo } from './due.js';
 import { applyCorrections } from './extract.js';
 
-const SOURCE = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' };
+const SOURCE = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text', email: 'as an email attachment' };
 
 export function pushEvent(invoice, event) {
   if (!Array.isArray(invoice.events)) invoice.events = [];

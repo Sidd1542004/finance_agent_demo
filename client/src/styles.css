@@ -228,6 +228,10 @@ code {
   font-weight: 500;
 }
 
+.banner-ok {
+  background: var(--ok);
+}
+
 .banner-close {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.6);
@@ -1949,6 +1953,31 @@ input[type='date'] {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.ingestion-provider + .ingestion-provider {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+}
+
+.ingestion-error {
+  color: var(--err);
+}
+
+/* A button that reads as a link, inside a sentence or a table cell. */
+.inline-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--blue);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inline-link:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .role-picks {

@@ -23,6 +23,7 @@
 // threshold with no exceptions. It is never approved without a person.
 
 import { namesEqual } from './rules.js';
+import { effectiveRoles } from '../../auth/roles.js';
 
 export const STATUS_LABEL = {
   received: 'Received',
@@ -62,6 +63,16 @@ export const TRANSITIONS = {
 };
 
 export const canTransition = (from, to) => (TRANSITIONS[from] || []).includes(to);
+
+// Segregation of duties (SEGREGATE_DUTIES=true): the approver of an invoice
+// cannot also schedule or record its payment, by hand or by matching a bank line.
+export const SAME_PERSON_PAYS = 'The person who approved an invoice cannot also schedule or record its payment.';
+/** Did this person approve it? Compared by account when both are known; by name for older, typed approvals. */
+export function approvedBySamePerson(approval, actorId, who) {
+  if (!approval?.decidedBy) return false;
+  if (actorId && approval.decidedById) return String(approval.decidedById) === String(actorId);
+  return String(approval.decidedBy).toLowerCase() === String(who || '').toLowerCase();
+}
 
 // Checks that stop a full approval while they fail. A suspected duplicate must
 // be cleared first; sums that don't add up need a corrected invoice; goods not
@@ -237,7 +248,7 @@ export function allowedActions(invoice, ctx = {}) {
         confirm: Boolean(a.confirm),
         role: a.role,
         // Whether the signed-in person holds the role (always true without one).
-        permitted: ctx.actor ? (ctx.actor.roles || []).includes(a.role) : true,
+        permitted: ctx.actor ? effectiveRoles(ctx.actor.roles).includes(a.role) : true,
       };
     })
     .filter((x) => x.enabled || ['approve', 'approve_received', 'clear_duplicate', 'reopen', 'reverse_approval', 'cancel_payment', 'reschedule_payment'].includes(x.id));
@@ -260,7 +271,7 @@ export function assertAction(invoice, actionId, input, ctx = {}) {
     who = String(ctx.actor.name || '').trim();
     actorId = ctx.actor.id ? String(ctx.actor.id) : null;
     if (!who || !actorId) throw new ActionError(401, 'Sign in to continue.');
-    if (!(ctx.actor.roles || []).includes(a.role)) throw new ActionError(403, `You need the ${a.role} role to ${a.label.toLowerCase()}.`);
+    if (!effectiveRoles(ctx.actor.roles).includes(a.role)) throw new ActionError(403, `You need the ${a.role} role to ${a.label.toLowerCase()}.`);
   } else {
     who = String(input.decidedBy || '').trim();
     if (!who) throw new ActionError(400, 'Enter your name so the decision is on record.');
@@ -268,10 +279,8 @@ export function assertAction(invoice, actionId, input, ctx = {}) {
     const list = a.role === 'approver' ? roles.approvers : a.role === 'payer' ? roles.payers : roles.reviewers;
     if (!inRole(who, list)) throw new ActionError(403, `${who} is not allowed to ${a.label.toLowerCase()}. Allowed: ${list.join(', ')}.`);
   }
-  if (ctx.policy?.segregateDuties && a.role === 'payer' && invoice.approval?.decidedBy) {
-    // Compared by account when both are known; by name for older, typed approvals.
-    const same = actorId && invoice.approval.decidedById ? invoice.approval.decidedById === actorId : invoice.approval.decidedBy.toLowerCase() === who.toLowerCase();
-    if (same) throw new ActionError(403, 'The person who approved an invoice cannot also schedule or record its payment.');
+  if (ctx.policy?.segregateDuties && a.role === 'payer' && approvedBySamePerson(invoice.approval, actorId, who)) {
+    throw new ActionError(403, SAME_PERSON_PAYS);
   }
   const reason = blockedReason(invoice, actionId, ctx);
   if (reason) throw new ActionError(409, reason);

@@ -133,7 +133,16 @@ export const INVOICE_STATUSES = [
 const invoiceSchema = new Schema(
   {
     // scan: { from: 'image' | 'pdf', pages, model } when read from a scan or photo by the vision reader.
-    source: { kind: { type: String, enum: ['sample', 'upload', 'paste'], required: true }, filename: String, sampleId: String, scan: { type: Mixed, default: undefined } },
+    // email: { provider, messageId, attachmentKey, from, subject, receivedAt, itemId } for an invoice imported
+    // from a mailbox (kind 'email'); fileHash: SHA-256 of the attachment, unique (one invoice per file).
+    source: {
+      kind: { type: String, enum: ['sample', 'upload', 'paste', 'email'], required: true },
+      filename: String,
+      sampleId: String,
+      scan: { type: Mixed, default: undefined },
+      email: { type: Mixed, default: undefined },
+      fileHash: { type: String, default: undefined },
+    },
     rawText: { type: String, required: true }, // for a scan or photo: the vision reader's transcription
     status: { type: String, enum: INVOICE_STATUSES, default: 'received', index: true },
     extracted: { type: Mixed, default: null }, // fields read from the invoice
@@ -170,6 +179,9 @@ const invoiceSchema = new Schema(
   },
   { timestamps: true, minimize: false },
 );
+// The same attachment never becomes two invoices, even with two workers at once.
+// Partial: only invoices imported from a mailbox carry a file hash.
+invoiceSchema.index({ 'source.fileHash': 1 }, { name: 'one_invoice_per_file', unique: true, partialFilterExpression: { 'source.fileHash': { $type: 'string' } } });
 export const Invoice = model('Invoice', invoiceSchema);
 
 // What reviewers' corrections taught the reader about one supplier's invoices:
@@ -497,3 +509,67 @@ export const Report = model(
     { timestamps: true, minimize: false },
   ),
 );
+
+// ----- Automatic invoice ingestion (see services/ingestion.js) -----
+
+// One per mailbox provider ('gmail' | 'outlook'): connection, settings and sync state.
+// `credentials` holds the refresh token ENCRYPTED (AES-256-GCM, INGESTION_ENCRYPTION_KEY);
+// it is never returned by the API. `pendingAuth` is a short-lived OAuth sign-in in progress.
+export const IngestionSource = model(
+  'IngestionSource',
+  new Schema(
+    {
+      _id: { type: String, enum: ['gmail', 'outlook'] },
+      status: { type: String, enum: ['disconnected', 'connected', 'error'], default: 'disconnected' },
+      enabled: { type: Boolean, default: false }, // an administrator turns polling on after connecting
+      account: { type: String, default: null }, // the mailbox address, when the provider tells us
+      credentials: { type: Mixed, default: null }, // { v, keyId, iv, tag, data } - encrypted refresh token
+      scopes: { type: [String], default: [] },
+      connectedBy: { type: String, default: null },
+      connectedById: { type: String, default: null },
+      connectedAt: { type: Date, default: null },
+      pendingAuth: { type: Mixed, default: null }, // { stateHash, verifier (encrypted), byId, expiresAt }
+      cursor: { type: Date, default: null }, // messages received from this time are looked at
+      lastPollAt: { type: Date, default: null },
+      lastSuccessAt: { type: Date, default: null },
+      lastError: { type: Mixed, default: null }, // { message, code, at }
+      emailsChecked: { type: Number, default: 0 },
+      lock: { type: Mixed, default: null }, // { token, until }: one sync at a time
+    },
+    { timestamps: true, minimize: false },
+  ),
+);
+
+// One per attachment of a message (or one with attachmentKey '' for a message
+// with no invoice attachment), so the same email or file is never processed twice.
+const ingestionItemSchema = new Schema(
+  {
+    provider: { type: String, enum: ['gmail', 'outlook'], required: true },
+    messageId: { type: String, required: true },
+    attachmentKey: { type: String, default: '' }, // stable per message: Gmail part id, Graph attachment id
+    attachmentId: { type: String, default: null }, // what the provider needs to download it (may change)
+    filename: { type: String, default: null },
+    mimeType: { type: String, default: null },
+    size: { type: Number, default: null },
+    sha256: { type: String, default: null, index: true },
+    from: { type: String, default: null }, // sender address only
+    subject: { type: String, default: null }, // first 200 characters; the body is never stored
+    receivedAt: { type: Date, default: null },
+    // pending -> processing -> imported | duplicate | rejected | failed (retried while attempts remain);
+    // skipped: a message with no invoice attachment.
+    status: { type: String, enum: ['pending', 'processing', 'imported', 'duplicate', 'rejected', 'failed', 'skipped'], default: 'pending', index: true },
+    reason: { type: String, default: null },
+    attempts: { type: Number, default: 0 },
+    nextAttemptAt: { type: Date, default: null },
+    leaseUntil: { type: Date, default: null },
+    invoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice', default: null },
+    duplicateOf: { type: Schema.Types.ObjectId, ref: 'Invoice', default: null }, // the earlier invoice it matches
+    duplicateSignals: { type: [String], default: [] },
+    finishedAt: { type: Date, default: null },
+  },
+  { timestamps: true, minimize: false },
+);
+ingestionItemSchema.index({ provider: 1, messageId: 1, attachmentKey: 1 }, { name: 'one_item_per_attachment', unique: true });
+ingestionItemSchema.index({ provider: 1, status: 1, nextAttemptAt: 1 });
+ingestionItemSchema.index({ createdAt: -1 });
+export const IngestionItem = model('IngestionItem', ingestionItemSchema);

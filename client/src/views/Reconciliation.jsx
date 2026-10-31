@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { money, day, when, hasRole, STATEMENT_STATUS, LINE_STATUS } from '../format.js';
-import { Rail, Reasons, RecordList, AuditTrail, useBusy, useRecords } from '../shared.jsx';
+import { Rail, Reasons, RecordList, AuditTrail, RoleNote, useBusy, useRecords } from '../shared.jsx';
 
 const OPEN = ['suggested', 'exception', 'unmatched'];
 
 export default function ReconciliationView({ user, onError }) {
+  // Adding statements and deciding lines: payers (as on the server).
+  const canAct = hasRole(user, 'payer');
   const records = useRecords(api.statements, api.statement, onError);
   const [busy, run] = useBusy(onError);
   const [sample, setSample] = useState(null);
@@ -45,15 +47,22 @@ export default function ReconciliationView({ user, onError }) {
   return (
     <div className="layout">
       <aside className="side">
-        <AddStatement
-          sample={sample}
-          busy={busy === 'process'}
-          disabled={Boolean(busy)}
-          onSample={() => process(() => api.processStatementSample(sample.id))}
-          onFile={(file) => process(() => api.processStatementFile(file))}
-          onText={(text) => process(() => api.processStatementText(text))}
-          onSimBank={hasRole(user, 'payer', 'admin') ? () => process(async () => api.processStatementText(await api.simStatementCsv())) : null}
-        />
+        {canAct ? (
+          <AddStatement
+            sample={sample}
+            busy={busy === 'process'}
+            disabled={Boolean(busy)}
+            onSample={() => process(() => api.processStatementSample(sample.id))}
+            onFile={(file) => process(() => api.processStatementFile(file))}
+            onText={(text) => process(() => api.processStatementText(text))}
+            onSimBank={() => process(async () => api.processStatementText(await api.simStatementCsv()))}
+          />
+        ) : (
+          <section className="card add">
+            <h2>Add a bank statement</h2>
+            <RoleNote role="payer" what="Reconciling a bank statement" />
+          </section>
+        )}
         <section className="card">
           <h2>Statements</h2>
           <RecordList
@@ -74,6 +83,7 @@ export default function ReconciliationView({ user, onError }) {
             data={records.detail}
             fresh={records.freshId === records.detail.statement._id}
             busy={busy}
+            canAct={canAct}
             onResolve={resolve}
             onRerun={() => process(() => api.rerunStatement(records.detail.statement._id))}
           />
@@ -166,7 +176,7 @@ function AddStatement({ sample, busy, disabled, onSample, onFile, onText, onSimB
   );
 }
 
-function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
+function StatementDetail({ data, fresh, busy, canAct, onResolve, onRerun }) {
   const { statement, run } = data;
   const status = STATEMENT_STATUS[statement.status] || STATEMENT_STATUS.received;
   const lines = statement.lines || [];
@@ -195,9 +205,9 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
       {statement.status === 'needs_person' && (
         <section className="outcome outcome-wait" aria-labelledby="st-decision">
           <h2 id="st-decision">
-            {open.length} line{open.length === 1 ? ' needs' : 's need'} your decision
+            {open.length} line{open.length === 1 ? ' needs' : 's need'} {canAct ? 'your' : 'a payer’s'} decision
           </h2>
-          <p>Each one is marked below. Your decisions are recorded under your account.</p>
+          {canAct ? <p>Each one is marked below. Your decisions are recorded under your account.</p> : <RoleNote role="payer" what="Matching or dismissing a bank line" />}
         </section>
       )}
 
@@ -215,11 +225,15 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
           <h2>The agent could not reconcile this statement</h2>
           <Reasons reasons={reasons} />
           <p className="outcome-note">No payments were marked as paid.</p>
-          <div className="decision-actions">
-            <button className="btn btn-primary" disabled={working} onClick={onRerun}>
-              {busy === 'process' ? 'Reconciling…' : 'Reconcile again'}
-            </button>
-          </div>
+          {canAct ? (
+            <div className="decision-actions">
+              <button className="btn btn-primary" disabled={working} onClick={onRerun}>
+                {busy === 'process' ? 'Reconciling…' : 'Reconcile again'}
+              </button>
+            </div>
+          ) : (
+            <RoleNote role="payer" what="Reconciling a statement again" />
+          )}
         </section>
       )}
 
@@ -228,7 +242,7 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
           <h2>Statement lines</h2>
           <ol className="bank-lines">
             {lines.map((line) => (
-              <BankLine key={line.n} line={line} canDecide={statement.status === 'needs_person'} busy={busy} onResolve={onResolve} />
+              <BankLine key={line.n} line={line} canDecide={canAct && statement.status === 'needs_person'} busy={busy} onResolve={onResolve} />
             ))}
           </ol>
         </section>

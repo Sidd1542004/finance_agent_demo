@@ -3,7 +3,6 @@
 
 import mongoose from 'mongoose';
 
-import { config } from '../config.js';
 import { VendorQuery, BankStatement, Report } from '../models/index.js';
 import { sampleQueries, findSampleQuery, sampleStatement } from '../seed/data.js';
 import { emailAddress } from '../agent/finance/queryRules.js';
@@ -13,6 +12,7 @@ import { processQuery, getQueryDetail, resolveQuery } from '../services/queries.
 import { processStatement, getStatementDetail, resolveLine } from '../services/statements.js';
 import { writeReport, getReportDetail } from '../services/reports.js';
 import { loadDemoMonth } from '../services/demo.js';
+import { withDemoWipe } from '../services/demoReset.js';
 import { pageOf, pageParams } from './paging.js';
 import { requireRole } from '../auth/middleware.js';
 
@@ -235,8 +235,9 @@ export function registerFinanceRoutes(api, { upload, work }) {
     requireRole('admin'),
     work,
     wrap(async (req, res) => {
-      if (!config.demoMode) throw new HttpError(403, 'The demo month is only available in demo mode.');
-      res.json(await loadDemoMonth(req.user));
+      // It starts by wiping the demo data, so the same rules as Reset apply:
+      // demo mode only, never on Production, one at a time.
+      res.json(await withDemoWipe(req.user, () => loadDemoMonth(req.user)));
     }),
   );
 }

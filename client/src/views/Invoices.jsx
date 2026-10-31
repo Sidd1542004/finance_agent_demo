@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
-import { Rail, CheckIcon, AuditTrail, LoadMore, PAGE_SIZE } from '../shared.jsx';
+import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
 
 // Decisions are recorded under the signed-in person's name: there is no name to type.
-export default function InvoicesView({ health, user, onError }) {
+export default function InvoicesView({ health, user, onError, openId = null }) {
   const setError = onError;
   const [samples, setSamples] = useState([]);
   const [reference, setReference] = useState(null);
@@ -89,14 +89,16 @@ export default function InvoicesView({ health, user, onError }) {
         const [s, r, list] = await Promise.all([api.samples(), api.reference(), refreshList()]);
         setSamples(s);
         setReference(r);
-        if (list.length) select(list[0]._id);
+        // `openId`: another screen asked for this invoice (e.g. an imported email attachment).
+        if (openId) select(openId);
+        else if (list.length) select(list[0]._id);
       } catch (err) {
         setError(err.message);
       } finally {
         setLoaded(true);
       }
     })();
-  }, [select, refreshList]);
+  }, [select, refreshList, openId]);
 
   // Run an action with a busy flag and one place for errors.
   const run = async (kind, action) => {
@@ -150,15 +152,22 @@ export default function InvoicesView({ health, user, onError }) {
   return (
     <div className="layout">
       <aside className="side">
-        <AddInvoice
-          samples={samples}
-          vision={Boolean(health?.reader?.vision)}
-          busy={busy === 'process'}
-          disabled={Boolean(busy) || !health}
-          onSample={(id) => processWith(() => api.processSample(id))}
-          onFile={(file) => processWith(() => api.processFile(file))}
-          onText={(text) => processWith(() => api.processText(text))}
-        />
+        {hasRole(user, 'reviewer') ? (
+          <AddInvoice
+            samples={samples}
+            vision={Boolean(health?.reader?.vision)}
+            busy={busy === 'process'}
+            disabled={Boolean(busy) || !health}
+            onSample={(id) => processWith(() => api.processSample(id))}
+            onFile={(file) => processWith(() => api.processFile(file))}
+            onText={(text) => processWith(() => api.processText(text))}
+          />
+        ) : (
+          <section className="card add">
+            <h2>Add an invoice</h2>
+            <RoleNote role="reviewer" what="Adding an invoice" />
+          </section>
+        )}
 
         <section className="card">
           <div className="tabs" role="tablist" aria-label="Invoices">
@@ -473,7 +482,10 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
   const cur = e.currency || 'AUD';
   const status = STATUS[invoice.status] || STATUS.received;
   const steps = run?.steps || [];
-  const sourceLabel = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' }[invoice.source?.kind] || '';
+  const mail = invoice.source?.kind === 'email' ? invoice.source.email || {} : null;
+  const sourceLabel = mail
+    ? `as an email attachment${mail.from ? ` from ${mail.from}` : ''} (${mail.provider === 'outlook' ? 'Outlook' : 'Gmail'}, imported automatically)`
+    : { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' }[invoice.source?.kind] || '';
   const score = invoice.match?.score;
   const checks = invoice.checks || [];
   const order = { fail: 0, unverified: 1, skip: 2, pass: 3 };

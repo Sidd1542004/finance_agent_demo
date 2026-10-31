@@ -8,13 +8,16 @@
 //
 // --roles reviewer,approver,payer adds roles on top of admin (optional).
 
+import dns from 'node:dns';
 import mongoose from 'mongoose';
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { config } from '../config.js';
 import { safeUri, redactSecrets } from '../safeUri.js';
 import { createUser } from '../services/users.js';
-
+if (config.dnsServers.length) {
+  dns.setServers(config.dnsServers);
+}
 function hiddenPrompt(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
