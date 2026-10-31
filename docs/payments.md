@@ -15,9 +15,9 @@ account for a while; sign-ins are also rate-limited per IP address.
 
 | Role | Can |
 | --- | --- |
-| Reviewer | Add and correct invoices, hold them, handle supplier emails, approve payment notices |
-| Approver | Approve, reject, reverse, cancel and reopen invoices; approve or reject bank-detail changes |
-| Payer | Schedule, reschedule, cancel and record payments; propose bank-detail changes; reconcile the bank; approve payment notices |
+| Reviewer | Add and correct invoices, hold them, handle supplier emails, draft or discard payment notices. Never sees stored bank details, not even masked |
+| Approver | Approve, reject, reverse, cancel and reopen invoices; approve or reject bank-detail changes; reveal bank details in full (audited); approve and send payment notices |
+| Payer | Schedule, reschedule, cancel and record payments; propose bank-detail changes; reconcile the bank; draft or discard payment notices. Sees bank details masked |
 | Administrator | Users and roles, the simulated bank's settings, "Run due payments now", Load demo month and Reset; and everything the other three roles can do |
 
 An administrator also holds the reviewer, approver and payer roles
@@ -114,6 +114,18 @@ agent still holds every email that mentions bank details for a person, and no
 code path from an email or the AI reader creates a proposal. Every step is in
 the audit log (subject `supplier`, masked details only), and the proposals are
 kept as the history.
+
+**Who sees the stored details** (the suppliers' details, pending changes, the
+snapshot on a payment, simulated bank transactions, payment notices and the
+audit log; invoice documents are shown as the supplier sent them):
+
+| Who | Sees |
+| --- | --- |
+| Reviewer | Nothing: that details exist and are verified, and the payment methods |
+| Payer | Masked: BSB `999-•••`, account `•••001`, biller `•••01`, reference `•••027`, card `SIMCARD-•••8342` |
+| Approver, administrator | Masked, and **Reveal to verify**: the full details of the pending change or the verified version, with a reason. `POST /api/suppliers/:abn/bank-details/reveal` `{ target: "pending" or "current", reason }`, rate limited, never cached, and logged as `bank_details_revealed` (who, which details, why; never the digits) |
+
+Records written before the BSB was masked are masked when they are shown.
 
 The sample suppliers Harbour (EFT, BPAY) and Southern Cross Pallets (EFT,
 Card) are loaded with verified simulated details; Bluegum has none, to show the

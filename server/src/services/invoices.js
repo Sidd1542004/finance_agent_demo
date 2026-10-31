@@ -18,6 +18,7 @@ import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
 import { createCalendar } from '../agent/finance/businessDays.js';
 import { BANK_METHODS } from '../agent/finance/beneficiary.js';
 import { invoiceDocumentStatus } from './invoiceDocuments.js';
+import { paymentFor, transactionFor, noticeFor } from './bankViews.js';
 
 // When bank payments may run: business days, bank holidays, cut-off, in TIME_ZONE.
 export const paymentCalendar = createCalendar({
@@ -114,10 +115,11 @@ export async function getInvoiceDetail(id, actor = null) {
       ])
     : [[], null, []];
   const calendar = { timeZone: paymentCalendar.timeZone, cutoff: paymentCalendar.cutoff, defaultTime: paymentCalendar.defaultTime, nextSlot: paymentCalendar.nextSlot(new Date()) };
+  // Stored bank details as this person may see them (masked, or hidden from reviewers).
   return {
     invoice,
     run,
-    payment,
+    payment: paymentFor(payment, actor),
     po,
     receivedOnly: partial,
     actions: allowedActions(invoice, ctx),
@@ -126,8 +128,8 @@ export async function getInvoiceDetail(id, actor = null) {
     bankMethods: BANK_METHODS,
     paymentCalendar: calendar,
     jobs,
-    bankTransaction,
-    notices,
+    bankTransaction: transactionFor(bankTransaction, actor),
+    notices: notices.map((n) => noticeFor(n, actor)),
     document,
   };
 }

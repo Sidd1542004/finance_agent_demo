@@ -8,6 +8,7 @@ import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../
 import { resetEverything } from '../seed/seed.js';
 import { processInvoice, getInvoiceDetail, applyHumanDecision, performInvoiceAction, getPayables, extractor, abrLookup, visionReader } from '../services/invoices.js';
 import { readUpload, NEEDS_OCR } from '../services/uploads.js';
+import { referenceVendor, auditEntryFor } from '../services/bankViews.js';
 import { keepInvoiceDocument, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { HttpError, recordAudit } from '../services/runs.js';
@@ -117,7 +118,8 @@ api.get(
       PurchaseOrder.find().sort({ poNumber: 1 }).lean(),
       GoodsReceipt.find().sort({ poNumber: 1 }).lean(),
     ]);
-    res.json({ vendors, purchaseOrders, goodsReceipts });
+    // Never the suppliers' bank details: only whether they are verified (see services/bankViews.js).
+    res.json({ vendors: vendors.map(referenceVendor), purchaseOrders, goodsReceipts });
   }),
 );
 
@@ -229,7 +231,9 @@ api.get(
   wrap(async (req, res) => {
     const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId.trim().slice(0, 100) : '';
     const limit = Math.min(500, Math.max(1, Math.floor(Number(req.query.limit)) || 200));
-    res.json({ items: await sampleLedger.listAudit({ subjectId: subjectId || null, limit }) });
+    // Bank-detail entries are masked, or hidden from reviewers.
+    const items = await sampleLedger.listAudit({ subjectId: subjectId || null, limit });
+    res.json({ items: items.map((e) => auditEntryFor(e, req.user)) });
   }),
 );
 
@@ -247,7 +251,7 @@ api.get(
 api.post('/reset', requireRole('admin'), wrap(createDemoResetHandler({ reset: resetEverything, audit: recordAudit })));
 
 registerFinanceRoutes(api, { upload, work });
-registerSupplierRoutes(api);
+registerSupplierRoutes(api, { work });
 registerPaymentRoutes(api);
 registerIngestionRoutes(api, { work });
 

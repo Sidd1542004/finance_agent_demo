@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
 import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
 import { pdfBlobProblem, fileSize, showsDocumentPanel } from '../documentView.js';
+import { paidToText } from '../bankDetails.js';
 
 // Decisions are recorded under the signed-in person's name: there is no name to type.
 export default function InvoicesView({ health, user, onError, openId = null }) {
@@ -966,7 +967,9 @@ function PaymentPanel({ data, currency, user, onReload, onError }) {
   const bank = payment.route === 'bank';
   const job = jobs.find((j) => j.active) || jobs[jobs.length - 1] || null;
   const [working, setWorking] = useState(null);
-  const canNotify = hasRole(user, 'payer', 'reviewer');
+  const canNotify = hasRole(user, 'payer', 'reviewer'); // draft a notice
+  const canSend = hasRole(user, 'approver', 'admin'); // approve and send it
+  const canDiscard = hasRole(user, 'payer', 'reviewer', 'approver');
   const act = async (key, fn) => {
     setWorking(key);
     onError(null);
@@ -998,12 +1001,7 @@ function PaymentPanel({ data, currency, user, onReload, onError }) {
           value={bank && payment.scheduledAt ? zoned(payment.scheduledAt, payment.timeZone || cal?.timeZone) : payment.scheduledFor ? day(payment.scheduledFor) : null}
         />
         <Field label="Scheduled by" value={payment.scheduledBy} />
-        {bank && payment.beneficiary?.masked && (
-          <Field
-            label="Paid to (verified details)"
-            value={`${payment.beneficiary.masked.accountName || ''} ${payment.beneficiary.masked.bsb ? `BSB ${payment.beneficiary.masked.bsb} ${payment.beneficiary.masked.accountNumber}` : payment.beneficiary.masked.billerCode ? `BPAY ${payment.beneficiary.masked.billerCode}` : payment.beneficiary.masked.cardToken || ''} (v${payment.beneficiary.version})`}
-          />
-        )}
+        {bank && payment.beneficiary && <Field label="Paid to (verified details)" value={paidToText(payment.beneficiary)} />}
         <Field label="Reference" value={payment.reference} missing="None yet" />
         <Field
           label="Paid"
@@ -1073,16 +1071,21 @@ function PaymentPanel({ data, currency, user, onReload, onError }) {
                     , by {n.sentBy} {when(n.sentAt)}.
                   </p>
                 )}
-                {n.status === 'draft' && canNotify && (
+                {n.status === 'draft' && (canSend || canDiscard) && (
                   <div className="decision-actions">
-                    <button className="btn btn-primary" disabled={Boolean(working)} onClick={() => act(`send-${n._id}`, () => api.sendNotice(n._id))}>
-                      {working === `send-${n._id}` ? 'Sending…' : 'Approve and send'}
-                    </button>
-                    <button className="btn btn-outline" disabled={Boolean(working)} onClick={() => discard(n)}>
-                      Discard
-                    </button>
+                    {canSend && (
+                      <button className="btn btn-primary" disabled={Boolean(working)} onClick={() => act(`send-${n._id}`, () => api.sendNotice(n._id))}>
+                        {working === `send-${n._id}` ? 'Sending…' : 'Approve and send'}
+                      </button>
+                    )}
+                    {canDiscard && (
+                      <button className="btn btn-outline" disabled={Boolean(working)} onClick={() => discard(n)}>
+                        Discard
+                      </button>
+                    )}
                   </div>
                 )}
+                {n.status === 'draft' && !canSend && <p className="hint">An approver or administrator approves and sends notices.</p>}
               </li>
             ))}
           </ul>

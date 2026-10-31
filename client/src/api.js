@@ -107,6 +107,8 @@ export const api = {
   proposeBankDetails: (abn, body) => request(`/suppliers/${abn}/beneficiary-changes`, json(body)),
   approveBankDetails: (id, note) => request(`/beneficiary-changes/${id}/approve`, json({ note })),
   rejectBankDetails: (id, note) => request(`/beneficiary-changes/${id}/reject`, json({ note })),
+  // Approvers and administrators: the full details, with a reason (logged). target: 'pending' | 'current'
+  revealBankDetails: (abn, target, reason) => request(`/suppliers/${abn}/bank-details/reveal`, json({ target, reason })),
 
   // Payments, notices to suppliers, the simulated bank
   payments: (status) => request(`/payments${query({ status })}`),

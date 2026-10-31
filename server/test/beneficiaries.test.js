@@ -30,7 +30,11 @@ test('details are masked wherever they are shown or logged', () => {
   assert.equal(m.accountNumber, '•••678');
   assert.equal(m.crn, '•••321');
   assert.equal(m.cardToken, 'SIMCARD-•••12CD');
+  assert.equal(m.bsb, '999-•••', 'the branch is masked; the bank code stays');
+  assert.equal(m.billerCode, '•••45');
+  assert.deepEqual(mask(m), m, 'masking masked details changes nothing');
   assert.ok(!maskedText(d).includes('12345678'));
+  assert.ok(!maskedText(d).includes('999-123'));
   assert.ok(!maskedText(d).includes('987654321'));
 });
 
@@ -91,9 +95,12 @@ test('a change needs two different people; the proposer cannot approve it', asyn
 
   const listed = (await reviewer.get('/api/suppliers')).data.items.find((s) => s.abn === BLUEGUM);
   assert.equal(listed.state, 'change_pending');
-  assert.equal(listed.pending.details.accountNumber, '•••001', 'a reviewer sees the proposal masked');
+  assert.deepEqual(listed.pending.details, { hidden: true, methods: ['EFT'] }, 'a reviewer does not see the proposed details at all');
   const forApprover = (await approver.get('/api/suppliers')).data.items.find((s) => s.abn === BLUEGUM);
-  assert.equal(forApprover.pending.details.accountNumber, '33916001', 'the approver sees it in full to check it');
+  assert.equal(forApprover.pending.details.accountNumber, '•••001', 'the approver sees it masked by default');
+  assert.equal(forApprover.canReveal, true, 'and may reveal it, which is logged');
+  const revealed = await approver.post(`/api/suppliers/${BLUEGUM}/bank-details/reveal`, { target: 'pending', reason: 'Checking it against the call-back.' });
+  assert.equal(revealed.data.details.accountNumber, '33916001', 'in full, to check it');
 
   const ok = await approver.post(`/api/beneficiary-changes/${proposed.data.id}/approve`, { note: 'Checked against the call-back record.' });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
@@ -109,6 +116,7 @@ test('a change needs two different people; the proposer cannot approve it', asyn
     log.map((e) => [e.action, e.actor, e.to]),
     [
       ['bank_details_proposed', 'Alex Both', 'change_pending'],
+      ['bank_details_revealed', 'Priya Approver', null], // the approver checked it in full first
       ['bank_details_approved', 'Priya Approver', 'verified'],
     ],
   );

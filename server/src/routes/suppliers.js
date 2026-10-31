@@ -1,12 +1,15 @@
-// Supplier bank details (simulated): list, propose, approve, reject.
+// Supplier bank details (simulated): list (masked), propose, approve, reject, and
+// an audited reveal of the full details for approvers and administrators.
 // Registered on the main API router after sign-in is required.
 
 import { requireRole } from '../auth/middleware.js';
-import { listSuppliers, supplierHistory, proposeChange, approveChange, rejectChange } from '../services/beneficiaries.js';
+import { listSuppliers, supplierHistory, proposeChange, approveChange, rejectChange, revealBankDetails } from '../services/beneficiaries.js';
 
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
-export function registerSupplierRoutes(api) {
+const noWork = (req, res, next) => next();
+
+export function registerSupplierRoutes(api, { work = noWork } = {}) {
   api.get(
     '/suppliers',
     wrap(async (req, res) => {
@@ -35,6 +38,18 @@ export function registerSupplierRoutes(api) {
     requireRole('approver', 'admin'),
     wrap(async (req, res) => {
       res.json(await approveChange(req.params.id, req.user, req.body?.note));
+    }),
+  );
+
+  // The full details, to check them: approvers and administrators only, with a
+  // reason, rate limited, never cached, and logged. { target: 'pending' | 'current', reason }
+  api.post(
+    '/suppliers/:abn/bank-details/reveal',
+    requireRole('approver', 'admin'),
+    work,
+    wrap(async (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      res.json(await revealBankDetails(req.params.abn, req.body || {}, req.user));
     }),
   );
 

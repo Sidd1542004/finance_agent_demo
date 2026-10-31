@@ -22,7 +22,9 @@ export default function PaymentsView({ user, onError }) {
   const [metrics, setMetrics] = useState(null);
   const [busy, run] = useBusy(onError);
   const isAdmin = hasRole(user, 'admin');
-  const canNotify = hasRole(user, 'payer', 'reviewer');
+  // Approvers and administrators send notices; payers, reviewers and approvers may discard a draft.
+  const canSend = hasRole(user, 'approver', 'admin');
+  const canDiscard = hasRole(user, 'payer', 'reviewer', 'approver');
 
   const load = useCallback(async () => {
     const [l, n] = await Promise.all([api.payments(filter), api.paymentNotices('draft')]);
@@ -117,16 +119,21 @@ export default function PaymentsView({ user, onError }) {
                     <summary>{n.subject}</summary>
                     <pre className="letter">{n.body}</pre>
                   </details>
-                  {canNotify && (
+                  {(canSend || canDiscard) && (
                     <div className="decision-actions">
-                      <button className="btn btn-primary" disabled={Boolean(busy)} onClick={() => send(n._id)}>
-                        {busy === `send-${n._id}` ? 'Sending…' : 'Approve and send'}
-                      </button>
-                      <button className="btn btn-outline" disabled={Boolean(busy)} onClick={() => discard(n._id)}>
-                        Discard
-                      </button>
+                      {canSend && (
+                        <button className="btn btn-primary" disabled={Boolean(busy)} onClick={() => send(n._id)}>
+                          {busy === `send-${n._id}` ? 'Sending…' : 'Approve and send'}
+                        </button>
+                      )}
+                      {canDiscard && (
+                        <button className="btn btn-outline" disabled={Boolean(busy)} onClick={() => discard(n._id)}>
+                          Discard
+                        </button>
+                      )}
                     </div>
                   )}
+                  {!canSend && <p className="hint">An approver or administrator approves and sends notices.</p>}
                 </li>
               ))}
             </ul>

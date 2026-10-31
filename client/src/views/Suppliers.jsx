@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { abn, when, hasRole } from '../format.js';
 import { RecordList, useBusy } from '../shared.jsx';
+import { bankDetailRows } from '../bankDetails.js';
 
 // Suppliers' bank details (SIMULATED only). One person proposes a change, a
 // different approver or administrator approves it. Payments to a supplier
 // are blocked until its details are verified and while a change is pending.
+// Details are masked (hidden from reviewers); approvers and administrators can
+// reveal them in full to check them, with a reason, and every reveal is logged.
 const STATE = {
   verified: { label: 'Verified', tone: 'ok' },
   change_pending: { label: 'Change waiting for approval', tone: 'wait' },
@@ -62,7 +65,7 @@ export default function SuppliersView({ user, onError }) {
       </aside>
       <main className="main">
         {supplier ? (
-          <SupplierDetail supplier={supplier} history={history} user={user} busy={busy} act={act} />
+          <SupplierDetail key={supplier.abn} supplier={supplier} history={history} user={user} busy={busy} act={act} onError={onError} />
         ) : (
           <div className="blank">
             <p>Choose a supplier.</p>
@@ -73,9 +76,40 @@ export default function SuppliersView({ user, onError }) {
   );
 }
 
-function SupplierDetail({ supplier: s, history, user, busy, act }) {
+// Rows of bank details: masked, hidden, or in full after a reveal.
+function BankRows({ details }) {
+  return bankDetailRows(details).map((r) => <D key={r.label} label={r.label} value={r.value} />);
+}
+
+function SupplierDetail({ supplier: s, history, user, busy, act: doAct, onError }) {
   const [form, setForm] = useState(EMPTY);
   const [note, setNote] = useState('');
+  // Full details shown after a reveal: { pending?, current? }. Cleared after any decision.
+  const [revealed, setRevealed] = useState({});
+  const act = (key, fn) => {
+    setRevealed({});
+    return doAct(key, fn);
+  };
+  const reveal = async (target) => {
+    const reason = window.prompt('Why do you need to see the full bank details? (This is recorded in the audit log.)');
+    if (!reason || !reason.trim()) return;
+    try {
+      const r = await api.revealBankDetails(s.abn, target, reason.trim());
+      setRevealed((v) => ({ ...v, [target]: r.details }));
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+  const RevealButton = ({ target }) =>
+    !s.canReveal ? null : revealed[target] ? (
+      <button className="btn btn-outline" onClick={() => setRevealed((v) => ({ ...v, [target]: undefined }))}>
+        Hide full details
+      </button>
+    ) : (
+      <button className="btn btn-outline" disabled={Boolean(busy)} onClick={() => reveal(target)}>
+        Reveal to verify
+      </button>
+    );
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const p = s.pending;
   const mine = p && p.proposedById === user.id;
@@ -103,30 +137,36 @@ function SupplierDetail({ supplier: s, history, user, busy, act }) {
         </h2>
         {b ? (
           <dl className="fields">
-            <D label="Account name" value={b.accountName} />
-            {b.bsb && <D label="BSB and account" value={`${b.bsb} ${b.accountNumber}`} />}
-            {b.billerCode && <D label="BPAY" value={`Biller ${b.billerCode}, ref ${b.crn}`} />}
-            {b.cardToken && <D label="Card" value={b.cardToken} />}
-            <D label="Can be paid by" value={b.methods.join(', ')} />
+            <BankRows details={revealed.current || b} />
+            <D label="Can be paid by" value={(b.methods || []).join(', ')} />
             <D label="Verified by" value={`${b.verifiedBy}${b.verifiedAt ? `, ${when(b.verifiedAt)}` : ''} (version ${b.version})`} />
           </dl>
         ) : (
           <p className="hint">None. Bank payments (EFT, BPAY, Card) to this supplier are blocked until details are proposed and approved by a second person.</p>
         )}
+        {b && (
+          <div className="decision-actions">
+            <RevealButton target="current" />
+          </div>
+        )}
+        {revealed.current && <p className="hint">Shown in full for you only. The reveal is in the audit log.</p>}
       </section>
 
       {p && (
         <section className="outcome outcome-wait">
           <h2>Change proposed by {p.proposedBy}: payments are blocked until it is decided</h2>
           <dl className="fields">
-            <D label="Account name" value={p.details.accountName} />
-            {p.details.bsb && <D label="BSB and account" value={`${p.details.bsb} ${p.details.accountNumber}`} />}
-            {p.details.billerCode && <D label="BPAY" value={`Biller ${p.details.billerCode}, ref ${p.details.crn}`} />}
-            {p.details.cardToken && <D label="Card" value={p.details.cardToken} />}
+            <BankRows details={revealed.pending || p.details} />
             <D label="Where it came from" value={p.reason} />
             <D label="Proposed" value={when(p.proposedAt)} />
           </dl>
-          <p className="outcome-note">Never approve a change only because an email or the AI suggested it: confirm it with the supplier on a number already on file.</p>
+          <div className="decision-actions">
+            <RevealButton target="pending" />
+          </div>
+          {revealed.pending && <p className="hint">Shown in full for you only. The reveal is in the audit log.</p>}
+          <p className="outcome-note">
+            Never approve a change only because an email or the AI suggested it: reveal the details and confirm them with the supplier on a number already on file.
+          </p>
           {(canApprove || mine || hasRole(user, 'approver', 'admin')) && (
             <div className="decision-form">
               <div className="decision-fields">
@@ -214,8 +254,8 @@ function SupplierDetail({ supplier: s, history, user, busy, act }) {
                     <td>{when(c.proposedAt)}</td>
                     <td>{c.proposedBy}</td>
                     <td>
-                      {[c.masked.accountName, c.masked.bsb && `${c.masked.bsb} ${c.masked.accountNumber}`, c.masked.billerCode && `BPAY ${c.masked.billerCode}`, c.masked.cardToken]
-                        .filter(Boolean)
+                      {bankDetailRows(c.masked)
+                        .map((r) => r.value)
                         .join(', ')}
                     </td>
                     <td>

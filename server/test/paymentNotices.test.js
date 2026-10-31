@@ -84,6 +84,8 @@ const h = await startPayments();
 test.after(h.stop);
 const { models } = h;
 const person = trustActor({ id: 'u-rev', name: 'Rita Reviewer', roles: ['reviewer'], sessionId: 's-rev' });
+// Only an approver or administrator sends a notice.
+const sender = trustActor({ id: 'u-app', name: 'Priya Approver', roles: ['approver'], sessionId: 's-app' });
 
 test('one success notice per confirmed payment, however many ticks or requests', async () => {
   const { paymentId } = await h.scheduled({ total: 120 });
@@ -114,12 +116,13 @@ test('approving sends it once, to the simulated outbox by default; the processin
   await h.executor().tick();
   const success = await models.OutboxMessage.findOne({ paymentId, kind: 'payment_success' }).lean();
 
-  const sent = await h.notices.approveAndSend(String(success._id), person);
+  await assert.rejects(h.notices.approveAndSend(String(success._id), person), (err) => err.status === 403, 'a reviewer drafts but does not send');
+  const sent = await h.notices.approveAndSend(String(success._id), sender);
   assert.equal(sent.status, 'sent');
-  assert.equal(sent.sentBy, 'Rita Reviewer');
+  assert.equal(sent.sentBy, 'Priya Approver');
   assert.deepEqual([sent.delivery.mode, sent.delivery.deliveredTo, sent.delivery.intendedTo], ['simulated_outbox', null, 'accounts@harbouroffice.example']);
-  await assert.rejects(h.notices.approveAndSend(String(success._id), person), (err) => err.status === 409, 'only once');
-  await assert.rejects(h.notices.approveAndSend(String(processing._id), person), (err) => err.status === 409 && /changed since/.test(err.message), 'out of date');
+  await assert.rejects(h.notices.approveAndSend(String(success._id), sender), (err) => err.status === 409, 'only once');
+  await assert.rejects(h.notices.approveAndSend(String(processing._id), sender), (err) => err.status === 409 && /changed since/.test(err.message), 'out of date');
   const log = await models.AuditEvent.find({ subjectId: String(success._id) }).lean();
   assert.deepEqual(
     log.map((e) => e.action),

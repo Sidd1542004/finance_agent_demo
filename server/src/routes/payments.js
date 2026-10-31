@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
 import { requireRole } from '../auth/middleware.js';
 import { Payment, PaymentJob } from '../models/index.js';
 import { HttpError, recordAudit } from '../services/runs.js';
+import { paymentFor, transactionFor, noticeFor } from '../services/bankViews.js';
 import { simBank, paymentExecutor, paymentNotices, emailDelivery } from '../services/paymentSystem.js';
 import { paymentCalendar } from '../services/invoices.js';
 import { SimBankError, SCENARIOS } from '../bank/simBank.js';
@@ -86,7 +87,8 @@ export function registerPaymentRoutes(api) {
         ref ? simBank.getTransaction(ref) : null,
         paymentNotices.list({ paymentId: p._id }),
       ]);
-      res.json({ payment: p, jobs, transaction, notices });
+      // Bank details masked, or hidden from reviewers.
+      res.json({ payment: paymentFor(p, req.user), jobs, transaction: transactionFor(transaction, req.user), notices: notices.map((n) => noticeFor(n, req.user)) });
     }),
   );
 
@@ -101,13 +103,14 @@ export function registerPaymentRoutes(api) {
     res.json({ timeZone: c.timeZone, cutoff: c.cutoff, defaultTime: c.defaultTime, businessDays: c.businessDays, upcomingHolidays: upcoming, nextSlot: c.nextSlot(new Date()) });
   });
 
-  // ----- notices to suppliers (drafts; a person approves each one) -----
+  // ----- notices to suppliers (drafts; an approver or administrator approves each one) -----
+  // Payers and reviewers draft them; reviewers see them with the bank details redacted.
 
   api.get(
     '/payment-notices',
     wrap(async (req, res) => {
       const status = ['draft', 'sent', 'discarded'].includes(req.query.status) ? req.query.status : undefined;
-      res.json({ items: await paymentNotices.list({ status }), delivery: emailDelivery.describe() });
+      res.json({ items: (await paymentNotices.list({ status })).map((n) => noticeFor(n, req.user)), delivery: emailDelivery.describe() });
     }),
   );
 
@@ -116,23 +119,23 @@ export function registerPaymentRoutes(api) {
     requireRole('payer', 'reviewer'),
     wrap(async (req, res) => {
       const { message, created } = await paymentNotices.draft(req.params.id, req.body?.kind, req.user);
-      res.status(created ? 201 : 200).json({ message, created });
+      res.status(created ? 201 : 200).json({ message: noticeFor(message, req.user), created });
     }),
   );
 
   api.post(
     '/payment-notices/:id/send',
-    requireRole('payer', 'reviewer'),
+    requireRole('approver', 'admin'),
     wrap(async (req, res) => {
-      res.json({ message: await paymentNotices.approveAndSend(req.params.id, req.user) });
+      res.json({ message: noticeFor(await paymentNotices.approveAndSend(req.params.id, req.user), req.user) });
     }),
   );
 
   api.post(
     '/payment-notices/:id/discard',
-    requireRole('payer', 'reviewer'),
+    requireRole('payer', 'reviewer', 'approver'),
     wrap(async (req, res) => {
-      res.json({ message: await paymentNotices.discard(req.params.id, req.user, req.body?.note) });
+      res.json({ message: noticeFor(await paymentNotices.discard(req.params.id, req.user, req.body?.note), req.user) });
     }),
   );
 
@@ -152,7 +155,7 @@ export function registerPaymentRoutes(api) {
     '/sim-bank/transactions',
     bankReader,
     wrap(async (req, res) => {
-      res.json({ items: await simBank.listTransactions({ limit: Number(req.query.limit) || 100 }), simulated: true });
+      res.json({ items: (await simBank.listTransactions({ limit: Number(req.query.limit) || 100 })).map((t) => transactionFor(t, req.user)), simulated: true });
     }),
   );
 
@@ -162,7 +165,7 @@ export function registerPaymentRoutes(api) {
     wrap(async (req, res) => {
       const t = await simBank.getTransaction(req.params.ref);
       if (!t) throw new HttpError(404, 'No simulated transaction with that reference.');
-      res.json(t);
+      res.json(transactionFor(t, req.user));
     }),
   );
 

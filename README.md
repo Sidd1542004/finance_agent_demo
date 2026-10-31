@@ -441,7 +441,8 @@ invoice from also paying it, administrators included. The earlier typed-name lis
 | `GET /api/invoices/:id/document` | The invoice's original PDF, inline (`application/pdf`). Same access as `GET /api/invoices/:id`. 404 with a `code` (`no_file`, `not_pdf`, `not_stored`) when there is none, 415 if the stored file is not a PDF, 413 on Vercel above 4.4 MB. |
 | `GET /api/suppliers`; `POST /api/suppliers/:abn/beneficiary-changes`; `POST /api/beneficiary-changes/:id/approve`, `/reject` | Supplier bank details (simulated), two people. |
 | `GET /api/payments?status=`, `GET /api/payments/:id`, `GET /api/payment-calendar` | Payments by status, one payment with its jobs, bank transaction and notices; the scheduling rules. |
-| `GET /api/payment-notices`; `POST /api/payments/:id/notices`; `POST /api/payment-notices/:id/send`, `/discard` | Payment notices to suppliers. |
+| `GET /api/payment-notices`; `POST /api/payments/:id/notices`; `POST /api/payment-notices/:id/send`, `/discard` | Payment notices to suppliers: payers and reviewers draft, approvers and administrators send, payers, reviewers and approvers discard. Reviewers see the bodies with the account redacted. |
+| `POST /api/suppliers/:abn/bank-details/reveal` | Approvers and administrators: the full stored bank details, with a reason; logged. Everywhere else they are masked, and hidden from reviewers (docs/payments.md). |
 | `/api/sim-bank/...`; `/api/admin/sim-bank...`; `POST /api/admin/run-due` | The simulated bank, its settings, and "Run due payments now". |
 | `GET` or `POST /api/cron/tick` | The payment scheduler's tick; needs `Authorization: Bearer <CRON_SECRET>`. |
 | `GET /api/invoices/:id` | Adds `actions` (what is allowed and why not), `linkablePos`, `paymentMethods`, `payment`, and `document` (whether the original PDF can be viewed, and if not, why). |

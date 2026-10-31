@@ -7,6 +7,8 @@
 // Details change only by a proposal from one person approved by another
 // (services/beneficiaries.js); never from an email or an AI suggestion.
 
+import { hasRole } from '../../auth/roles.js';
+
 export const BANK_METHODS = ['EFT', 'BPAY', 'Card'];
 
 const digits = (v) => String(v ?? '').replace(/[\s-]/g, '');
@@ -64,19 +66,66 @@ export function methodsOf(details) {
 }
 
 const last = (s, n) => (s ? `•••${String(s).slice(-n)}` : null);
+// "999-001" -> "999-•••": the bank's code stays, the branch does not. Already masked: unchanged.
+const maskBsb = (bsb) => (bsb ? `${String(bsb).slice(0, 3)}-•••` : null);
 
-/** Details safe to show anyone and to write in the audit log. */
+/**
+ * Masked details: what payers, approvers and administrators see, and what the
+ * audit log holds. Safe to apply to details that are already masked.
+ */
 export function mask(details) {
   if (!details) return null;
   return {
     accountName: details.accountName || null,
-    bsb: details.bsb || null,
+    bsb: maskBsb(details.bsb),
     accountNumber: last(details.accountNumber, 3),
-    billerCode: details.billerCode || null,
+    billerCode: last(details.billerCode, 2),
     crn: last(details.crn, 3),
     cardToken: details.cardToken ? `SIMCARD-${last(details.cardToken.replace(/^SIMCARD-/, ''), 4)}` : null,
     methods: methodsOf(details),
   };
+}
+
+// ----- Who sees what (stored bank details only; invoice documents are not masked) -----
+//
+//   reviewer only            nothing of the details: that they exist, and the methods
+//   payer, approver, admin   masked details (mask above)
+//   approver, admin          the full details through an audited reveal
+//                            (services/beneficiaries.js revealBankDetails)
+
+/** May this person see masked bank details? Reviewers (and anyone without a working role) may not. */
+export const seesMaskedBankDetails = (viewer) => hasRole(viewer, 'payer', 'approver', 'admin');
+
+/** May this person reveal full bank details (audited)? */
+export const mayRevealBankDetails = (viewer) => hasRole(viewer, 'approver', 'admin');
+
+/** Stored bank details as this viewer may see them. Never the full details. */
+export function bankDetailsFor(details, viewer) {
+  if (!details) return null;
+  if (seesMaskedBankDetails(viewer)) return { ...mask(details), hidden: false };
+  return { hidden: true, methods: methodsOf(details) };
+}
+
+// The phrases payment notices print the account in (agent/finance/paymentEmails.js),
+// including notices written before BSBs were masked.
+const NOTICE_ACCOUNT = /\b(?:BSB [^,\n]+, account [^\s(,\n]+|BPAY biller [^,\n]+, reference [^\s(,\n]+|card SIMCARD-[^\s(,\n]+)/g;
+
+/** A notice's text as this viewer may see it: reviewers see no account at all; others see it masked. */
+export function noticeTextFor(text, viewer) {
+  if (!text) return text;
+  if (!seesMaskedBankDetails(viewer)) return String(text).replace(NOTICE_ACCOUNT, '[bank details hidden]');
+  return String(text)
+    .replace(/\bBSB (\d{3})-\d{3}\b/g, 'BSB $1-•••')
+    .replace(/\bBPAY biller (\d+)(?=,)/g, (m, code) => `BPAY biller ${last(code, 2)}`);
+}
+
+/** An audit entry's text about bank details, as this viewer may see it. */
+export function auditTextFor(text, viewer) {
+  if (!text) return text;
+  if (!seesMaskedBankDetails(viewer)) return 'Bank details are hidden for your role.';
+  return String(text)
+    .replace(/\bBSB (\d{3})-\d{3}\b/g, 'BSB $1-•••')
+    .replace(/\bBPAY (\d+) ref\b/g, (m, code) => `BPAY ${last(code, 2)} ref`);
 }
 
 export function maskedText(details) {

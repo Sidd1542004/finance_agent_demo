@@ -92,8 +92,9 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
   }
 
   /** A person approves a draft: it is delivered (safely) and marked sent. Only once. */
+  // Only an approver or administrator sends a notice to a supplier.
   async function approveAndSend(id, user) {
-    requireActor(user, 'payer', 'reviewer');
+    requireActor(user, 'approver', 'admin');
     const msg = await loadDraft(id);
     if (msg.status !== 'draft') throw new HttpError(409, `This message is already ${msg.status}.`);
     // The payment must still be in the state the notice describes (a success notice for a confirmed payment only).
@@ -138,7 +139,7 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
   }
 
   async function discard(id, user, note) {
-    requireActor(user, 'payer', 'reviewer');
+    requireActor(user, 'payer', 'reviewer', 'approver');
     const msg = await loadDraft(id);
     const why = String(note || '')
       .trim()

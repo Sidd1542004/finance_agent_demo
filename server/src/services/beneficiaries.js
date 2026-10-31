@@ -8,7 +8,7 @@
 
 import mongoose from 'mongoose';
 import { Vendor, BeneficiaryChange } from '../models/index.js';
-import { normaliseDetails, mask, maskedText, beneficiaryState, methodsOf } from '../agent/finance/beneficiary.js';
+import { normaliseDetails, maskedText, beneficiaryState, methodsOf, bankDetailsFor, mayRevealBankDetails } from '../agent/finance/beneficiary.js';
 import { normaliseAbn } from '../agent/finance/rules.js';
 import { hasRole } from '../auth/roles.js';
 import { config } from '../config.js';
@@ -23,13 +23,15 @@ async function vendorByAbn(abn) {
   return vendor;
 }
 
-const changeView = (c, { full = false } = {}) => ({
+// A proposed change as this viewer may see it: masked for payers, approvers and
+// administrators, hidden for reviewers. Never in full: see revealBankDetails.
+const changeView = (c, viewer) => ({
   id: String(c._id),
   vendorAbn: c.vendorAbn,
   vendorName: c.vendorName,
   status: c.status,
-  details: full ? c.details : mask(c.details),
-  masked: mask(c.details),
+  details: bankDetailsFor(c.details, viewer),
+  masked: bankDetailsFor(c.details, viewer),
   reason: c.reason,
   baseVersion: c.baseVersion,
   proposedBy: c.proposedBy,
@@ -40,12 +42,11 @@ const changeView = (c, { full = false } = {}) => ({
   decisionNote: c.decisionNote,
 });
 
-/** Every supplier with its masked details and any pending change. */
+/** Every supplier with its details and any pending change, masked (or hidden from reviewers). */
 export async function listSuppliers(user) {
   requireActor(user);
   const [vendors, pending] = await Promise.all([Vendor.find().sort({ name: 1 }).lean(), BeneficiaryChange.find({ status: 'pending' }).lean()]);
-  // Approvers and admins see a pending proposal in full, to check it before approving.
-  const canReview = hasRole(user, 'approver', 'admin');
+  const canReveal = mayRevealBankDetails(user);
   return vendors.map((v) => {
     const p = pending.find((c) => c.vendorAbn === v.abn) || null;
     return {
@@ -54,9 +55,16 @@ export async function listSuppliers(user) {
       email: v.email || null,
       state: beneficiaryState(v, p),
       beneficiary: v.beneficiary
-        ? { ...mask(v.beneficiary), status: v.beneficiary.status, version: v.beneficiary.version, verifiedBy: v.beneficiary.verifiedBy, verifiedAt: v.beneficiary.verifiedAt }
+        ? {
+            ...bankDetailsFor(v.beneficiary, user),
+            status: v.beneficiary.status,
+            version: v.beneficiary.version,
+            verifiedBy: v.beneficiary.verifiedBy,
+            verifiedAt: v.beneficiary.verifiedAt,
+          }
         : null,
-      pending: p ? changeView(p, { full: canReview || p.proposedById === user.id }) : null,
+      pending: p ? changeView(p, user) : null,
+      canReveal,
     };
   });
 }
@@ -65,7 +73,7 @@ export async function supplierHistory(abn, user) {
   requireActor(user);
   const vendor = await vendorByAbn(abn);
   const changes = await BeneficiaryChange.find({ vendorAbn: vendor.abn }).sort({ createdAt: -1 }).lean();
-  return { abn: vendor.abn, name: vendor.name, changes: changes.map((c) => changeView(c)) };
+  return { abn: vendor.abn, name: vendor.name, changes: changes.map((c) => changeView(c, user)) };
 }
 
 /** Propose new details. One pending change per supplier. Blocks payments until decided. */
@@ -103,7 +111,7 @@ export async function proposeChange(abn, input, user) {
     reason,
     detail: `Proposed ${maskedText(details)}; replaces ${maskedText(vendor.beneficiary)}. Payments to this supplier are blocked until a second person decides.`,
   });
-  return changeView(change.toObject(), { full: true });
+  return changeView(change.toObject(), user);
 }
 
 async function pendingChange(id) {
@@ -157,7 +165,7 @@ export async function approveChange(id, user, note = '') {
     reason: note || null,
     detail: `Verified version ${version}: ${maskedText(change.details)}. Proposed by ${change.proposedBy}. Methods: ${methodsOf(change.details).join(', ')}.`,
   });
-  return changeView(decided);
+  return changeView(decided, user);
 }
 
 /** Reject (a second person) or withdraw (the proposer). The current details stay. */
@@ -188,5 +196,65 @@ export async function rejectChange(id, user, note = '') {
     reason: why,
     detail: `Proposed ${maskedText(change.details)} was not applied.`,
   });
-  return changeView(decided);
+  return changeView(decided, user);
+}
+
+/**
+ * Show a supplier's full bank details to an approver or administrator, so they
+ * can check them (for example against a call-back) before approving a change.
+ * A reason is required, and every reveal is in the audit log: who, which
+ * details (the verified version or the pending change) and why. The log never
+ * holds the digits.
+ *
+ * target: 'pending' (the proposed change) or 'current' (the verified details).
+ */
+export async function revealBankDetails(abn, { target, reason } = {}, user) {
+  requireActor(user, 'approver', 'admin');
+  if (!['pending', 'current'].includes(target)) throw new HttpError(400, 'Choose which details to reveal: the pending change or the verified details.');
+  const why = String(reason || '')
+    .trim()
+    .slice(0, 500);
+  if (why.length < 5) throw new HttpError(400, 'Say why you need to see the full bank details (at least a few words).');
+  const vendor = await vendorByAbn(abn);
+  let details;
+  let what;
+  let ref;
+  if (target === 'pending') {
+    const change = await BeneficiaryChange.findOne({ vendorAbn: vendor.abn, status: 'pending' }).lean();
+    if (!change) throw new HttpError(404, `No change to ${vendor.name}'s bank details is waiting for approval.`);
+    details = change.details;
+    what = `the pending change proposed by ${change.proposedBy}`;
+    ref = { changeId: String(change._id), proposedBy: change.proposedBy };
+  } else {
+    if (!vendor.beneficiary) throw new HttpError(404, `${vendor.name} has no verified bank details.`);
+    details = vendor.beneficiary;
+    what = `the verified details, version ${vendor.beneficiary.version}`;
+    ref = { version: vendor.beneficiary.version };
+  }
+  await recordAudit({
+    subjectKind: 'supplier',
+    subjectId: vendor.abn,
+    ...who(user),
+    action: 'bank_details_revealed',
+    reason: why,
+    detail: `Revealed ${what} in full. Methods: ${methodsOf(details).join(', ') || 'none'}.`,
+  });
+  const pick = (k) => details[k] || null;
+  return {
+    abn: vendor.abn,
+    name: vendor.name,
+    target,
+    ...ref,
+    details: {
+      accountName: pick('accountName'),
+      bsb: pick('bsb'),
+      accountNumber: pick('accountNumber'),
+      billerCode: pick('billerCode'),
+      crn: pick('crn'),
+      cardToken: pick('cardToken'),
+    },
+    methods: methodsOf(details),
+    simulated: true,
+    revealedAt: new Date().toISOString(),
+  };
 }

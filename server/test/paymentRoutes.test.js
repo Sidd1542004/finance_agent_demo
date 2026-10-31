@@ -75,19 +75,22 @@ test('approve, schedule, tick: the invoice is completed only after the bank conf
   assert.ok(list.counts.paid >= 1);
 });
 
-test('notices: reviewers and payers approve them; a typed recipient or mode in the request changes nothing', async () => {
+test('notices: approvers and administrators send them; reviewers and payers cannot; a typed recipient or mode changes nothing', async () => {
   const draft = await OutboxMessage.findOne({ kind: 'payment_success', status: 'draft' }).lean();
-  const approver = await t.signIn('approver');
-  assert.equal((await approver.post(`/api/payment-notices/${draft._id}/send`)).status, 403);
   const reviewer = await t.signIn('reviewer');
+  const payer = await t.signIn('payer');
+  assert.equal((await reviewer.post(`/api/payment-notices/${draft._id}/send`)).status, 403);
+  assert.equal((await payer.post(`/api/payment-notices/${draft._id}/send`)).status, 403);
+  const approver = await t.signIn('approver');
   const list = await reviewer.get('/api/payment-notices?status=draft');
   assert.equal(list.data.delivery.mode, 'simulated_outbox', 'SUPPLIER_EMAIL_MODE=live is not enough outside production');
-  const sent = await reviewer.post(`/api/payment-notices/${draft._id}/send`, { to: 'attacker@evil.example', mode: 'live', deliveredTo: 'x' });
+  assert.match(list.data.items.find((n) => n._id === String(draft._id)).body, /\[bank details hidden\]/, 'reviewers see no account in the notice');
+  const sent = await approver.post(`/api/payment-notices/${draft._id}/send`, { to: 'attacker@evil.example', mode: 'live', deliveredTo: 'x' });
   assert.equal(sent.status, 200, JSON.stringify(sent.data));
   assert.equal(sent.data.message.delivery.mode, 'simulated_outbox');
   assert.equal(sent.data.message.delivery.deliveredTo, null);
   assert.equal(sent.data.message.to, 'accounts@harbouroffice.example');
-  assert.equal((await reviewer.post(`/api/payment-notices/${draft._id}/send`)).status, 409);
+  assert.equal((await approver.post(`/api/payment-notices/${draft._id}/send`)).status, 409);
   const again = await reviewer.post(`/api/payments/${draft.paymentId}/notices`, { kind: 'payment_success' });
   assert.equal(again.status, 200);
   assert.equal(again.data.created, false, 'no duplicate confirmation');
