@@ -133,6 +133,16 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
   const add = (id, label, status, detail) => checks.push({ id, label, status, detail });
   const pct = (x) => `${Math.round(x * 100)}%`;
 
+  // The AI reader failed and the keyword reader stood in (readQuery.js): never answered automatically.
+  if (reading?.fallback) {
+    add(
+      'ai_reader_unavailable',
+      'Email was read by the AI reader',
+      'fail',
+      `The AI reader was unavailable (${reading.fallback.reason}), so the keyword reader read this email. It is not answered automatically: a person checks it and replies.`,
+    );
+  }
+
   add(
     'sender_known',
     'Sender is an approved supplier',

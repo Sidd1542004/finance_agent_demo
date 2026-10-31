@@ -15,6 +15,7 @@ import { api } from './routes/api.js';
 import { seedIfEmpty } from './seed/seed.js';
 import { ensureOutboxIndexes } from './models/index.js';
 import { refreshPolicy } from './services/policySettings.js';
+import { withDeadline } from './llm/deadline.js';
 
 // Node's bundled DNS resolver (not Windows') is used for mongodb+srv://
 // lookups and can detect the wrong DNS server on some Windows machines even
@@ -93,6 +94,13 @@ if (config.corsOrigins.length) {
 }
 
 app.use(express.json({ limit: '1mb' }));
+
+// Every API request has a deadline (REQUEST_BUDGET_SECONDS): AI reader calls are cut
+// to the time left, so no request runs past it (llm/deadline.js, llm/groq.js).
+app.use('/api', (req, res, next) => {
+  req.deadlineAt = Date.now() + config.requestBudgetSeconds * 1000;
+  withDeadline(req.deadlineAt, next);
+});
 
 // State-changing API calls must come from the dashboard itself (CSRF). The
 // cron endpoints are called by a scheduler with CRON_SECRET instead.

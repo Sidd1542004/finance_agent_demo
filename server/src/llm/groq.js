@@ -4,8 +4,11 @@
 // Busy or briefly unavailable (429, 5xx, a network error or a timeout): tried
 // again up to twice, waiting as long as Groq's Retry-After asks (capped), or a
 // short backoff. A bad request or a bad key (400, 401, other 4xx) is never
-// retried. Everything, waits included, fits in `budgetMs`, which stays under
-// Vercel's 60-second function limit with room for the rest of the request.
+// retried. Everything, waits included, fits in `budgetMs`, and never past the
+// request's own deadline (llm/deadline.js), less a margin for the rest of the
+// request: with too little time left, a call fails at once (code "timeout").
+
+import { timeLeftMs } from './deadline.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -13,6 +16,8 @@ export const RETRY = { retries: 2, budgetMs: 45000, baseDelayMs: 600, maxDelayMs
 
 // A retry is only started if at least this much of the budget is left for it.
 const MIN_ATTEMPT_MS = 5000;
+// Kept free at the end of the request for what comes after the call (saving, answering).
+export const REQUEST_MARGIN_MS = 3000;
 
 const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -59,7 +64,10 @@ export async function groqChat({
 }) {
   if (!apiKey) throw new GroqError('not_configured', 'GROQ_API_KEY is not set.');
 
-  const deadline = now() + budgetMs;
+  // The request's deadline caps the budget: no call (or retry) waits past it.
+  const usable = Math.min(budgetMs, timeLeftMs(now()) - REQUEST_MARGIN_MS);
+  if (usable < MIN_ATTEMPT_MS) throw new GroqError('timeout', 'There was not enough time left in this request for the AI reader.');
+  const deadline = now() + usable;
   let attempt = 0;
   for (;;) {
     const left = deadline - now();

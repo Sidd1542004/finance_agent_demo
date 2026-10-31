@@ -6,7 +6,7 @@
   "outputDirectory": "client/dist",
   "functions": {
     "api/index.js": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "{server/node_modules/unpdf/dist/**,server/node_modules/@napi-rs/**}"
     }
   },

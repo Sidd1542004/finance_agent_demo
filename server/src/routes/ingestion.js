@@ -8,13 +8,15 @@
 //                                               signed-in administrator and the one-time state
 //   registerIngestionRoutes(api, { work })      after sign-in, administrators only
 
+import { inRequestDeadline } from '../llm/deadline.js';
 import mongoose from 'mongoose';
 import { requireRole } from '../auth/middleware.js';
 import { hasRole } from '../auth/roles.js';
 import { ingestion, ConnectError } from '../services/ingestion.js';
 import { HttpError } from '../services/runs.js';
 
-const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+// Inside the request's deadline (llm/deadline.js), even after a body parser.
+const wrap = (handler) => (req, res, next) => Promise.resolve(inRequestDeadline(req, () => handler(req, res, next))).catch(next);
 const PROVIDERS = ['gmail', 'outlook'];
 
 function providerParam(req) {

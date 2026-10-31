@@ -76,7 +76,7 @@ test('an out-of-bounds value is refused as a whole: nothing is saved, not even t
   assert.equal(config.policy.minConfidence, 0.99);
 });
 
-test('saved values persist, are used by the agent at once, show in /api/health and are audited', async () => {
+test('saved values persist, are used by the agent at once, show in /api/status and are audited', async () => {
   const reviewer = await t.signIn('reviewer');
   // With the defaults (99% reading confidence), the basic reader's 90% sends the clean sample to a person.
   const created = await reviewer.post('/api/invoices', { sampleId: 'clean' });
@@ -94,7 +94,7 @@ test('saved values persist, are used by the agent at once, show in /api/health a
 
   const doc = await Setting.findById(POLICY_SETTING_ID).lean();
   assert.deepEqual(doc.value.values, { minConfidence: 0.85, matchThreshold: 95 });
-  const health = await reviewer.get('/api/health');
+  const health = await reviewer.get('/api/status');
   assert.equal(health.data.policy.minConfidence, 0.85);
   assert.equal(health.data.policy.matchThreshold, 95);
 

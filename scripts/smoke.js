@@ -54,11 +54,13 @@ if (!/<div id="root">/.test(deep.data)) throw new Error('Client routes do not fa
 ok('client route falls back to index.html');
 
 const health = (await call('GET', '/api/health')).data;
-ok('/api/health', `database ${health.database}, reader ${health.reader.mode}, demo mode ${health.demoMode}`);
+ok('/api/health', `database ${health.database}`);
 
 if (!process.env.SMOKE_EMAIL || !process.env.SMOKE_USER_PASSWORD) throw new Error('Set SMOKE_EMAIL and SMOKE_USER_PASSWORD (an account with the admin, reviewer and payer roles).');
 const me = (await call('POST', '/api/auth/login', { email: process.env.SMOKE_EMAIL, password: process.env.SMOKE_USER_PASSWORD })).data.user;
 ok('signed in', `${me.name} (${me.roles.join(', ')})`);
+const status = (await call('GET', '/api/status')).data;
+ok('/api/status', `reader ${status.reader.mode}, demo mode ${status.demoMode}`);
 
 if (process.env.SMOKE_CRON_SECRET) {
   const tick = (await call('GET', '/api/cron/tick', undefined, { Authorization: `Bearer ${process.env.SMOKE_CRON_SECRET}` })).data;

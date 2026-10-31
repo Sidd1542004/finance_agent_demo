@@ -15,6 +15,7 @@
 // Authorization header, never from the URL. Repeated failures from one
 // address are slowed down (429). Responses are never cached.
 
+import { inRequestDeadline } from '../llm/deadline.js';
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 
@@ -26,7 +27,8 @@ import { registerIngestionCron } from './ingestion.js';
 
 export const MIN_CRON_SECRET_LENGTH = 32;
 
-const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+// Inside the request's deadline (llm/deadline.js), even after a body parser.
+const wrap = (handler) => (req, res, next) => Promise.resolve(inRequestDeadline(req, () => handler(req, res, next))).catch(next);
 
 /** Why a scheduler's request is refused, as { status, error }, or null. */
 export function cronProblem({ secret, authorization }) {

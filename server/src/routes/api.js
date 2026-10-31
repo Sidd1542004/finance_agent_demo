@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { inRequestDeadline } from '../llm/deadline.js';
 import mongoose from 'mongoose';
 import multer from 'multer';
 
@@ -64,7 +65,8 @@ async function invoiceCounts() {
 }
 
 // Express 4 does not catch errors from async handlers on its own.
-const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+// Inside the request's deadline (llm/deadline.js), even after a body parser.
+const wrap = (handler) => (req, res, next) => Promise.resolve(inRequestDeadline(req, () => handler(req, res, next))).catch(next);
 
 // The signed-in person, as the actor of an action (auth/middleware.js). Whatever
 // name the request body types is ignored: the session decides who acted.
@@ -83,22 +85,12 @@ export const api = Router();
 
 api.get(
   '/health',
-  wrap(async (req, res) => {
-    // fallback: invoices the rules reader read because the AI reader failed, waiting for a person.
-    const fallback = extractor.mode === 'groq' && mongoose.connection.readyState === 1 ? await readerFallbackStatus() : null;
-    res.json({
-      ok: true,
-      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null, fallback },
-      policy: config.policy,
-      abr: Boolean(abrLookup),
-      auth: 'accounts',
-      demoMode: config.demoMode,
-      // Whether Reset and Load demo month are allowed here (demo mode, not Production).
-      demoReset: demoResetBlocked() === null,
-      timeZone: config.timeZone,
-    });
-  }),
+  // Open, for uptime checks and the dashboard's "can I reach the server": nothing else.
+  // The settings the dashboard needs are in GET /api/status (signed in).
+  (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected' });
+  },
 );
 
 // Sign in / out. Open: these are how a person gets a session.
@@ -115,6 +107,22 @@ registerIngestionPublicRoutes(api);
 // that changes something also checks the specific role it needs.
 api.use(requireUser);
 api.use(requireAnyRole);
+
+// What the dashboard needs to know about this server: the reader, the policy, the
+// demo controls and the time zone. Any role (it used to be part of /api/health).
+api.get('/status', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    reader: { mode: extractor.mode, model: extractor.model, vision: visionReader ? visionReader.model : null },
+    policy: config.policy,
+    abr: Boolean(abrLookup),
+    auth: 'accounts',
+    demoMode: config.demoMode,
+    // Whether Reset and Load demo month are allowed here (demo mode, not Production).
+    demoReset: demoResetBlocked() === null,
+    timeZone: config.timeZone,
+  });
+});
 
 const adminRouter = createAdminRouter();
 registerAdminPaymentRoutes(adminRouter);
@@ -149,6 +157,16 @@ api.get(
     });
     // The tab counts and the KPIs cover every invoice, not just the ones loaded.
     res.json({ ...page, counts: await invoiceCounts() });
+  }),
+);
+
+// For the dashboard header: invoices read by the rules reader because the AI reader
+// failed, still waiting for a person (null without an AI reader). Any role.
+api.get(
+  '/invoices/summary',
+  wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ readerFallback: extractor.mode === 'groq' ? await readerFallbackStatus() : null });
   }),
 );
 

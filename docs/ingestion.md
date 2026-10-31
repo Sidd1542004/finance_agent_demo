@@ -160,8 +160,9 @@ repository secrets `INGEST_URL` and `CRON_SECRET` are set. Calling it more often
 is harmless: each mailbox is synced at most every `INGESTION_POLL_MINUTES`. A daily
 cron alone would mean invoices arrive up to a day late.
 
-Each sync stops starting new work after `INGESTION_BUDGET_SECONDS` (Vercel gives
-a function 60 seconds) and processes at most `INGESTION_MAX_PER_RUN`
+Each sync stops starting new work after `INGESTION_BUDGET_SECONDS`, and the whole
+sync, AI reader calls included, never runs past `REQUEST_BUDGET_SECONDS` (270 of the
+300 seconds `vercel.json` gives a function) and processes at most `INGESTION_MAX_PER_RUN`
 attachments; the rest wait for the next sync. A crashed sync frees its lock
 after 90 seconds and its item after 3 minutes.
 

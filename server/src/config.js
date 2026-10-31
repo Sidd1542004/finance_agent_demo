@@ -61,6 +61,11 @@ export const config = {
     },
   },
 
+  // The most time one request may take, in seconds: every /api request runs with this
+  // deadline (app.js), and an AI reader call never waits past it. Under Vercel's
+  // maxDuration (300 s in vercel.json), with room to answer.
+  requestBudgetSeconds: Math.max(5, num(process.env.REQUEST_BUDGET_SECONDS, 270)),
+
   // The scheduler endpoints (/api/cron/*, routes/cron.js): refused requests from one
   // address before it is slowed down (429). CRON_FAILURE_LIMIT=0 turns it off.
   cron: {
@@ -112,7 +117,7 @@ export const config = {
     // Comma-separated YYYY-MM-DD. Empty: the built-in Australian national public holidays.
     holidays: list(process.env.BANK_HOLIDAYS),
     tickMaxJobs: num(process.env.TICK_MAX_JOBS, 10),
-    tickBudgetSeconds: num(process.env.TICK_BUDGET_SECONDS, 40), // stay well inside Vercel's 60 s
+    tickBudgetSeconds: num(process.env.TICK_BUDGET_SECONDS, 40), // well inside the request budget below
     leaseSeconds: num(process.env.JOB_LEASE_SECONDS, 120),
     maxAttempts: num(process.env.JOB_MAX_ATTEMPTS, 5),
     bankTimeoutMs: num(process.env.BANK_TIMEOUT_MS, 10000),
@@ -201,7 +206,7 @@ export const config = {
     maxAttachmentBytes: Math.max(1, num(process.env.INGESTION_MAX_ATTACHMENT_MB, 10)) * 1024 * 1024,
     lookbackDays: Math.max(1, num(process.env.INGESTION_LOOKBACK_DAYS, 7)), // the first sync looks this far back
     maxPerRun: Math.max(1, num(process.env.INGESTION_MAX_PER_RUN, 5)), // attachments processed per sync
-    budgetSeconds: Math.max(5, num(process.env.INGESTION_BUDGET_SECONDS, 40)), // stop starting new work after this (Vercel: 60 s per request)
+    budgetSeconds: Math.max(5, num(process.env.INGESTION_BUDGET_SECONDS, 40)), // stop starting new work after this (each sync is also bounded by requestBudgetSeconds)
     maxAttempts: Math.max(1, num(process.env.INGESTION_MAX_ATTEMPTS, 5)),
   },
 };

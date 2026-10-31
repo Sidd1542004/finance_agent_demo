@@ -34,7 +34,11 @@ export function createVendorQueryAgent({ ledger, read, policy, companyName, save
         query.reading = reading;
         await save(query);
         const refs = understood.invoiceNumbers;
-        const reader = reading.method === 'groq' ? `AI reader (${reading.model})` : 'keyword reader';
+        const reader = reading.fallback
+          ? `keyword reader, because the AI reader was unavailable (${reading.fallback.reason})`
+          : reading.method === 'groq'
+            ? `AI reader (${reading.model})`
+            : 'keyword reader';
         return {
           summary: `Read as ${INTENT_LABEL[understood.intent]}. ${refs.length ? `Invoices mentioned: ${refs.join(', ')}.` : 'No invoice number found.'} Read by the ${reader}.`,
         };

@@ -600,6 +600,40 @@ test('when the agent fails on a created invoice, the retry re-runs it instead of
   }
 });
 
+test('a sync is bounded like a request: the AI reader only ever gets the time left in it', async () => {
+  const { timeLeftMs } = await import('../src/llm/deadline.js');
+  const { processInvoice } = await import('../src/services/invoices.js');
+  const seen = [];
+  const svc = configureIngestion({
+    cfg,
+    fetchImpl: routeFetch,
+    vision,
+    now,
+    log: quietLog,
+    requestBudgetMs: 4000,
+    process: async (invoice, opts) => {
+      seen.push(timeLeftMs());
+      return processInvoice(invoice, opts);
+    },
+  });
+  try {
+    google.add({ id: 'm-deadline-1', parts: [pdf('1', 'INV-000003-d1.pdf', Buffer.concat([NO_PO, Buffer.from('\n%% d1\n')]))] });
+    assert.equal((await admin.post('/api/ingestion/gmail/sync')).status, 200, 'the Sync button');
+    google.add({ id: 'm-deadline-2', parts: [pdf('1', 'INV-000003-d2.pdf', Buffer.concat([NO_PO, Buffer.from('\n%% d2\n')]))] });
+    clockOffset = 10 * 60 * 1000; // due again for the scheduler
+    try {
+      await svc.sync('gmail', { trigger: 'cron' }); // the scheduler, called directly (no request around it)
+    } finally {
+      clockOffset = 0;
+    }
+    assert.equal(seen.length, 2, JSON.stringify(seen));
+    // Within the 4 s budget (it may already be spent on a slow machine: then the AI reader is not called at all).
+    for (const left of seen) assert.ok(Number.isFinite(left) && left <= 4000, `time left ${left} ms`);
+  } finally {
+    configureIngestion({ cfg, fetchImpl: routeFetch, vision, now, log: quietLog });
+  }
+});
+
 // ---------- provider errors ----------
 
 test('an expired access token is refreshed once and the call repeated', async () => {

@@ -44,7 +44,11 @@ const RESET_SCOPE = [
 ].join('\n');
 
 export default function App() {
+  // health: the server's settings for the dashboard (GET /api/status, once signed in).
+  // reachable: GET /api/health answered. summary: GET /api/invoices/summary, for the header.
   const [health, setHealth] = useState(null);
+  const [reachable, setReachable] = useState(false);
+  const [summary, setSummary] = useState(null);
   const [session, setSession] = useState(null); // { user, setupRequired, setupEnabled }
   const [unreachable, setUnreachable] = useState(false);
   const [tab, setTab] = useState('invoices');
@@ -61,11 +65,31 @@ export default function App() {
   const loadSession = useCallback(() => api.me().then(setSession), []);
 
   useEffect(() => {
-    Promise.all([api.health().then(setHealth), loadSession()]).catch((err) => {
+    Promise.all([api.health().then(() => setReachable(true)), loadSession()]).catch((err) => {
       setError(err.message);
       setUnreachable(true);
     });
   }, [loadSession]);
+
+  // Signed in: the settings the screens need. Signed out: nothing beyond the health check.
+  const userId = session?.user?.id || null;
+  const loadStatus = useCallback(() => api.status().then(setHealth), []);
+  useEffect(() => {
+    if (!userId) {
+      setHealth(null);
+      setSummary(null);
+      return;
+    }
+    loadStatus().catch((err) => setError(err.message));
+  }, [userId, loadStatus]);
+  // The header's count of invoices read by the rules reader, refreshed as the person moves around.
+  useEffect(() => {
+    if (!userId) return;
+    api
+      .invoiceSummary()
+      .then(setSummary)
+      .catch(() => setSummary(null));
+  }, [userId, tab, version]);
 
   // Back from connecting a mailbox: the server redirects to /?ingestion=connected|error&provider=..&code=..
   // (a code, never a token). Say what happened, open Admin, and tidy the address bar.
@@ -143,9 +167,9 @@ export default function App() {
           <span className="brand-name">Finance Operations Agent</span>
           <div className="topbar-right">
             {health && <span className={`reader reader-${health.reader.mode}`}>{health.reader.mode === 'groq' ? `AI on: ${health.reader.model}` : 'AI off: no Groq key set'}</span>}
-            {health?.reader.fallback?.invoicesWaiting > 0 && (
-              <span className="reader reader-rules" title={`Last at ${health.reader.fallback.lastAt} (${health.reader.fallback.lastCode})`}>
-                AI reader unavailable: {health.reader.fallback.invoicesWaiting} invoice{health.reader.fallback.invoicesWaiting === 1 ? '' : 's'} read by the rules reader
+            {summary?.readerFallback?.invoicesWaiting > 0 && (
+              <span className="reader reader-rules" title={`Last at ${summary.readerFallback.lastAt} (${summary.readerFallback.lastCode})`}>
+                AI reader unavailable: {summary.readerFallback.invoicesWaiting} invoice{summary.readerFallback.invoicesWaiting === 1 ? '' : 's'} read by the rules reader
               </span>
             )}
             {user && health?.demoReset && hasRole(user, 'admin') && (
@@ -205,7 +229,7 @@ export default function App() {
         </div>
       )}
 
-      {health && session && !user ? (
+      {reachable && session && !user ? (
         <Login
           setupRequired={session.setupRequired}
           setupEnabled={session.setupEnabled}
@@ -221,7 +245,7 @@ export default function App() {
           user={user}
           onError={setError}
           onNotice={setNotice}
-          onHealthChange={() => api.health().then(setHealth)}
+          onHealthChange={loadStatus}
           openInvoice={openInvoice}
           openId={tab === 'invoices' ? openInvoiceId : null}
         />

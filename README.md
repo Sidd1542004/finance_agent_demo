@@ -169,11 +169,14 @@ Limits to know:
 
 - **Uploads are limited to 4 MB.** Vercel refuses request bodies over 4.5 MB before they
   reach the app.
-- **Each request has 60 seconds** (`maxDuration` in `vercel.json`). Processing one invoice
-  with Groq normally takes a few seconds; loading the demo month takes longer. When Groq
-  is busy (429), briefly down (5xx), unreachable or slow, a call is tried up to twice more,
-  waiting as long as Groq's `Retry-After` asks (at most 8 seconds); all attempts fit in
-  45 seconds. A bad request or a rejected key is not retried.
+- **Each request has 300 seconds** (`maxDuration` in `vercel.json`), and the app gives
+  itself `REQUEST_BUDGET_SECONDS` (270) of them. Processing one invoice with Groq normally
+  takes a few seconds; loading the demo month takes longer. When Groq is busy (429), briefly
+  down (5xx), unreachable or slow, a call is tried up to twice more, waiting as long as
+  Groq's `Retry-After` asks (at most 8 seconds); all attempts fit in 45 seconds, and never
+  past the time left in the request (a mailbox sync, Process again, an upload): with too
+  little left, the call fails at once and the reader's fallback takes over. A bad request
+  or a rejected key is not retried.
 - **Cold starts.** The first request after a quiet spell starts a new function instance and
   opens the database connection, so it can take a few seconds. Later requests reuse the
   connection.
@@ -374,12 +377,18 @@ reader instead of stopping at "Could not process". Failures include Groq unavail
   possible. Nothing is approved or paid because of the fallback;
 - shows "basic rules reader, because the AI reader was unavailable" on the invoice page.
 
-`GET /api/health` reports `reader.fallback`: how many invoices read this way are
-still waiting for a person, and when and why it last happened. The dashboard header
-shows a warning while that count is above zero. A rejected key is also logged as an
+`GET /api/invoices/summary` (signed in, any role) reports `readerFallback`: how many
+invoices read this way are still waiting for a person, and when and why it last happened.
+The dashboard header shows a warning while that count is above zero. A rejected key is also logged as an
 error, so a broken key does not go unnoticed. Scans and photos have no text for the
 rules reader, so they still need the AI vision reader, as before. Without a Groq key
 the rules reader is simply the reader, and this does not apply.
+
+**Supplier emails** get the same treatment. When the AI reader fails or gives an
+unusable answer (not JSON, or no valid intent), the keyword reader reads the email
+for the person, the email is **never answered automatically**, and it goes to a
+person with the check "Email was read by the AI reader" failed and the reason, under
+the same codes as invoices (`rate_limit`, `timeout`, `bad_output`, ...).
 
 ### Viewing the original PDF
 
@@ -472,7 +481,9 @@ invoice from also paying it, administrators included. The earlier typed-name lis
 | `GET /api/payables` | Overdue and due-soon invoices and cash needed (approved due in 7/30 days, awaiting a decision due in 7 days; AUD only). |
 | `POST /api/invoices/:id/approval` | Kept: `approve`, `approve_received`, `reject`. |
 | `POST /api/invoices/:id/rerun` | Kept: re-checks through the `rerun` action. |
-| `GET /api/health` | Adds `abr` and which roles are configured; `policy` now has `matchThreshold`, `missingAbn`, `segregateDuties`. |
+| `GET /api/health` | Open: `{ ok, database }` only, for uptime checks. |
+| `GET /api/status` | Signed in, any role: what the dashboard needs: the reader (mode, model, vision), the policy, `abr`, demo controls, the time zone. |
+| `GET /api/invoices/summary` | Signed in, any role: `readerFallback` (invoices read by the rules reader because the AI reader failed, still waiting for a person), or null without an AI reader. |
 | `GET /api/invoices`, `/api/queries`, `/api/statements`, `/api/reports` | One page at a time, newest first: `?before=<nextCursor>&limit=<n>` (default 50, at most 200). Answers `{ items, nextCursor }`; `nextCursor` is null on the last page. Invoices also take `?filter=waiting|pay` and return `counts` (tabs and KPIs) over every invoice. |
 | `GET /api/audit?subjectId=<id>` | The append-only audit log for one invoice, payment, supplier email, report, or bank line (`<statement id>:<line number>`), oldest first. Without `subjectId`, the latest entries. |
 | `GET /api/cron/daily-summary` | The daily summary email; needs `Authorization: Bearer <CRON_SECRET>`. `?preview=1` returns it without sending. |

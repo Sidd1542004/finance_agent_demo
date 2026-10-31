@@ -1,6 +1,6 @@
 // The Groq fallback through the real app, with GROQ_API_KEY set and Groq
 // replaced by a stand-in: an invoice read while Groq is down goes to Needs
-// Review, /api/health says so, approval is refused by the API, and correcting
+// Review, GET /api/invoices/summary says so, approval is refused by the API, and correcting
 // the fields or processing it again once Groq is back clears it.
 
 import test from 'node:test';
@@ -28,9 +28,13 @@ const { renderInvoiceText, findSample } = await import('../src/seed/data.js');
 const reviewer = await t.signIn('reviewer');
 const approver = await t.signIn('approver');
 const check = (inv) => inv.checks.find((c) => c.id === 'ai_reader_unavailable');
-const health = async () => (await t.client().get('/api/health')).data.reader;
+// The header's count: signed in, any role. (GET /api/health says nothing about it.)
+const health = async () => {
+  const [summary, status] = await Promise.all([reviewer.get('/api/invoices/summary'), reviewer.get('/api/status')]);
+  return { mode: status.data.reader.mode, fallback: summary.data.readerFallback };
+};
 
-test('Groq rejects the key: the invoice is read by the rules reader, goes to Needs Review, and /api/health shows it', async () => {
+test('Groq rejects the key: the invoice is read by the rules reader, goes to Needs Review, and the invoice summary shows it', async () => {
   assert.equal((await health()).mode, 'groq');
   assert.deepEqual((await health()).fallback, { invoicesWaiting: 0, lastAt: null, lastCode: null });
   const res = await reviewer.post('/api/invoices', { sampleId: 'clean' });

@@ -31,6 +31,7 @@ import { redactSecrets } from '../safeUri.js';
 import { readUpload } from './uploads.js';
 import { processInvoice, visionReader } from './invoices.js';
 import { keepInvoiceDocument } from './invoiceDocuments.js';
+import { withDeadline } from '../llm/deadline.js';
 import { HttpError, recordAudit } from './runs.js';
 import { requireActor } from './actor.js';
 
@@ -63,6 +64,8 @@ export function createIngestion({
   read = readUpload,
   process: runAgent = processInvoice,
   keepDocument = keepInvoiceDocument,
+  // The most a sync (or a retry) may take: its AI reader calls are cut to the time left.
+  requestBudgetMs = appConfig.requestBudgetSeconds * 1000,
   audit = recordAudit,
   now = () => new Date(),
   log = console,
@@ -563,7 +566,11 @@ export function createIngestion({
   // ----- sync -----
 
   // trigger 'cron': the scheduler (CRON_SECRET); anything else is an administrator's request.
-  async function sync(name, { trigger = 'manual', user = null } = {}) {
+  // Bounded like a request (llm/deadline.js), whoever calls it: the scheduler, the
+  // Sync button, or a direct call. An earlier request deadline is kept.
+  const sync = (name, opts) => withDeadline(Date.now() + requestBudgetMs, () => syncNow(name, opts));
+
+  async function syncNow(name, { trigger = 'manual', user = null } = {}) {
     if (trigger !== 'cron') requireActor(user, 'admin');
     providerFor(name);
     const doc = await IngestionSource.findById(name).lean();
@@ -722,7 +729,9 @@ export function createIngestion({
     }));
   }
 
-  async function retry(id, user) {
+  const retry = (id, user) => withDeadline(Date.now() + requestBudgetMs, () => retryNow(id, user));
+
+  async function retryNow(id, user) {
     requireActor(user, 'admin');
     const item = await IngestionItem.findById(id).lean();
     if (!item) throw new HttpError(404, 'That ingestion record does not exist.');

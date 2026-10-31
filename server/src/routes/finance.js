@@ -1,6 +1,7 @@
 // Routes for vendor queries, bank reconciliation, month-end reporting and the
 // demo loader. Registered on the main API router in api.js.
 
+import { inRequestDeadline } from '../llm/deadline.js';
 import mongoose from 'mongoose';
 
 import { VendorQuery, BankStatement, Report } from '../models/index.js';
@@ -16,7 +17,8 @@ import { withDemoWipe } from '../services/demoReset.js';
 import { pageOf, pageParams } from './paging.js';
 import { requireRole, actorOf } from '../auth/middleware.js';
 
-const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+// Inside the request's deadline (llm/deadline.js), even after a body parser.
+const wrap = (handler) => (req, res, next) => Promise.resolve(inRequestDeadline(req, () => handler(req, res, next))).catch(next);
 
 const requireId = (req, what) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, `That ${what} no longer exists.`);

@@ -70,7 +70,12 @@ const query = (params = {}) => {
 const json = (body, method = 'POST') => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
 
 export const api = {
+  // Open: is the server (and its database) there? Nothing else.
   health: () => request('/health'),
+  // Signed in, any role: the reader, the policy, demo controls, time zone.
+  status: () => request('/status'),
+  // Signed in, any role: invoices read by the rules reader because the AI reader failed.
+  invoiceSummary: () => request('/invoices/summary'),
 
   // Signing in
   me: () => request('/auth/me'),

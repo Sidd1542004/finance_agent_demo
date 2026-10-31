@@ -253,7 +253,13 @@ function QueryDetail({ data, fresh, busy, canAct, onResolve, onRerun }) {
 
             {query.reading && (
               <p className="hint">
-                Read by the {query.reading.method === 'groq' ? `AI reader (${query.reading.model})` : 'keyword reader'}, {Math.round(query.reading.confidence * 100)}% confident.
+                Read by the{' '}
+                {query.reading.fallback
+                  ? 'keyword reader, because the AI reader was unavailable (a person replies)'
+                  : query.reading.method === 'groq'
+                    ? `AI reader (${query.reading.model})`
+                    : 'keyword reader'}
+                , {Math.round(query.reading.confidence * 100)}% confident.
                 {query.reading.notes ? ` ${query.reading.notes}` : ''}
               </p>
             )}
