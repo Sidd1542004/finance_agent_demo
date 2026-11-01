@@ -1061,6 +1061,14 @@ show.
   entry.
 - **Demo**: a script or test that prints "what is waiting and why" from tools
   alone.
+- **Status (2026-11-01): built.** 17 tools in `server/src/orchestrator/tools.js`;
+  the functions no tool may reach are listed in `neverExposed.js` and checked by
+  `server/test/orchestratorTools.test.js`; the demo is
+  `node scripts/orchestrator-tools-demo.js`. Two differences from the table in
+  §9.1: `sim_bank_account` reads the account record itself, because
+  `simBank.accountView()` writes (it opens the account if missing, and saves
+  its `updatedAt` on every read); and the model enum needed no separate change,
+  because it uses `SUBJECT_KINDS`.
 
 ### Phase 2: the graph, read-only, in one request
 
