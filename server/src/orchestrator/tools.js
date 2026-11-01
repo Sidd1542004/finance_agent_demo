@@ -37,8 +37,11 @@ import {
   listReports,
   getReference,
   listAuditEntries,
+  findInvoicesByNumber,
+  listOpenInvoices,
   INVOICE_FILTERS,
   PAYMENT_STATUSES,
+  OPEN_STAGES,
 } from '../services/listings.js';
 import { getInvoiceDetail, getPayables, paymentCalendar } from '../services/invoices.js';
 import { getQueryDetail } from '../services/queries.js';
@@ -52,6 +55,8 @@ import { redactSecrets } from '../safeUri.js';
 import { isToolContext } from './context.js';
 import {
   forViewer,
+  foundInvoices,
+  openInvoiceList,
   invoiceList,
   invoiceDetail,
   payables,
@@ -94,6 +99,23 @@ const LIST = [
     description: 'Invoices, newest first. filter: waiting (needs a person), pay (approved, to pay) or all. With the tab counts.',
     input: z.strictObject({ filter: z.enum([...Object.keys(INVOICE_FILTERS), 'all']).optional(), before: cursor.optional(), limit: pageLimit(50).optional() }),
     run: async (actor, a) => invoiceList(await listInvoices(actor, { filter: a.filter, before: a.before, limit: a.limit ?? 20 })),
+  }),
+  tool('find_invoices', {
+    description: 'Invoices with this invoice number (case, punctuation and leading zeros ignored), at most 10, with the matched supplier ABN.',
+    input: z.strictObject({ invoiceNumber: z.string().trim().min(1).max(40) }),
+    run: async (actor, a) => foundInvoices(await findInvoicesByNumber(actor, a.invoiceNumber)),
+  }),
+  tool('list_open_invoices', {
+    description:
+      'Invoices still to be paid, newest first, at most 100, with the matched supplier ABN and the total count. stage: approval, review, on_hold or payment; abn: one supplier.',
+    input: z.strictObject({
+      stage: z.enum(Object.keys(OPEN_STAGES)).optional(),
+      abn: z
+        .string()
+        .regex(/^\d{11}$/)
+        .optional(),
+    }),
+    run: async (actor, a) => openInvoiceList(await listOpenInvoices(actor, a)),
   }),
   tool('get_invoice', {
     description: 'One invoice: fields read from it, the checks, the score, the PO, duplicates, its payment, and the actions with whether this person may take them.',

@@ -17,11 +17,11 @@ const alnum = (s) =>
   String(s ?? '')
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '');
-const invoiceKey = (n) =>
+export const invoiceKey = (n) =>
   alnum(n)
     .replace(/^0+(?=\d)/, '')
     .replace(/([A-Z])0+(?=\d)/g, '$1');
-const nameKey = (s) => alnum(String(s ?? '').replace(/\b(pty|ltd|limited|co|company|the)\b/gi, ''));
+export const nameKey = (s) => alnum(String(s ?? '').replace(/\b(pty|ltd|limited|co|company|the)\b/gi, ''));
 
 export function supplierKey(e) {
   if (e.abn) return `ABN:${e.abn}`;
