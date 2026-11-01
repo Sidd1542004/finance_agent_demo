@@ -1,10 +1,10 @@
 // Routes for vendor queries, bank reconciliation, month-end reporting and the
 // demo loader. Registered on the main API router in api.js.
 
+import { inRequestDeadline } from '../llm/deadline.js';
 import mongoose from 'mongoose';
 
-import { config } from '../config.js';
-import { VendorQuery, BankStatement, Report } from '../models/index.js';
+import { VendorQuery, BankStatement } from '../models/index.js';
 import { sampleQueries, findSampleQuery, sampleStatement } from '../seed/data.js';
 import { emailAddress } from '../agent/finance/queryRules.js';
 import { isMonth, monthOf, figuresToCsv } from '../agent/finance/reportFigures.js';
@@ -13,9 +13,12 @@ import { processQuery, getQueryDetail, resolveQuery } from '../services/queries.
 import { processStatement, getStatementDetail, resolveLine } from '../services/statements.js';
 import { writeReport, getReportDetail } from '../services/reports.js';
 import { loadDemoMonth } from '../services/demo.js';
-import { pageOf, pageParams } from './paging.js';
+import { withDemoWipe } from '../services/demoReset.js';
+import { listQueries, listStatements, listReports } from '../services/listings.js';
+import { requireRole, actorOf } from '../auth/middleware.js';
 
-const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+// Inside the request's deadline (llm/deadline.js), even after a body parser.
+const wrap = (handler) => (req, res, next) => Promise.resolve(inRequestDeadline(req, () => handler(req, res, next))).catch(next);
 
 const requireId = (req, what) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, `That ${what} no longer exists.`);
@@ -32,7 +35,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/queries',
     wrap(async (req, res) => {
-      res.json(await pageOf(VendorQuery, {}, pageParams(req.query), { select: 'status from subject createdAt supplier.name decision.outcome' }));
+      res.json(await listQueries(actorOf(req), req.query));
     }),
   );
 
@@ -45,6 +48,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/queries',
+    requireRole('reviewer'),
     work,
     wrap(async (req, res) => {
       let fields;
@@ -75,6 +79,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/queries/:id/rerun',
+    requireRole('reviewer'),
     work,
     wrap(async (req, res) => {
       const query = await VendorQuery.findById(requireId(req, 'email'));
@@ -87,8 +92,10 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/queries/:id/resolution',
+    requireRole('reviewer'),
     wrap(async (req, res) => {
-      res.json(await resolveQuery(requireId(req, 'email'), req.body || {}));
+      // The signed-in person decides; a typed name in the body is ignored.
+      res.json(await resolveQuery(requireId(req, 'email'), req.body || {}, actorOf(req)));
     }),
   );
 
@@ -102,19 +109,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/statements',
     wrap(async (req, res) => {
-      res.json(
-        await pageOf(BankStatement, {}, pageParams(req.query), {
-          select: 'status source createdAt lines.status lines.amount',
-          map: (s) => ({
-            _id: s._id,
-            status: s.status,
-            source: s.source,
-            createdAt: s.createdAt,
-            lineCount: s.lines.length,
-            openCount: s.lines.filter((l) => ['suggested', 'exception', 'unmatched'].includes(l.status)).length,
-          }),
-        }),
-      );
+      res.json(await listStatements(actorOf(req), req.query));
     }),
   );
 
@@ -127,6 +122,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/statements',
+    requireRole('payer'),
     work,
     upload.single('file'),
     wrap(async (req, res) => {
@@ -162,6 +158,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/statements/:id/rerun',
+    requireRole('payer'),
     work,
     wrap(async (req, res) => {
       const statement = await BankStatement.findById(requireId(req, 'statement'));
@@ -175,8 +172,9 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/statements/:id/lines/:n/resolution',
+    requireRole('payer'),
     wrap(async (req, res) => {
-      res.json(await resolveLine(requireId(req, 'statement'), req.params.n, req.body || {}));
+      res.json(await resolveLine(requireId(req, 'statement'), req.params.n, req.body || {}, actorOf(req)));
     }),
   );
 
@@ -185,7 +183,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/reports',
     wrap(async (req, res) => {
-      res.json(await pageOf(Report, {}, pageParams(req.query), { select: 'month status createdAt figures.label' }));
+      res.json(await listReports(actorOf(req), req.query));
     }),
   );
 
@@ -209,6 +207,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/reports',
+    requireRole('reviewer', 'approver', 'payer', 'admin'),
     work,
     wrap(async (req, res) => {
       const month = req.body?.month || monthOf(new Date());
@@ -221,10 +220,12 @@ export function registerFinanceRoutes(api, { upload, work }) {
 
   api.post(
     '/demo/load',
+    requireRole('admin'),
     work,
     wrap(async (req, res) => {
-      if (!config.demoMode) throw new HttpError(403, 'The demo month is only available in demo mode.');
-      res.json(await loadDemoMonth());
+      // It starts by wiping the demo data, so the same rules as Reset apply:
+      // demo mode only, never on Production, one at a time.
+      res.json(await withDemoWipe(req.user, () => loadDemoMonth(req.user)));
     }),
   );
 }

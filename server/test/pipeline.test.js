@@ -78,7 +78,7 @@ test('a failed first attempt does not make the retry a duplicate', async () => {
   assert.equal(second.result.outcome, 'under_review');
 });
 
-test('if the reader fails, the invoice is flagged and nothing is queued', async () => {
+test('without a fallback reader, if the reader fails, the invoice is flagged and nothing is queued', async () => {
   const { ledger, submit } = setup({
     extract: async () => {
       throw new Error('Could not reach Groq (timed out).');
@@ -101,7 +101,7 @@ test('if the reader fails, the invoice is flagged and nothing is queued', async 
 // (the same read ECONNRESET a flaky proxy or network blip produces). This
 // must flow through the whole six-step loop and land on "Could not process"
 // with a clear reason, exactly like any other reader failure, not crash.
-test('a Groq response that fails while reading the body ends as a clean "could not process", not a crash', async () => {
+test('without a fallback reader, a Groq response that fails while reading the body ends as a clean "could not process", not a crash', async () => {
   const fetchImpl = async () => ({
     ok: true,
     status: 200,

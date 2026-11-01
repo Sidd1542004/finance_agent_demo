@@ -25,9 +25,15 @@ jobs:
           npm ci --prefix server
           npm ci --prefix client
 
-      # No database, network or secrets needed: the tests use the in-memory ledger.
+      # No secrets needed. Most tests use the in-memory ledger; the route, payment and
+      # ingestion tests start an in-memory MongoDB (mongodb-memory-server downloads
+      # mongod on the first run).
       - name: Server tests
         run: npm test --prefix server
+
+      # Plain functions behind the dashboard (no browser needed).
+      - name: Client tests
+        run: npm test --prefix client
 
       - name: Client build
         run: npm run build --prefix client

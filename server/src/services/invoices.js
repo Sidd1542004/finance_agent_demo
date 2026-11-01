@@ -4,24 +4,51 @@
 
 import { runAgent } from '../agent/core/loop.js';
 import { createInvoiceAgent } from '../agent/finance/invoiceAgent.js';
-import { createExtractor, createVisionReader } from '../agent/finance/extract.js';
+import { createExtractor, createVisionReader, extractWithRules } from '../agent/finance/extract.js';
 import { createAbrLookup } from '../agent/finance/abr.js';
 import { receivedOnly, normaliseAbn } from '../agent/finance/rules.js';
 import { allowedActions, ActionError, AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { payablesSummary, todayIso } from '../agent/finance/due.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
-import { Invoice, AgentRun, Payment, PurchaseOrder } from '../models/index.js';
+import { Invoice, AgentRun, Payment, PurchaseOrder, PaymentJob, SimBankTransaction, OutboxMessage } from '../models/index.js';
+import { NOTICE_KINDS } from '../agent/finance/paymentEmails.js';
 import { config } from '../config.js';
 import { HttpError, recordAudit } from './runs.js';
 import { createInvoiceActions, PAYMENT_METHODS } from './invoiceActions.js';
+import { createCalendar } from '../agent/finance/businessDays.js';
+import { BANK_METHODS } from '../agent/finance/beneficiary.js';
+import { documentsFor } from './invoiceDocuments.js';
+import { policySnapshot } from './policySettings.js';
+import { paymentFor, transactionFor, noticeFor } from './bankViews.js';
+
+// When bank payments may run: business days, bank holidays, cut-off, in TIME_ZONE.
+export const paymentCalendar = createCalendar({
+  timeZone: config.timeZone,
+  businessDays: config.payments.businessDays,
+  holidays: config.payments.holidays,
+  cutoff: config.payments.cutoff,
+  defaultTime: config.payments.defaultTime,
+});
 
 export const extractor = createExtractor(config);
 export const visionReader = createVisionReader(config);
 export const abrLookup = createAbrLookup(config);
 
+// When the AI reader is configured but fails (unavailable, timed out, invalid
+// answer), the rules reader stands in for it. The invoice then goes to Needs
+// Review with approval blocked (invoiceAgent.js ai_reader_unavailable).
+export function readerFallback(log = console) {
+  return async (text, fb) => {
+    if (fb.code === 'auth') log.error?.('The AI reader is not working: Groq rejected GROQ_API_KEY. Invoices are being read by the rules reader.');
+    else log.warn?.(`AI reader unavailable (${fb.code}); invoice read by the rules reader.`);
+    return extractWithRules(text, { fallback: fb });
+  };
+}
+
 const agent = createInvoiceAgent({
   ledger: sampleLedger,
   extract: extractor.extract,
+  fallback: extractor.mode === 'groq' ? readerFallback() : null,
   abr: abrLookup,
   policy: config.policy,
   save: (invoice) => invoice.save(),
@@ -30,11 +57,15 @@ const agent = createInvoiceAgent({
 
 // `reading`: a scan or photo the vision reader has already read (see uploads.js).
 export async function processInvoice(invoice, { reading = null } = {}) {
-  const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [] });
+  // The policy this run checks against, fixed for the whole run and kept on it
+  // ("Checked at 99% match threshold (policy v3)"). A later save does not change it.
+  const snapshot = policySnapshot();
+  const policy = Object.freeze({ ...config.policy });
+  const run = await AgentRun.create({ agent: agent.name, invoiceId: invoice._id, status: 'running', steps: [], policy: snapshot });
 
   const result = await runAgent(
     agent,
-    { invoice, reading },
+    { invoice, reading, policy },
     {
       onStep: async (_step, steps) => {
         run.steps = [...steps];
@@ -59,23 +90,25 @@ export async function processInvoice(invoice, { reading = null } = {}) {
 const actions = createInvoiceActions({
   store: sampleLedger,
   policy: config.policy,
-  roles: config.roles,
+  // EFT, BPAY and Card go through the simulated bank (AUD only). Cheque and Other are recorded by hand.
+  bank: { calendar: paymentCalendar, methods: BANK_METHODS, currencies: ['AUD'] },
   rerun: async (id) => {
     const doc = await Invoice.findById(id);
     if (doc) await processInvoice(doc);
   },
 });
 
-export async function getInvoiceDetail(id) {
+export async function getInvoiceDetail(id, actor = null) {
   const invoice = await Invoice.findById(id).lean();
   if (!invoice) throw new HttpError(404, 'That invoice no longer exists.');
-  const [run, payment, po] = await Promise.all([
+  const [run, payment, po, documents] = await Promise.all([
     AgentRun.findOne({ invoiceId: id }).sort({ createdAt: -1 }).lean(),
     Payment.findOne({ invoiceId: id }).lean(),
     invoice.matchedPo ? sampleLedger.findPurchaseOrder(invoice.matchedPo) : null,
+    documentsFor(invoice), // the invoice's original, its purchase order and delivery slip
   ]);
   const partial = AWAITING_DECISION.includes(invoice.status) ? receivedOnly(invoice, config.policy.gstRatePct) : null;
-  const ctx = { payment: payment ? { ...payment, id: String(payment._id) } : null, receivedOnly: partial, roles: config.roles, policy: config.policy };
+  const ctx = { payment: payment ? { ...payment, id: String(payment._id) } : null, receivedOnly: partial, policy: config.policy, actor };
 
   // POs a reviewer can link: the supplier's when it is known, otherwise all.
   let linkablePos = [];
@@ -87,7 +120,35 @@ export async function getInvoiceDetail(id) {
       raisedOn: p.raisedOn,
     }));
   }
-  return { invoice, run, payment, po, receivedOnly: partial, actions: allowedActions(invoice, ctx), linkablePos, paymentMethods: PAYMENT_METHODS };
+  // The bank side of the payment: its jobs, the simulated bank's transaction, and notices to the supplier.
+  const ref = payment?.confirmation?.txnRef || payment?.submission?.txnRef || null;
+  const [jobs, bankTransaction, notices] = payment
+    ? await Promise.all([
+        PaymentJob.find({ paymentId: payment._id }).select('-history').sort({ createdAt: 1 }).lean(),
+        ref ? SimBankTransaction.findOne({ ref }).select('-requestHash -idempotencyKey').lean() : null,
+        OutboxMessage.find({ invoiceId: invoice._id, kind: { $in: NOTICE_KINDS } })
+          .sort({ createdAt: -1 })
+          .lean(),
+      ])
+    : [[], null, []];
+  const calendar = { timeZone: paymentCalendar.timeZone, cutoff: paymentCalendar.cutoff, defaultTime: paymentCalendar.defaultTime, nextSlot: paymentCalendar.nextSlot(new Date()) };
+  // Stored bank details as this person may see them (masked, or hidden from reviewers).
+  return {
+    invoice,
+    run,
+    payment: paymentFor(payment, actor),
+    po,
+    receivedOnly: partial,
+    actions: allowedActions(invoice, ctx),
+    linkablePos,
+    paymentMethods: PAYMENT_METHODS,
+    bankMethods: BANK_METHODS,
+    paymentCalendar: calendar,
+    jobs,
+    bankTransaction: transactionFor(bankTransaction, actor),
+    notices: notices.map((n) => noticeFor(n, actor)),
+    documents,
+  };
 }
 
 async function addHumanStep(id, summary) {
@@ -97,27 +158,41 @@ async function addHumanStep(id, summary) {
   await run.save();
 }
 
-export async function performInvoiceAction(id, action, input) {
+// `actor`: the signed-in user { id, name, roles }. Every API call passes one.
+export async function performInvoiceAction(id, action, input, actor = null) {
   try {
-    const { summary } = await actions.perform(id, action, input || {});
+    const { summary } = await actions.perform(id, action, input || {}, actor);
     // Actions that re-run the agent start a new run; the person's step goes on the latest one.
     await addHumanStep(id, summary);
   } catch (err) {
-    if (err instanceof ActionError) throw new HttpError(err.status, err.message);
+    if (err instanceof ActionError) throw new HttpError(err.status, err.message, err.extra);
     throw err;
   }
-  return getInvoiceDetail(id);
+  return getInvoiceDetail(id, actor);
 }
 
 // The earlier API: approve | approve_received | reject.
-export function applyHumanDecision(id, { decision, decidedBy, note }) {
+export function applyHumanDecision(id, { decision, decidedBy, note }, actor = null) {
   if (!['approve', 'approve_received', 'reject'].includes(decision)) throw new HttpError(400, 'Choose approve, approve the received quantity only, or reject.');
-  return performInvoiceAction(id, decision, { decidedBy, note });
+  return performInvoiceAction(id, decision, { decidedBy, note }, actor);
+}
+
+/** For /api/health: invoices read by the rules reader because the AI reader failed, still waiting for a person. */
+export async function readerFallbackStatus() {
+  const filter = { aiFallback: { $ne: null }, status: { $in: [...AWAITING_DECISION, 'failed'] } };
+  const [count, latest] = await Promise.all([
+    Invoice.countDocuments(filter),
+    Invoice.findOne({ aiFallback: { $ne: null } })
+      .sort({ 'aiFallback.at': -1 })
+      .select('aiFallback.at aiFallback.code')
+      .lean(),
+  ]);
+  return { invoicesWaiting: count, lastAt: latest?.aiFallback?.at || null, lastCode: latest?.aiFallback?.code || null };
 }
 
 // Overdue and due-soon invoices and the cash needed.
 export async function getPayables() {
-  const docs = await Invoice.find({ status: { $in: ['under_review', 'needs_review', 'on_hold', 'approved', 'payment_pending', 'payment_failed'] } })
+  const docs = await Invoice.find({ status: { $in: ['under_review', 'needs_review', 'on_hold', 'approved', 'payment_pending', 'payment_processing', 'payment_failed'] } })
     .select('status extracted.invoiceNumber extracted.vendorName extracted.total extracted.currency extracted.dueDate extracted.invoiceDate extracted.paymentTerms approval')
     .lean();
   const payments = await Payment.find({ invoiceId: { $in: docs.map((d) => d._id) } }).lean();

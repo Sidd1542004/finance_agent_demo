@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { money, day, when, STATEMENT_STATUS, LINE_STATUS } from '../format.js';
-import { Rail, Reasons, RecordList, AuditTrail, useBusy, useRecords } from '../shared.jsx';
+import { money, day, when, hasRole, STATEMENT_STATUS, LINE_STATUS } from '../format.js';
+import { Rail, Reasons, RecordList, AuditTrail, RoleNote, useBusy, useRecords } from '../shared.jsx';
 
 const OPEN = ['suggested', 'exception', 'unmatched'];
 
-export default function ReconciliationView({ onError }) {
+export default function ReconciliationView({ user, onError }) {
+  // Adding statements and deciding lines: payers (as on the server).
+  const canAct = hasRole(user, 'payer');
   const records = useRecords(api.statements, api.statement, onError);
   const [busy, run] = useBusy(onError);
   const [sample, setSample] = useState(null);
@@ -45,14 +47,22 @@ export default function ReconciliationView({ onError }) {
   return (
     <div className="layout">
       <aside className="side">
-        <AddStatement
-          sample={sample}
-          busy={busy === 'process'}
-          disabled={Boolean(busy)}
-          onSample={() => process(() => api.processStatementSample(sample.id))}
-          onFile={(file) => process(() => api.processStatementFile(file))}
-          onText={(text) => process(() => api.processStatementText(text))}
-        />
+        {canAct ? (
+          <AddStatement
+            sample={sample}
+            busy={busy === 'process'}
+            disabled={Boolean(busy)}
+            onSample={() => process(() => api.processStatementSample(sample.id))}
+            onFile={(file) => process(() => api.processStatementFile(file))}
+            onText={(text) => process(() => api.processStatementText(text))}
+            onSimBank={() => process(async () => api.processStatementText(await api.simStatementCsv()))}
+          />
+        ) : (
+          <section className="card add">
+            <h2>Add a bank statement</h2>
+            <RoleNote role="payer" what="Reconciling a bank statement" />
+          </section>
+        )}
         <section className="card">
           <h2>Statements</h2>
           <RecordList
@@ -73,6 +83,7 @@ export default function ReconciliationView({ onError }) {
             data={records.detail}
             fresh={records.freshId === records.detail.statement._id}
             busy={busy}
+            canAct={canAct}
             onResolve={resolve}
             onRerun={() => process(() => api.rerunStatement(records.detail.statement._id))}
           />
@@ -96,7 +107,7 @@ export default function ReconciliationView({ onError }) {
   );
 }
 
-function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
+function AddStatement({ sample, busy, disabled, onSample, onFile, onText, onSimBank }) {
   const [pasting, setPasting] = useState(false);
   const [text, setText] = useState('');
   return (
@@ -111,6 +122,11 @@ function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
       <button className="btn btn-primary btn-block" disabled={disabled || !sample} onClick={onSample}>
         {busy ? 'Reconciling…' : 'Reconcile the sample statement'}
       </button>
+      {onSimBank && (
+        <button className="btn btn-outline btn-block" disabled={disabled} onClick={onSimBank}>
+          Reconcile the simulated bank's statement
+        </button>
+      )}
       <div className="add-alt">
         <label className={`btn btn-outline file-btn ${disabled ? 'is-disabled' : ''}`}>
           Upload a CSV
@@ -160,9 +176,8 @@ function AddStatement({ sample, busy, disabled, onSample, onFile, onText }) {
   );
 }
 
-function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
+function StatementDetail({ data, fresh, busy, canAct, onResolve, onRerun }) {
   const { statement, run } = data;
-  const [who, setWho] = useState('');
   const status = STATEMENT_STATUS[statement.status] || STATEMENT_STATUS.received;
   const lines = statement.lines || [];
   const open = lines.filter((l) => OPEN.includes(l.status));
@@ -190,19 +205,9 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
       {statement.status === 'needs_person' && (
         <section className="outcome outcome-wait" aria-labelledby="st-decision">
           <h2 id="st-decision">
-            {open.length} line{open.length === 1 ? ' needs' : 's need'} your decision
+            {open.length} line{open.length === 1 ? ' needs' : 's need'} {canAct ? 'your' : 'a payer’s'} decision
           </h2>
-          <p>Each one is marked below. Enter your name once, then decide each line.</p>
-          <div className="decision-form">
-            <div className="decision-fields">
-              <div>
-                <label className="field-label" htmlFor="st-who">
-                  Your name
-                </label>
-                <input id="st-who" type="text" value={who} onChange={(e) => setWho(e.target.value)} autoComplete="name" />
-              </div>
-            </div>
-          </div>
+          {canAct ? <p>Each one is marked below. Your decisions are recorded under your account.</p> : <RoleNote role="payer" what="Matching or dismissing a bank line" />}
         </section>
       )}
 
@@ -220,11 +225,15 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
           <h2>The agent could not reconcile this statement</h2>
           <Reasons reasons={reasons} />
           <p className="outcome-note">No payments were marked as paid.</p>
-          <div className="decision-actions">
-            <button className="btn btn-primary" disabled={working} onClick={onRerun}>
-              {busy === 'process' ? 'Reconciling…' : 'Reconcile again'}
-            </button>
-          </div>
+          {canAct ? (
+            <div className="decision-actions">
+              <button className="btn btn-primary" disabled={working} onClick={onRerun}>
+                {busy === 'process' ? 'Reconciling…' : 'Reconcile again'}
+              </button>
+            </div>
+          ) : (
+            <RoleNote role="payer" what="Reconciling a statement again" />
+          )}
         </section>
       )}
 
@@ -233,7 +242,7 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
           <h2>Statement lines</h2>
           <ol className="bank-lines">
             {lines.map((line) => (
-              <BankLine key={line.n} line={line} who={who} canDecide={statement.status === 'needs_person'} busy={busy} onResolve={onResolve} />
+              <BankLine key={line.n} line={line} canDecide={canAct && statement.status === 'needs_person'} busy={busy} onResolve={onResolve} />
             ))}
           </ol>
         </section>
@@ -280,7 +289,7 @@ function StatementDetail({ data, fresh, busy, onResolve, onRerun }) {
   );
 }
 
-function BankLine({ line, who, canDecide, busy, onResolve }) {
+function BankLine({ line, canDecide, busy, onResolve }) {
   const [note, setNote] = useState('');
   const status = LINE_STATUS[line.status] || LINE_STATUS.unmatched;
   const isOpen = OPEN.includes(line.status);
@@ -322,15 +331,11 @@ function BankLine({ line, who, canDecide, busy, onResolve }) {
             <input id={`note-${line.n}`} type="text" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
           {candidate && (
-            <button
-              className="btn btn-primary"
-              disabled={working || !who.trim() || (needsNote && !note.trim())}
-              onClick={() => onResolve(line.n, { action: 'confirm', decidedBy: who, note })}
-            >
+            <button className="btn btn-primary" disabled={working || (needsNote && !note.trim())} onClick={() => onResolve(line.n, { action: 'confirm', note })}>
               Match to {candidate.invoiceNumber}
             </button>
           )}
-          <button className="btn btn-outline" disabled={working || !who.trim() || !note.trim()} onClick={() => onResolve(line.n, { action: 'dismiss', decidedBy: who, note })}>
+          <button className="btn btn-outline" disabled={working || !note.trim()} onClick={() => onResolve(line.n, { action: 'dismiss', note })}>
             Dismiss line
           </button>
         </div>

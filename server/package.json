@@ -10,9 +10,15 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "seed": "node src/seed/seed.js",
-    "test": "node --test"
+    "test": "node --test",
+    "create-admin": "node src/scripts/create-admin.js",
+    "migrate": "node src/scripts/migrate.js"
   },
   "dependencies": {
+    "@langchain/core": "1.2.18",
+    "@langchain/langgraph": "1.5.1",
+    "@langchain/langgraph-checkpoint": "1.2.0",
+    "@langchain/langgraph-checkpoint-mongodb": "1.5.0",
     "@napi-rs/canvas": "^1.0.11",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
@@ -21,6 +27,11 @@
     "mongoose": "^8.9.0",
     "multer": "^2.0.2",
     "nodemailer": "^10.1.7",
-    "unpdf": "^1.8.1"
+    "pdfkit": "0.20.2",
+    "unpdf": "^1.8.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3"
   }
 }

@@ -10,8 +10,12 @@ import mongoose from 'mongoose';
 import { config } from './config.js';
 import { safeUri, redactSecrets } from './safeUri.js';
 import { requireAccessPassword } from './accessAuth.js';
+import { csrfGuard, loadUser } from './auth/middleware.js';
 import { api } from './routes/api.js';
 import { seedIfEmpty } from './seed/seed.js';
+import { ensureOutboxIndexes } from './models/index.js';
+import { refreshPolicy } from './services/policySettings.js';
+import { withDeadline } from './llm/deadline.js';
 
 // Node's bundled DNS resolver (not Windows') is used for mongodb+srv://
 // lookups and can detect the wrong DNS server on some Windows machines even
@@ -55,9 +59,22 @@ export function createDatabaseGate({ connect, seed, isConnected }) {
   };
 }
 
+// Once per process, before seeding: replace the outbox's old unique queryId
+// index if it is still there (see ensureOutboxIndexes). A failure is logged,
+// not fatal: everything except storing payment notices keeps working.
+async function prepareDatabase() {
+  try {
+    const dropped = await ensureOutboxIndexes();
+    if (dropped.length) console.log(`Outbox indexes updated (replaced ${dropped.join(', ')}).`);
+  } catch (err) {
+    console.error('Could not update the outbox indexes. Run `npm run migrate --prefix server`.', redactSecrets(err?.message));
+  }
+  return seedIfEmpty();
+}
+
 export const ensureDatabase = createDatabaseGate({
   connect: () => mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 8000 }),
-  seed: seedIfEmpty,
+  seed: prepareDatabase,
   isConnected: () => mongoose.connection.readyState === 1,
 });
 
@@ -78,14 +95,30 @@ if (config.corsOrigins.length) {
 
 app.use(express.json({ limit: '1mb' }));
 
+// Every API request has a deadline (REQUEST_BUDGET_SECONDS): AI reader calls are cut
+// to the time left, so no request runs past it (llm/deadline.js, llm/groq.js).
+app.use('/api', (req, res, next) => {
+  req.deadlineAt = Date.now() + config.requestBudgetSeconds * 1000;
+  withDeadline(req.deadlineAt, next);
+});
+
+// State-changing API calls must come from the dashboard itself (CSRF). The
+// cron endpoints are called by a scheduler with CRON_SECRET instead.
+app.use('/api', csrfGuard({ allowedOrigins: config.corsOrigins, skip: [/^\/cron\//] }));
+
 app.use('/api', async (req, res, next) => {
   try {
     await ensureDatabase();
-    next();
   } catch (err) {
     console.error(`\nCould not connect to MongoDB at ${safeUri(config.mongoUri)}: ${redactSecrets(err?.message)}`);
-    res.status(503).json({ error: DATABASE_UNAVAILABLE });
+    return res.status(503).json({ error: DATABASE_UNAVAILABLE });
   }
+  // The administrator's saved policy values (sliders), laid over config.policy. Never throws.
+  await refreshPolicy();
+  next();
 });
+
+// Who is signed in (req.user), from the session cookie.
+app.use('/api', loadUser());
 
 app.use('/api', api);

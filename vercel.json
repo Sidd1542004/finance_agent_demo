@@ -6,7 +6,7 @@
   "outputDirectory": "client/dist",
   "functions": {
     "api/index.js": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "{server/node_modules/unpdf/dist/**,server/node_modules/@napi-rs/**}"
     }
   },
@@ -24,6 +24,14 @@
     {
       "path": "/api/cron/daily-summary",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/tick",
+      "schedule": "0 22 * * *"
+    },
+    {
+      "path": "/api/cron/ingest",
+      "schedule": "30 21 * * *"
     }
   ]
 }

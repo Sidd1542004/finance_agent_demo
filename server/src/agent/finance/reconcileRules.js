@@ -125,16 +125,28 @@ const sameAmount = (line, payment) => cents(Math.abs(line.amount)) === cents(pay
  * Match statement lines to payments.
  *
  * @param lines     [{ n, date, description, amount }] from parseStatement
- * @param payments  every payment: [{ id, invoiceNumber, vendorName, amount, status, paidOn, bank }]
+ * @param payments  every payment: [{ id, invoiceNumber, vendorName, amount, status, paidOn, bank, route, confirmation, submission }]
  * @param invoices  every readable invoice: [{ invoiceNumber, vendorName, status }]
  * @returns { lines, unpaid }
- *   line.status: matched   - the agent will mark the payment as paid
+ *
+ * Payments made through the simulated bank (route 'bank') are already
+ * confirmed by the bank. A line quoting the bank's transaction reference
+ * (SIMTXN-...) is matched to that payment as confirmed (`confirmed: true`):
+ * it is linked, never marked paid again and never called a double payment.
+ * Such payments are never matched on supplier name or amount alone.
+ *
+ *   line.status: matched   - the agent will mark the payment as paid (or, confirmed: link it)
  *                suggested - probably this payment, a person confirms
  *                exception - something is wrong, a person decides
  *                unmatched - nothing fits, a person decides
  *                skipped   - money in, outside this agent's job
  */
-export function matchLines(lines, allPayments, invoices) {
+const confirmedRef = (p) => p.confirmation?.txnRef || p.txnRef || null;
+const sentRef = (p) => p.submission?.txnRef || p.submissionRef || null;
+
+// `statementId`: the statement being matched (a bank-confirmed payment already
+// linked to one of its lines is the same line again, not a repeat).
+export function matchLines(lines, allPayments, invoices, { statementId = null } = {}) {
   let payments = allPayments;
   const taken = new Map(); // payment id -> line number that pays it
   const out = lines.map((l) => ({
@@ -171,12 +183,76 @@ export function matchLines(lines, allPayments, invoices) {
   // Cancelled payments never went out and can't be matched.
   payments = payments.filter((p) => p.status !== 'cancelled');
 
+  // Pass 0: the description quotes a simulated bank transaction reference.
+  for (const line of out.filter((l) => !l.status)) {
+    const p = payments.find((x) => x.route === 'bank' && [confirmedRef(x), sentRef(x)].some((ref) => ref && refInDescription(line.description, ref)));
+    if (!p) continue;
+    const ref = confirmedRef(p) || sentRef(p);
+    const who = { invoiceNumber: p.invoiceNumber, vendorName: p.vendorName };
+    if (p.status !== 'paid' || !confirmedRef(p)) {
+      set(line, {
+        ...who,
+        status: 'exception',
+        kind: p.status === 'processing' ? 'awaiting_bank_confirmation' : 'bank_not_confirmed',
+        reason:
+          p.status === 'processing'
+            ? `Quotes bank transaction ${ref} for invoice ${p.invoiceNumber}, which the bank has not confirmed yet. It is marked paid only when the bank confirms it.`
+            : `Quotes bank transaction ${ref} for invoice ${p.invoiceNumber}, which the bank did not complete (${p.status}). Check with the bank.`,
+      });
+    } else if (taken.has(p.id)) {
+      set(line, {
+        ...who,
+        status: 'exception',
+        kind: 'duplicate',
+        reason: `Line ${taken.get(p.id)} of this statement already shows bank transaction ${ref}. This line repeats it.`,
+      });
+    } else if (p.bank?.statementId && !(p.bank.date === line.date && p.bank.description === line.description && p.bank.statementId === statementId)) {
+      set(line, {
+        ...who,
+        status: 'exception',
+        kind: 'already_reconciled',
+        reason: `Bank transaction ${ref} for invoice ${p.invoiceNumber} was already reconciled on another statement. It is one payment, confirmed by the bank; nothing is paid again.`,
+      });
+    } else if (!sameAmount(line, { amount: p.confirmation?.amount ?? p.amount })) {
+      set(line, {
+        ...who,
+        status: 'exception',
+        kind: 'amount_differs',
+        reason: `The bank shows ${money(Math.abs(line.amount))}, but transaction ${ref} for invoice ${p.invoiceNumber} was confirmed for ${money(p.confirmation?.amount ?? p.amount)}.`,
+      });
+    } else {
+      taken.set(p.id, line.n);
+      set(line, {
+        ...who,
+        status: 'matched',
+        method: 'bank transaction reference',
+        kind: 'confirmed_by_bank',
+        confirmed: true,
+        paymentId: p.id,
+        reason: `Bank transaction ${ref}: invoice ${p.invoiceNumber}, already confirmed by the simulated bank.`,
+      });
+    }
+  }
+
   // Pass 1: the description quotes an invoice number.
   for (const line of out.filter((l) => !l.status)) {
     const named = payments.filter((p) => refInDescription(line.description, p.invoiceNumber));
-    const p = named.find((x) => x.status === 'queued' && !taken.has(x.id) && sameAmount(line, x)) || named[0];
+    const p = named.find((x) => x.status === 'queued' && x.route !== 'bank' && !taken.has(x.id) && sameAmount(line, x)) || named[0];
     if (p) {
       const who = { invoiceNumber: p.invoiceNumber, vendorName: p.vendorName };
+      if (p.route === 'bank') {
+        // Paid (or to be paid) through the simulated bank: only its transaction reference confirms it.
+        set(line, {
+          ...who,
+          status: 'exception',
+          kind: p.status === 'paid' ? 'check_bank_payment' : 'routed_to_bank',
+          reason:
+            p.status === 'paid'
+              ? `Invoice ${p.invoiceNumber} was paid through the simulated bank as ${confirmedRef(p)}, but this line does not quote that reference. Check it is not a second payment.`
+              : `Invoice ${p.invoiceNumber} is paid through the simulated bank and is confirmed by the bank's transaction reference, not by a statement line.`,
+        });
+        continue;
+      }
       if (p.status === 'paid' || taken.has(p.id)) {
         set(line, { ...who, status: 'exception', kind: 'duplicate', reason: alreadyPaid(line, p) });
       } else if (p.status !== 'queued') {
@@ -215,9 +291,13 @@ export function matchLines(lines, allPayments, invoices) {
     }
   }
 
+  // Passes 2 and 3 never use payments made through the simulated bank: only
+  // their transaction reference (pass 0) confirms them.
+  const manual = payments.filter((p) => p.route !== 'bank');
+
   // Pass 2: no invoice number, but the supplier's name and the amount fit.
   for (const line of out.filter((l) => !l.status)) {
-    const fits = payments.filter((p) => vendorInDescription(line.description, p.vendorName) && sameAmount(line, p));
+    const fits = manual.filter((p) => vendorInDescription(line.description, p.vendorName) && sameAmount(line, p));
     const open = fits.filter((p) => p.status === 'queued' && !taken.has(p.id));
     if (open.length === 1) {
       const p = open[0];
@@ -245,7 +325,7 @@ export function matchLines(lines, allPayments, invoices) {
 
   // Pass 3: only the amount fits. Never matched without a person.
   for (const line of out.filter((l) => !l.status)) {
-    const open = payments.filter((p) => p.status === 'queued' && !taken.has(p.id) && sameAmount(line, p));
+    const open = manual.filter((p) => p.status === 'queued' && !taken.has(p.id) && sameAmount(line, p));
     if (open.length === 1) {
       const p = open[0];
       set(line, {

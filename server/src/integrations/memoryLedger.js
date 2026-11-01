@@ -33,8 +33,9 @@ const summary = (d) => ({
 const between = (list, { start, end } = {}) => list.filter((x) => (!start || x.createdAt >= start) && (!end || x.createdAt < end));
 const event = (e) => ({ at: new Date().toISOString(), ...e });
 
-export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsReceipts = [], invoices = [], queries = [], statements = [] } = {}) {
+export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsReceipts = [], invoices = [], queries = [], statements = [], beneficiaryChanges = [] } = {}) {
   const payments = [];
+  const jobs = [];
   const messages = [];
   const hints = [];
   // The audit log: entries are frozen when added and never changed or removed.
@@ -45,7 +46,16 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     auditEvents.push(Object.freeze({ ...e, at: e.at.toISOString() }));
   };
   const auditPayment = (p, from, h) =>
-    audit({ subjectKind: 'payment', subjectId: p.id, actor: h?.by || 'System', action: h?.event || 'changed', from, to: p.status, detail: h?.detail || null });
+    audit({
+      subjectKind: 'payment',
+      subjectId: p.id,
+      actor: h?.by || 'System',
+      actorId: h?.byId || null,
+      action: h?.event || 'changed',
+      from,
+      to: p.status,
+      detail: h?.detail || null,
+    });
   const auditInvoice = (id, e) =>
     audit({ subjectKind: 'invoice', subjectId: id, ...e, ...(e.changes?.length ? { detail: [e.detail, `Changes: ${JSON.stringify(e.changes)}`].filter(Boolean).join(' ') } : {}) });
   const inv = (id) => invoices.find((i) => i.id === id) || null;
@@ -59,10 +69,12 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
 
   return {
     payments,
+    jobs,
     invoices,
     messages,
     hints,
     auditEvents,
+    beneficiaryChanges,
 
     // ----- the audit log (append only) -----
     async recordAudit(entry) {
@@ -78,6 +90,43 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     },
     async findVendorByAbn(abn) {
       return vendors.find((v) => v.abn === abn) || null;
+    },
+    async beneficiaryFor(abn) {
+      const key = String(abn ?? '').replace(/[^0-9]/g, '');
+      return { vendor: vendors.find((v) => v.abn === key) || null, pending: beneficiaryChanges.some((c) => c.vendorAbn === key && c.status === 'pending') };
+    },
+
+    // ----- payment execution jobs (one active job per payment) -----
+    async createPaymentJob({ paymentId, invoiceId, runAt, scheduleVersion, by = 'System' }) {
+      if (jobs.some((j) => j.paymentId === paymentId && j.active)) {
+        const err = new Error('duplicate key');
+        err.code = 11000;
+        throw err;
+      }
+      const job = { id: `job-${nextId++}`, paymentId, invoiceId, runAt, scheduleVersion, status: 'pending', active: true, attempts: 0, history: [event({ event: 'created', by })] };
+      jobs.push(job);
+      return job;
+    },
+    async cancelPaymentJobs(paymentId, { status = 'cancelled', by = 'System', reason = null } = {}) {
+      let n = 0;
+      for (const j of jobs.filter((x) => x.paymentId === paymentId && x.active)) {
+        Object.assign(j, { status, active: false });
+        j.history.push(event({ event: status, by, reason }));
+        n += 1;
+      }
+      return n;
+    },
+    async ensurePaymentJob(payment) {
+      if (payment.route !== 'bank' || payment.status !== 'queued' || jobs.some((j) => j.paymentId === payment.id && j.active)) return null;
+      return this.createPaymentJob({
+        paymentId: payment.id,
+        invoiceId: payment.invoiceId,
+        runAt: payment.scheduledAt || new Date(),
+        scheduleVersion: payment.scheduleVersion || 1,
+      });
+    },
+    async listPaymentJobs(paymentId) {
+      return jobs.filter((j) => j.paymentId === paymentId);
     },
     async findPurchaseOrder(poNumber) {
       return purchaseOrders.find((p) => p.poNumber === String(poNumber).toUpperCase()) || null;
@@ -174,7 +223,9 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
     // Change the payment only if its status is one of `from`. Returns null if not.
     async updatePayment(id, from, set, history) {
       const p = payments.find((x) => x.id === id);
-      if (!p || !from.includes(p.status)) return null;
+      const statuses = Array.isArray(from) ? from : from.status;
+      if (!p || !statuses.includes(p.status)) return null;
+      if (!Array.isArray(from) && (p.scheduleVersion || 1) !== from.scheduleVersion) return null;
       const before = p.status;
       Object.assign(p, set);
       if (history) (p.history ||= []).push(event(history));
@@ -187,7 +238,7 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
         ? ['same supplier and invoice number', 'identical document']
         : ['same supplier and invoice number', 'same supplier, total and invoice date', 'identical document'];
       const others = invoices.filter((i) => i.id !== invoice.id && sharedSignals(invoice.fingerprints, i.fingerprints).some((s) => blocking.includes(s)));
-      return payments.filter((p) => others.some((o) => o.id === p.invoiceId) && ['queued', 'paid'].includes(p.status));
+      return payments.filter((p) => others.some((o) => o.id === p.invoiceId) && ['queued', 'processing', 'paid'].includes(p.status));
     },
 
     // ----- supplier hints (see agent/finance/supplierHints.js) -----
@@ -240,15 +291,23 @@ export function createMemoryLedger({ vendors = [], purchaseOrders = [], goodsRec
       });
       return { ...p };
     },
+    async linkBankLine(paymentId, bank) {
+      const p = payments.find((x) => x.id === paymentId && x.status === 'paid' && x.route === 'bank' && (!x.bank || x.bank.statementId === bank.statementId));
+      if (!p) return null;
+      p.bank = bank;
+      auditPayment(p, 'paid', { event: 'reconciled', by: 'Bank reconciliation' });
+      return { ...p };
+    },
     async unmarkPaid(paymentId, statementId) {
-      const p = payments.find((x) => x.id === paymentId && x.status === 'paid' && x.bank?.statementId === statementId);
+      const p = payments.find((x) => x.id === paymentId && x.status === 'paid' && x.route !== 'bank' && x.bank?.statementId === statementId);
       if (!p) return;
       Object.assign(p, { status: 'queued', paidOn: null, bank: null, recordedBy: null });
       auditPayment(p, 'paid', { event: 'unmatched', by: 'Bank reconciliation' });
       moveInvoice(p.invoiceId, 'payment_completed', 'payment_pending', { actor: 'Bank reconciliation', action: 'payment_unmatched', reason: 'The bank match was undone.' });
     },
     async revertStatement(statementId) {
-      for (const p of payments.filter((x) => x.status === 'paid' && x.bank?.statementId === statementId)) {
+      for (const p of payments.filter((x) => x.status === 'paid' && x.route === 'bank' && x.bank?.statementId === statementId)) p.bank = null;
+      for (const p of payments.filter((x) => x.status === 'paid' && x.route !== 'bank' && x.bank?.statementId === statementId)) {
         Object.assign(p, { status: 'queued', paidOn: null, bank: null, recordedBy: null });
         auditPayment(p, 'paid', { event: 'unmatched', by: 'Bank reconciliation' });
         moveInvoice(p.invoiceId, 'payment_completed', 'payment_pending', { actor: 'Bank reconciliation', action: 'payment_unmatched', reason: 'The bank match was undone.' });

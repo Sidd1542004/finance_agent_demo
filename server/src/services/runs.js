@@ -7,9 +7,10 @@ import { sampleLedger } from '../integrations/sampleLedger.js';
 import { bankLineId } from '../agent/finance/audit.js';
 
 export class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, extra = null) {
     super(message);
     this.status = status;
+    this.extra = extra;
   }
 }
 
@@ -74,20 +75,6 @@ export async function addHumanStep(id, summary, status) {
   run.steps = [...run.steps, { stage: 'human', status: 'done', summary, detail: null, ms: 0, at: new Date().toISOString() }];
   if (status) run.status = status;
   await run.save();
-}
-
-// Name and note typed by the person deciding.
-export function whoAndWhy({ decidedBy, note }) {
-  const who = String(decidedBy || '')
-    .trim()
-    .slice(0, 120);
-  if (!who) throw new HttpError(400, 'Enter your name so the decision is on record.');
-  return {
-    who,
-    why: String(note || '')
-      .trim()
-      .slice(0, 1000),
-  };
 }
 
 // If even the escalate stage failed, do not leave the record looking fine.

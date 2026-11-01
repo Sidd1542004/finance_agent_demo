@@ -208,6 +208,8 @@ function finish(extracted, text, meta, corrected = new Map()) {
   const raw = Math.max(0, Math.min(1, Number(meta.confidence) || 0));
   let confidence = raw;
   const notes = [];
+  // Read by the rules reader because the AI reader could not be used (see invoiceAgent.js).
+  if (meta.fallback) notes.push(`The AI reader was unavailable (${meta.fallback.reason}), so the basic rules reader was used.`);
   if (meta.notes) notes.push(String(meta.notes).trim());
   notes.push(...guardAbns(extracted, text, corrected));
   const exempt = new Set([...corrected.keys()].map((f) => GROUNDING_LABEL[f]).filter(Boolean));
@@ -241,6 +243,7 @@ function finish(extracted, text, meta, corrected = new Map()) {
       // The reader's own confidence and notes, so corrections can be laid over the reading again.
       reader: { confidence: raw, notes: meta.notes ? String(meta.notes).trim() || null : null },
       ...(meta.hints ? { hints: meta.hints } : {}),
+      ...(meta.fallback ? { fallback: meta.fallback } : {}),
       ...(corrections.length ? { corrected: corrections } : {}),
     },
   };
@@ -262,7 +265,15 @@ export function applyCorrections(reading, corrections, text) {
   return finish(
     extracted,
     text,
-    { method: x.method, model: x.model, input: x.input, hints: x.hints, confidence: x.reader?.confidence ?? x.rawConfidence ?? x.confidence, notes: x.reader?.notes ?? null },
+    {
+      method: x.method,
+      model: x.model,
+      input: x.input,
+      hints: x.hints,
+      fallback: x.fallback,
+      confidence: x.reader?.confidence ?? x.rawConfidence ?? x.confidence,
+      notes: x.reader?.notes ?? null,
+    },
     latest,
   );
 }
@@ -320,7 +331,8 @@ function splitBillTo(rows) {
   return { rows: out, customer };
 }
 
-export function extractWithRules(text) {
+// `fallback`: { code, reason, at } when the AI reader failed and this reader stands in for it.
+export function extractWithRules(text, { fallback = null } = {}) {
   const allRows = text.split(/\r?\n/).map((l) => l.trim());
   const { rows, customer } = splitBillTo(allRows);
   const supplierText = rows.join('\n');
@@ -394,6 +406,7 @@ export function extractWithRules(text) {
 
   return finish(extracted, text, {
     method: 'rules',
+    fallback,
     confidence,
     notes: found === wanted.length ? null : 'The basic pattern reader could not find every field. Set GROQ_API_KEY to use the AI reader.',
   });
@@ -453,11 +466,22 @@ Rules:
 - Dates on Australian invoices are day first.
 - Lower the confidence if the text is garbled, truncated or ambiguous.`;
 
-export async function extractWithGroq(text, { apiKey, model, fetchImpl, hints = [] } = {}) {
+/**
+ * A reading with nothing in it: no supplier, invoice number, total or lines.
+ * From the AI reader this is invalid output, not an invoice (see invoiceAgent.js).
+ */
+export const isEmptyReading = (reading) => {
+  const e = reading?.extracted || {};
+  return !e.vendorName && !e.invoiceNumber && (e.total === null || e.total === undefined) && !(e.lines || []).length;
+};
+
+// `retries`: for the tests (default: groq.js RETRY).
+export async function extractWithGroq(text, { apiKey, model, fetchImpl, hints = [], retries } = {}) {
   const raw = await groqJson({
     apiKey,
     model,
     fetchImpl,
+    ...(retries !== undefined ? { retries } : {}),
     system: SYSTEM_PROMPT,
     user: `Invoice text:\n"""\n${text.slice(0, MAX_CHARS)}\n"""${hintsPrompt(hints)}`,
   });

@@ -136,6 +136,12 @@ code {
   color: #f3e2a6;
 }
 
+/* Invoices read by the rules reader because the AI reader failed */
+.reader-rules {
+  border-color: #f2b8b5;
+  color: #ffd9d6;
+}
+
 /* ---------- Buttons ---------- */
 
 .btn {
@@ -228,6 +234,10 @@ code {
   font-weight: 500;
 }
 
+.banner-ok {
+  background: var(--ok);
+}
+
 .banner-close {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.6);
@@ -253,6 +263,7 @@ code {
 
 .side {
   display: grid;
+  grid-template-columns: minmax(0, 1fr); /* a long line inside a card never widens the column */
   gap: 16px;
   min-width: 0;
 }
@@ -1852,4 +1863,206 @@ a.btn {
   color: var(--gold-ink);
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* ---------- Accounts, payments, suppliers, admin ---------- */
+
+input[type='email'],
+input[type='password'],
+input[type='time'],
+input[type='number'],
+input[type='date'] {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #b8c2d0;
+  border-radius: var(--r);
+  padding: 9px 10px;
+  min-height: 40px;
+  font: inherit;
+}
+
+.login-wrap {
+  display: grid;
+  place-items: start center;
+  padding: 48px 16px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  display: grid;
+  gap: 8px;
+}
+
+.login-card h1 {
+  font: 800 22px/1.2 var(--display);
+  color: var(--navy);
+}
+
+.login-card .field-label {
+  margin-top: 6px;
+}
+
+.whoami {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+}
+
+.whoami-name {
+  font-weight: 700;
+}
+
+.whoami-roles {
+  color: var(--on-navy-muted);
+  font-size: 13px;
+}
+
+.sub-head {
+  font: 700 14px/1.3 var(--display);
+  color: var(--navy);
+  margin: 16px 0 10px;
+}
+
+.notices {
+  display: grid;
+  gap: 10px;
+}
+
+.notice {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.notice summary {
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.notice .letter {
+  margin-top: 8px;
+}
+
+.admin {
+  display: grid;
+  gap: 24px;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ingestion-provider + .ingestion-provider {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+}
+
+.ingestion-error {
+  color: var(--err);
+}
+
+/* A button that reads as a link, inside a sentence or a table cell. */
+.inline-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--blue);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inline-link:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.role-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 10px;
+}
+
+@media (max-width: 980px) {
+  .admin {
+    padding: 16px;
+  }
+
+  .whoami-roles {
+    display: none;
+  }
+}
+
+/* Five payment statuses in the 340px side column: wrap instead of overflowing. */
+.tabs-wrap {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+.tabs-wrap .tab {
+  padding: 6px 8px;
+}
+
+/* Agent policy sliders (Admin) */
+.policy-row {
+  margin: 1rem 0;
+}
+.policy-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.policy-value {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+.policy-moved {
+  color: var(--gold-ink);
+}
+.policy-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--navy);
+}
+.policy-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The original invoice PDF, viewed in the app */
+.pdf-frame {
+  display: block;
+  width: 100%;
+  height: min(80vh, 900px);
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-alt);
+}
+.original-pdf a.btn {
+  text-decoration: none;
+}
+
+/* The invoice's Documents row */
+.documents-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.document-view .decision-actions {
+  align-items: center;
 }

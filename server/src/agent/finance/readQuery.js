@@ -3,8 +3,15 @@
 // Two readers, as for invoices: Groq when GROQ_API_KEY is set, otherwise a
 // keyword reader. Both go through the same grounding check: an invoice number
 // the reader reports must literally appear in the email.
+//
+// When the AI reader is configured but fails (unavailable, rate limited, timed
+// out, a rejected key, an answer that is not JSON or names no valid intent),
+// the keyword reader reads the email for the person, and the reading carries
+// `fallback: { code, reason, at }` with the same codes as the invoice reader's
+// fallback (llm/groq.js GroqError). Such an email is never answered
+// automatically (queryRules.js ai_reader_unavailable).
 
-import { groqJson } from '../../llm/groq.js';
+import { groqJson, GroqError } from '../../llm/groq.js';
 import { INTENTS, mentionsBankDetails } from './queryRules.js';
 
 const MAX_CHARS = 8000;
@@ -95,19 +102,40 @@ How to choose the intent:
 - "other": anything else, or more than one of the above.
 If you are unsure, choose "other" and lower the confidence. Never invent an invoice number.`;
 
-export async function readWithGroq({ subject, body }, { apiKey, model, fetchImpl } = {}) {
+// `retries`: for the tests (default: groq.js RETRY).
+export async function readWithGroq({ subject, body }, { apiKey, model, fetchImpl, retries } = {}) {
   const text = `${subject || ''}\n${body || ''}`;
   const raw = await groqJson({
     apiKey,
     model,
     fetchImpl,
+    ...(retries !== undefined ? { retries } : {}),
     system: QUERY_PROMPT,
     user: `Subject: ${subject || '(none)'}\n\nEmail:\n"""\n${String(body || '').slice(0, MAX_CHARS)}\n"""`,
   });
+  // An answer that does not say what the email is about is not a reading.
+  if (!INTENTS.includes(raw.intent)) throw new GroqError('bad_output', 'The AI reader did not say what the email is about.');
   return finish(raw, text, { method: 'groq', model, confidence: raw.confidence, notes: raw.notes });
 }
 
-export function createQueryReader({ groqApiKey, groqModel }) {
-  if (groqApiKey) return (email) => readWithGroq(email, { apiKey: groqApiKey, model: groqModel });
+/** The AI reader failed: the keyword reader's reading, marked so the email goes to a person with the reason. */
+export function fallbackReading(email, err) {
+  const fallback = { code: err?.code || 'error', reason: String(err?.message || err).slice(0, 300), at: new Date().toISOString() };
+  const r = readWithRules(email);
+  const notes = [`The AI reader was unavailable (${fallback.reason}), so the keyword reader was used.`, r.reading.notes].filter(Boolean).join(' ');
+  return { understood: r.understood, reading: { ...r.reading, notes, fallback } };
+}
+
+// `options` (fetchImpl, retries): for the tests.
+export function createQueryReader({ groqApiKey, groqModel }, { fetchImpl, retries } = {}) {
+  if (groqApiKey) {
+    return async (email) => {
+      try {
+        return await readWithGroq(email, { apiKey: groqApiKey, model: groqModel, fetchImpl, retries });
+      } catch (err) {
+        return fallbackReading(email, err);
+      }
+    };
+  }
   return async (email) => readWithRules(email);
 }

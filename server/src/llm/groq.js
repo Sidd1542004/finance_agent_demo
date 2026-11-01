@@ -4,8 +4,11 @@
 // Busy or briefly unavailable (429, 5xx, a network error or a timeout): tried
 // again up to twice, waiting as long as Groq's Retry-After asks (capped), or a
 // short backoff. A bad request or a bad key (400, 401, other 4xx) is never
-// retried. Everything, waits included, fits in `budgetMs`, which stays under
-// Vercel's 60-second function limit with room for the rest of the request.
+// retried. Everything, waits included, fits in `budgetMs`, and never past the
+// request's own deadline (llm/deadline.js), less a margin for the rest of the
+// request: with too little time left, a call fails at once (code "timeout").
+
+import { timeLeftMs } from './deadline.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -13,6 +16,8 @@ export const RETRY = { retries: 2, budgetMs: 45000, baseDelayMs: 600, maxDelayMs
 
 // A retry is only started if at least this much of the budget is left for it.
 const MIN_ATTEMPT_MS = 5000;
+// Kept free at the end of the request for what comes after the call (saving, answering).
+export const REQUEST_MARGIN_MS = 3000;
 
 const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -28,7 +33,28 @@ export function retryAfterMs(value, now = Date.now()) {
 const retryable = (status) => status === 429 || (status >= 500 && status <= 599);
 
 /**
+ * A Groq call that did not give a usable answer. `code` says why, for the
+ * invoice reader's fallback and its explanation:
+ *   not_configured  no GROQ_API_KEY        auth         the key was rejected (401)
+ *   rate_limit      429 after the retries  server       5xx after the retries
+ *   timeout         no answer in time      network      Groq could not be reached
+ *   bad_request     another 4xx            bad_output   the answer was not a JSON object
+ */
+export class GroqError extends Error {
+  constructor(code, message) {
+    super(message); // still shown as "Error: ...", as before
+    this.code = code;
+  }
+}
+
+/**
  * Send one chat request. `body` is the request body without the model.
+ *
+ * `onUsage(usage, { model, purpose })`, optional: called once when Groq
+ * answers, before the answer is checked (tokens are spent even when it is not
+ * valid JSON). `usage` is Groq's object ({ prompt_tokens, completion_tokens,
+ * total_tokens, ... }), or null if the answer had none. `purpose` is passed
+ * through as given. An error thrown (or rejected) by the callback is ignored.
  * @returns the parsed object from the message content
  */
 export async function groqChat({
@@ -41,15 +67,21 @@ export async function groqChat({
   budgetMs = RETRY.budgetMs,
   sleep = sleepFor,
   now = Date.now,
+  onUsage = null,
+  purpose = null,
 }) {
-  if (!apiKey) throw new Error('GROQ_API_KEY is not set.');
+  if (!apiKey) throw new GroqError('not_configured', 'GROQ_API_KEY is not set.');
 
-  const deadline = now() + budgetMs;
+  // The request's deadline caps the budget: no call (or retry) waits past it.
+  const usable = Math.min(budgetMs, timeLeftMs(now()) - REQUEST_MARGIN_MS);
+  if (usable < MIN_ATTEMPT_MS) throw new GroqError('timeout', 'There was not enough time left in this request for the AI reader.');
+  const deadline = now() + usable;
   let attempt = 0;
   for (;;) {
     const left = deadline - now();
     let res = null;
     let failure = null; // a message for an error that may be retried
+    let failureCode = null;
     let wait = null;
     try {
       res = await fetchImpl(GROQ_URL, {
@@ -60,6 +92,7 @@ export async function groqChat({
       });
     } catch (err) {
       failure = `Could not reach Groq (${err?.name === 'TimeoutError' ? 'timed out' : err?.message || 'network error'}).`;
+      failureCode = err?.name === 'TimeoutError' ? 'timeout' : 'network';
     }
 
     if (res && !res.ok) {
@@ -69,38 +102,50 @@ export async function groqChat({
       } catch {
         /* body was not JSON */
       }
-      if (res.status === 401) throw new Error('Groq rejected the API key. Check GROQ_API_KEY in server/.env.');
+      if (res.status === 401) throw new GroqError('auth', 'Groq rejected the API key. Check GROQ_API_KEY in server/.env.');
       const text =
         res.status === 429 ? 'Groq rate limit reached. Wait a moment and process the invoice again.' : `Groq returned an error (${res.status})${message ? `: ${message}` : '.'}`;
-      if (!retryable(res.status)) throw new Error(text);
+      if (!retryable(res.status)) throw new GroqError('bad_request', text);
       failure = text;
+      failureCode = res.status === 429 ? 'rate_limit' : 'server';
       wait = retryAfterMs(res.headers?.get?.('retry-after'));
     }
 
-    if (!failure) return readContent(res);
+    if (!failure) return readContent(res, onUsage && ((usage) => reportUsage(onUsage, usage, { model, purpose })));
 
     // Try again only if there is time for the wait and a reasonable attempt after it.
     attempt += 1;
     const delay = Math.min(RETRY.maxDelayMs, wait ?? RETRY.baseDelayMs * 2 ** (attempt - 1) + Math.floor(Math.random() * 200));
-    if (attempt > retries || now() + delay + MIN_ATTEMPT_MS > deadline) throw new Error(failure);
+    if (attempt > retries || now() + delay + MIN_ATTEMPT_MS > deadline) throw new GroqError(failureCode, failure);
     await sleep(delay);
   }
 }
 
-async function readContent(res) {
+// Token accounting must never break the call it accounts for.
+function reportUsage(onUsage, usage, meta) {
+  try {
+    const done = onUsage(usage && typeof usage === 'object' ? usage : null, meta);
+    if (typeof done?.catch === 'function') done.catch(() => {});
+  } catch {
+    /* ignored */
+  }
+}
+
+async function readContent(res, usageSeen = null) {
   let data;
   try {
     data = await res.json();
   } catch (err) {
-    throw new Error(`Could not read Groq's response (${err?.message || 'network error'}).`);
+    throw new GroqError('network', `Could not read Groq's response (${err?.message || 'network error'}).`);
   }
+  if (usageSeen) usageSeen(data?.usage);
   const content = data?.choices?.[0]?.message?.content;
   try {
     const parsed = JSON.parse(content);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
     return parsed;
   } catch {
-    throw new Error('The AI reader returned an answer that was not valid JSON.');
+    throw new GroqError('bad_output', 'The AI reader returned an answer that was not valid JSON.');
   }
 }
 

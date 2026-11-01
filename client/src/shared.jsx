@@ -2,6 +2,17 @@
 // record list on the left, and two small hooks.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ROLE_LABEL } from './format.js';
+
+// Shown in place of controls the signed-in person's roles do not allow. The
+// server refuses those requests anyway; this only explains why nothing is there.
+export function RoleNote({ role, what }) {
+  return (
+    <p className="hint role-note">
+      {what} needs the {ROLE_LABEL[role] || role} role.
+    </p>
+  );
+}
 
 // The six stages every agent runs, in order.
 export const STAGES = [

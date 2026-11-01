@@ -56,6 +56,7 @@ export function createReconciliationAgent({ ledger, explain, save }) {
           state.lines,
           payments,
           invoices.filter((i) => i.status !== 'failed' && i.invoiceNumber),
+          { statementId: statement.id },
         );
         state.lines = lines;
 
@@ -87,7 +88,9 @@ export function createReconciliationAgent({ ledger, explain, save }) {
         const { statement } = state.input;
         let done = 0;
         for (const line of state.lines.filter((l) => l.status === 'matched')) {
-          const paid = await ledger.markPaid(line.paymentId, { statementId: statement.id, line: line.n, date: line.date, description: line.description });
+          const bankLine = { statementId: statement.id, line: line.n, date: line.date, description: line.description };
+          // Already confirmed by the simulated bank: link the line, never mark it paid again.
+          const paid = line.confirmed ? await ledger.linkBankLine(line.paymentId, bankLine) : await ledger.markPaid(line.paymentId, bankLine);
           if (paid) done += 1;
           else {
             Object.assign(line, {
@@ -110,11 +113,20 @@ export function createReconciliationAgent({ ledger, explain, save }) {
       // 5. Verify: the payments marked as paid must be exactly the matched lines.
       async verify(state) {
         const { statement } = state.input;
-        const matched = state.lines.filter((l) => l.status === 'matched');
-        const paid = (await ledger.listPayments()).filter((p) => p.status === 'paid' && p.bank?.statementId === statement.id);
+        const all = state.lines.filter((l) => l.status === 'matched');
+        const matched = all.filter((l) => !l.confirmed);
+        const confirmed = all.filter((l) => l.confirmed);
+        const payments = await ledger.listPayments();
+        const paid = payments.filter((p) => p.status === 'paid' && p.route !== 'bank' && p.bank?.statementId === statement.id);
+        const linked = payments.filter((p) => p.status === 'paid' && p.route === 'bank' && p.bank?.statementId === statement.id);
         const lineTotal = sum(matched, (l) => Math.abs(l.amount));
         const paidTotal = sum(paid, (p) => p.amount);
-        const ok = paid.length === matched.length && cents(lineTotal) === cents(paidTotal) && matched.every((l) => paid.some((p) => p.id === l.paymentId && p.bank.line === l.n));
+        const ok =
+          paid.length === matched.length &&
+          cents(lineTotal) === cents(paidTotal) &&
+          matched.every((l) => paid.some((p) => p.id === l.paymentId && p.bank.line === l.n)) &&
+          linked.length === confirmed.length &&
+          confirmed.every((l) => linked.some((p) => p.id === l.paymentId && p.bank.line === l.n));
         if (!ok) {
           await ledger.revertStatement(statement.id);
           throw new Error(

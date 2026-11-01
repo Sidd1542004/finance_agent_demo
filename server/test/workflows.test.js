@@ -25,6 +25,7 @@ import {
   isMonth,
 } from '../src/agent/finance/reportFigures.js';
 import { createInvoiceActions } from '../src/services/invoiceActions.js';
+import { person } from '../test-support/actors.js';
 import { receivedOnly } from '../src/agent/finance/rules.js';
 import { createMemoryLedger } from '../src/integrations/memoryLedger.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleInvoices, renderInvoiceText, sampleQueries, findSampleQuery, sampleStatement } from '../src/seed/data.js';
@@ -54,12 +55,13 @@ async function demoMonth() {
     byId[sample.id] ??= invoice;
   }
   const actions = createInvoiceActions({ store: ledger, policy, rerun: async () => {} });
-  const by = { decidedBy: 'Priya N' };
-  await actions.perform(byId.clean.id, 'approve', by);
-  await actions.perform(byId.clean.id, 'schedule_payment', { decidedBy: 'Sam K', method: 'EFT' });
-  await actions.perform(byId['quantity-variance'].id, 'approve_received', by);
-  await actions.perform(byId['quantity-variance'].id, 'schedule_payment', { decidedBy: 'Sam K', method: 'EFT' });
-  await actions.perform(byId['gst-error'].id, 'reject', { ...by, note: 'GST is wrong.' });
+  const priya = person('Priya N', ['approver']);
+  const sam = person('Sam K', ['payer']);
+  await actions.perform(byId.clean.id, 'approve', {}, priya);
+  await actions.perform(byId.clean.id, 'schedule_payment', { method: 'EFT' }, sam);
+  await actions.perform(byId['quantity-variance'].id, 'approve_received', {}, priya);
+  await actions.perform(byId['quantity-variance'].id, 'schedule_payment', { method: 'EFT' }, sam);
+  await actions.perform(byId['gst-error'].id, 'reject', { note: 'GST is wrong.' }, priya);
   return { ledger, invoices, queries, statements, byId, actions };
 }
 

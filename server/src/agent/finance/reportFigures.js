@@ -30,6 +30,7 @@ export const monthOf = (date, tz = businessTimeZone()) => monthIn(date, tz);
 // report needs the opposite: why the invoice was held.
 const HELD_REASON = {
   read_from_image: 'Read from a scan or photo: key fields to confirm',
+  ai_reader_unavailable: 'AI reader unavailable: read by the rules reader',
   required_fields: 'Details missing from the invoice',
   reader_confidence: 'Invoice could not be read with confidence',
   jurisdiction: 'Tax rules could not be identified',
@@ -158,7 +159,7 @@ export function buildFigures({ month, invoices: received, payments, queries, sta
   const withStatus = (s) => invoices.filter((i) => i.status === s);
 
   const inStatus = (list) => invoices.filter((i) => list.includes(i.status));
-  const approved = inStatus(['approved', 'payment_pending', 'payment_completed', 'payment_failed']);
+  const approved = inStatus(['approved', 'payment_pending', 'payment_processing', 'payment_completed', 'payment_failed']);
   const waiting = inStatus(['under_review', 'needs_review', 'on_hold']);
   const rejected = withStatus('rejected');
   const cancelled = withStatus('cancelled');
@@ -288,9 +289,11 @@ export function buildFigures({ month, invoices: received, payments, queries, sta
     },
     openItems,
     // For the consistency check only.
-    scheduledInvoices: inStatus(['payment_pending', 'payment_completed']).length,
+    scheduledInvoices: inStatus(['payment_pending', 'payment_processing', 'payment_completed']).length,
     livePayments: invoices.filter(
-      (i) => ['payment_pending', 'payment_completed'].includes(i.status) && pay.some((p) => p.invoiceId === i.id && ['queued', 'paid'].includes(p.status)),
+      (i) =>
+        ['payment_pending', 'payment_processing', 'payment_completed'].includes(i.status) &&
+        pay.some((p) => p.invoiceId === i.id && ['queued', 'processing', 'paid'].includes(p.status)),
     ).length,
   };
 }

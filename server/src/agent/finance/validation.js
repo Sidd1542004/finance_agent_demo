@@ -29,6 +29,7 @@ export const SEVERITY = {
   supplier_known: 'review',
   gst_registration: 'review',
   tax_charged: 'hold',
+  ai_reader_unavailable: 'review', // read by the rules reader because the AI reader failed (invoiceAgent.js)
 };
 
 export const fmtMoney = (n, currency = 'AUD') => {

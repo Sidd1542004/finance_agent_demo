@@ -1,27 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { money, abn, acn, day, when, STATUS, AWAITING_DECISION, TO_PAY } from '../format.js';
-import { Rail, CheckIcon, AuditTrail, LoadMore, PAGE_SIZE } from '../shared.jsx';
+import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
+import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
+import { documentBlobProblem, fileSize, documentButtons, opensInNewTab } from '../documentView.js';
+import { checkedAtText } from '../policyForm.js';
+import { paidToText } from '../bankDetails.js';
 
-// The reviewer's name is remembered on this computer so it does not have to be
-// typed for every decision. Storage can be unavailable; the form still works.
-const NAME_KEY = 'finance-agent.reviewer';
-const readName = () => {
-  try {
-    return localStorage.getItem(NAME_KEY) || '';
-  } catch {
-    return '';
-  }
-};
-const saveName = (name) => {
-  try {
-    localStorage.setItem(NAME_KEY, name);
-  } catch {
-    /* not available */
-  }
-};
-
-export default function InvoicesView({ health, onError }) {
+// Decisions are recorded under the signed-in person's name: there is no name to type.
+export default function InvoicesView({ health, user, onError, openId = null }) {
   const setError = onError;
   const [samples, setSamples] = useState([]);
   const [reference, setReference] = useState(null);
@@ -106,14 +92,16 @@ export default function InvoicesView({ health, onError }) {
         const [s, r, list] = await Promise.all([api.samples(), api.reference(), refreshList()]);
         setSamples(s);
         setReference(r);
-        if (list.length) select(list[0]._id);
+        // `openId`: another screen asked for this invoice (e.g. an imported email attachment).
+        if (openId) select(openId);
+        else if (list.length) select(list[0]._id);
       } catch (err) {
         setError(err.message);
       } finally {
         setLoaded(true);
       }
     })();
-  }, [select, refreshList]);
+  }, [select, refreshList, openId]);
 
   // Run an action with a busy flag and one place for errors.
   const run = async (kind, action) => {
@@ -167,15 +155,22 @@ export default function InvoicesView({ health, onError }) {
   return (
     <div className="layout">
       <aside className="side">
-        <AddInvoice
-          samples={samples}
-          vision={Boolean(health?.reader?.vision)}
-          busy={busy === 'process'}
-          disabled={Boolean(busy) || !health}
-          onSample={(id) => processWith(() => api.processSample(id))}
-          onFile={(file) => processWith(() => api.processFile(file))}
-          onText={(text) => processWith(() => api.processText(text))}
-        />
+        {hasRole(user, 'reviewer') ? (
+          <AddInvoice
+            samples={samples}
+            vision={Boolean(health?.reader?.vision)}
+            busy={busy === 'process'}
+            disabled={Boolean(busy) || !health}
+            onSample={(id) => processWith(() => api.processSample(id))}
+            onFile={(file) => processWith(() => api.processFile(file))}
+            onText={(text) => processWith(() => api.processText(text))}
+          />
+        ) : (
+          <section className="card add">
+            <h2>Add an invoice</h2>
+            <RoleNote role="reviewer" what="Adding an invoice" />
+          </section>
+        )}
 
         <section className="card">
           <div className="tabs" role="tablist" aria-label="Invoices">
@@ -236,7 +231,16 @@ export default function InvoicesView({ health, onError }) {
       <main className="main">
         {total > 0 && <Kpis invoices={invoices} counts={counts?.kpis} />}
         {detail ? (
-          <Detail key={detail.invoice._id} data={detail} fresh={freshId === detail.invoice._id} busy={busy} onAct={act} />
+          <Detail
+            key={detail.invoice._id}
+            data={detail}
+            fresh={freshId === detail.invoice._id}
+            busy={busy}
+            onAct={act}
+            user={user}
+            onReload={() => select(detail.invoice._id)}
+            onError={setError}
+          />
         ) : (
           <div className="blank">
             {!loaded ? (
@@ -361,7 +365,7 @@ function Rules({ health }) {
         </div>
         <div>
           <dt>Minimum reading confidence</dt>
-          <dd>{Math.round(policy.minConfidence * 100)}%</dd>
+          <dd>{Math.round(policy.minConfidence * 100)}%, below it a person reviews the invoice</dd>
         </div>
         <div>
           <dt>Australian invoice with no ABN</dt>
@@ -378,7 +382,7 @@ function Rules({ health }) {
       </dl>
       <p className="hint">
         A score at or above the threshold makes an invoice eligible for a person to approve. It is never approved or paid automatically, and a failed mandatory check still stops
-        it. Change these in server/.env.
+        it. An administrator can adjust the numbers on the Settings screen (policy v{policy.version}); the defaults are in server/.env.
       </p>
     </section>
   );
@@ -475,13 +479,16 @@ function Payables({ data, onSelect }) {
   );
 }
 
-function Detail({ data, fresh, busy, onAct }) {
+function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
   const { invoice, run, payment } = data;
   const e = invoice.extracted || {};
   const cur = e.currency || 'AUD';
   const status = STATUS[invoice.status] || STATUS.received;
   const steps = run?.steps || [];
-  const sourceLabel = { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' }[invoice.source?.kind] || '';
+  const mail = invoice.source?.kind === 'email' ? invoice.source.email || {} : null;
+  const sourceLabel = mail
+    ? `as an email attachment${mail.from ? ` from ${mail.from}` : ''} (${mail.provider === 'outlook' ? 'Outlook' : 'Gmail'}, imported automatically)`
+    : { sample: 'from the sample set', upload: 'as an uploaded file', paste: 'as pasted text' }[invoice.source?.kind] || '';
   const score = invoice.match?.score;
   const checks = invoice.checks || [];
   const order = { fail: 0, unverified: 1, skip: 2, pass: 3 };
@@ -498,6 +505,7 @@ function Detail({ data, fresh, busy, onAct }) {
             Received {when(invoice.createdAt)} {sourceLabel}
             {invoice.source?.filename ? ` (${invoice.source.filename})` : ''}
           </p>
+          {checkedAtText(run?.policy) && <p className="detail-meta">{checkedAtText(run.policy)}</p>}
         </div>
         <div className="detail-amount">
           <span className="amount">{money(e.total, cur)}</span>
@@ -514,7 +522,9 @@ function Detail({ data, fresh, busy, onAct }) {
 
       <Outcome invoice={invoice} payment={payment} />
 
-      <Actions data={data} busy={busy} onAct={onAct} />
+      <Actions data={data} busy={busy} onAct={onAct} user={user} />
+
+      {data.documents && <Documents key={invoice._id} invoiceId={invoice._id} documents={data.documents} />}
 
       {invoice.extracted && (
         <>
@@ -687,11 +697,13 @@ function Detail({ data, fresh, busy, onAct }) {
             {invoice.extraction && (
               <p className="hint">
                 Read by the{' '}
-                {invoice.extraction.method === 'groq-vision'
-                  ? `AI vision reader (${invoice.extraction.model}), from an image`
-                  : invoice.extraction.method === 'groq'
-                    ? `AI reader (${invoice.extraction.model})`
-                    : 'basic pattern reader'}
+                {invoice.extraction.fallback
+                  ? 'basic rules reader, because the AI reader was unavailable'
+                  : invoice.extraction.method === 'groq-vision'
+                    ? `AI vision reader (${invoice.extraction.model}), from an image`
+                    : invoice.extraction.method === 'groq'
+                      ? `AI reader (${invoice.extraction.model})`
+                      : 'basic pattern reader'}
                 , {Math.round(invoice.extraction.confidence * 100)}% confident.
                 {invoice.extraction.notes ? ` ${invoice.extraction.notes}` : ''}
               </p>
@@ -700,7 +712,7 @@ function Detail({ data, fresh, busy, onAct }) {
         </>
       )}
 
-      {payment && <PaymentPanel payment={payment} currency={cur} />}
+      {payment && <PaymentPanel data={data} currency={cur} user={user} onReload={onReload} onError={onError} />}
 
       <StatusHistory events={invoice.events || []} currency={cur} />
 
@@ -711,6 +723,95 @@ function Detail({ data, fresh, busy, onAct }) {
         <pre>{invoice.rawText}</pre>
       </details>
     </article>
+  );
+}
+
+// The documents behind the invoice: its original (or its text), the purchase
+// order and the delivery slip. One button each, disabled with the reason when
+// the document does not exist. On a wide screen the document opens in a panel
+// here (fetched first with the same sign-in, so a missing one gives a clear
+// message instead of an error page in the frame); on a phone, in a new tab.
+function Documents({ invoiceId, documents }) {
+  const [view, setView] = useState({ kind: null, url: null, loading: null, error: null });
+
+  // Free the in-memory copy when it is replaced or the invoice is closed.
+  useEffect(
+    () => () => {
+      if (view.url) URL.revokeObjectURL(view.url);
+    },
+    [view.url],
+  );
+
+  const open = async (d) => {
+    if (opensInNewTab(window.innerWidth)) {
+      window.open(api.invoiceDocumentUrl(invoiceId, d.kind), '_blank', 'noopener');
+      return;
+    }
+    setView({ kind: null, url: null, loading: d.kind, error: null });
+    try {
+      const blob = await api.invoiceDocument(invoiceId, d.kind);
+      const problem = documentBlobProblem(blob);
+      if (problem) throw new Error(problem);
+      setView({ kind: d.kind, url: URL.createObjectURL(blob), loading: null, error: null });
+    } catch (err) {
+      setView({ kind: null, url: null, loading: null, error: err.message });
+    }
+  };
+  const shown = documents.find((d) => d.kind === view.kind) || null;
+  const buttons = documentButtons(documents);
+
+  return (
+    <section className="panel documents">
+      <div className="panel-head">
+        <h2>Documents</h2>
+        <div className="decision-actions" role="group" aria-label="Documents">
+          {buttons.map((b) => (
+            <button
+              key={b.kind}
+              className={`btn ${view.kind === b.kind ? 'btn-primary' : 'btn-outline'}`}
+              disabled={!b.enabled || Boolean(view.loading)}
+              title={b.reason || undefined}
+              aria-pressed={view.kind === b.kind}
+              onClick={() => open(b)}
+            >
+              {view.loading === b.kind ? 'Opening…' : b.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <ul className="documents-notes">
+        {buttons
+          .filter((b) => b.note)
+          .map((b) => (
+            <li key={b.kind} className="hint">
+              {b.label}: {b.note}
+            </li>
+          ))}
+      </ul>
+      {view.error && (
+        <p className="form-hint" role="alert">
+          {view.error}
+        </p>
+      )}
+      {view.url && shown && (
+        <div className="document-view">
+          <div className="decision-actions">
+            <span className="hint">
+              {shown.label}
+              {shown.filename ? `: ${shown.filename}` : ''}
+              {shown.size ? `, ${fileSize(shown.size)}` : ''}
+            </span>
+            <a className="btn btn-outline" href={api.invoiceDocumentUrl(invoiceId, shown.kind)} target="_blank" rel="noopener noreferrer">
+              Open in a new tab
+            </a>
+            <button className="btn btn-outline" onClick={() => setView({ kind: null, url: null, loading: null, error: null })}>
+              Close
+            </button>
+          </div>
+          <iframe className="pdf-frame" src={view.url} title={shown.label} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -887,20 +988,48 @@ function Comparison({ rows, po, linkedBy }) {
   );
 }
 
-function PaymentPanel({ payment, currency }) {
-  const label = { queued: 'Scheduled', paid: 'Paid', failed: 'Failed', cancelled: 'Cancelled', on_hold: 'On hold' }[payment.status] || payment.status;
+function PaymentPanel({ data, currency, user, onReload, onError }) {
+  const { payment, bankTransaction: txn, jobs = [], notices = [], paymentCalendar: cal } = data;
+  const label = PAYMENT_STATUS[payment.status]?.label || payment.status;
   const paid = payment.paidAmount || 0;
+  const bank = payment.route === 'bank';
+  const job = jobs.find((j) => j.active) || jobs[jobs.length - 1] || null;
+  const [working, setWorking] = useState(null);
+  const canNotify = hasRole(user, 'payer', 'reviewer'); // draft a notice
+  const canSend = hasRole(user, 'approver', 'admin'); // approve and send it
+  const canDiscard = hasRole(user, 'payer', 'reviewer', 'approver');
+  const act = async (key, fn) => {
+    setWorking(key);
+    onError(null);
+    try {
+      await fn();
+      await onReload();
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setWorking(null);
+    }
+  };
+  const discard = (n) => {
+    const note = window.prompt('Why is this notice not being sent?');
+    if (note) act(`discard-${n._id}`, () => api.discardNotice(n._id, note));
+  };
   return (
     <section className="panel">
       <h2>
         Payment <span className="tag tag-sim">Simulated: no money moves</span>
+        {bank && <span className="tag">Through the simulated bank</span>}
       </h2>
       <dl className="fields">
         <Field label="Status" value={label} flag={payment.status === 'failed'} />
         <Field label="Amount" value={money(payment.amount, currency)} />
         <Field label="Method" value={payment.method} />
-        <Field label="Scheduled for" value={payment.scheduledFor ? day(payment.scheduledFor) : null} />
+        <Field
+          label="Scheduled for"
+          value={bank && payment.scheduledAt ? zoned(payment.scheduledAt, payment.timeZone || cal?.timeZone) : payment.scheduledFor ? day(payment.scheduledFor) : null}
+        />
         <Field label="Scheduled by" value={payment.scheduledBy} />
+        {bank && payment.beneficiary && <Field label="Paid to (verified details)" value={paidToText(payment.beneficiary)} />}
         <Field label="Reference" value={payment.reference} missing="None yet" />
         <Field
           label="Paid"
@@ -919,6 +1048,87 @@ function PaymentPanel({ payment, currency }) {
           />
         )}
       </dl>
+
+      {bank && (
+        <>
+          <h3 className="sub-head">Simulated bank</h3>
+          <dl className="fields">
+            <Field label="Transaction reference" value={txn?.ref || payment.submission?.txnRef} missing={payment.status === 'queued' ? 'Not sent yet' : '—'} />
+            <Field
+              label="Bank status"
+              value={txn ? BANK_STATUS[txn.status]?.label || txn.status : null}
+              missing={payment.submission?.state === 'unknown' ? 'No answer yet: being checked' : '—'}
+              flag={['FAILED', 'REJECTED'].includes(txn?.status)}
+            />
+            {txn?.status === 'PROCESSING' && <Field label="Expected to complete" value={zoned(txn.completesAt, cal?.timeZone)} />}
+            {payment.confirmation && <Field label="Confirmed by the bank" value={zoned(payment.confirmation.confirmedAt, cal?.timeZone)} />}
+            {txn?.failureMessage && <Field label="Bank's reason" value={txn.failureMessage} flag />}
+            {job && (
+              <Field
+                label="Scheduler"
+                value={`${job.status}${job.active ? `, runs ${zoned(job.runAt, cal?.timeZone)}` : ''}${job.attempts ? `, ${job.attempts} attempt${job.attempts === 1 ? '' : 's'}` : ''}${job.result ? `. ${job.result}` : ''}`}
+              />
+            )}
+          </dl>
+          {payment.status === 'processing' && <p className="hint">Accepted by the bank, not confirmed. The invoice is marked paid only when the bank confirms it.</p>}
+        </>
+      )}
+
+      {bank && (notices.length > 0 || (canNotify && ['processing', 'failed'].includes(payment.status))) && (
+        <>
+          <h3 className="sub-head">Notices to the supplier</h3>
+          <ul className="notices">
+            {notices.map((n) => (
+              <li key={n._id} className="notice">
+                <p>
+                  <strong>{NOTICE_KIND[n.kind] || n.kind}</strong>{' '}
+                  <span className={`status status-${n.status === 'sent' ? 'ok' : n.status === 'draft' ? 'wait' : 'neutral'}`}>{n.status}</span>{' '}
+                  <span className="hint">to {n.to}</span>
+                </p>
+                <details>
+                  <summary>{n.subject}</summary>
+                  <pre className="letter">{n.body}</pre>
+                </details>
+                {n.status === 'sent' && n.delivery && (
+                  <p className="hint">
+                    {n.delivery.mode === 'live'
+                      ? `Emailed to ${n.delivery.deliveredTo}`
+                      : n.delivery.mode === 'test_recipient'
+                        ? `Sent to the test recipient ${n.delivery.deliveredTo}, not the supplier`
+                        : 'Kept in the simulated outbox: not emailed'}
+                    , by {n.sentBy} {when(n.sentAt)}.
+                  </p>
+                )}
+                {n.status === 'draft' && (canSend || canDiscard) && (
+                  <div className="decision-actions">
+                    {canSend && (
+                      <button className="btn btn-primary" disabled={Boolean(working)} onClick={() => act(`send-${n._id}`, () => api.sendNotice(n._id))}>
+                        {working === `send-${n._id}` ? 'Sending…' : 'Approve and send'}
+                      </button>
+                    )}
+                    {canDiscard && (
+                      <button className="btn btn-outline" disabled={Boolean(working)} onClick={() => discard(n)}>
+                        Discard
+                      </button>
+                    )}
+                  </div>
+                )}
+                {n.status === 'draft' && !canSend && <p className="hint">An approver or administrator approves and sends notices.</p>}
+              </li>
+            ))}
+          </ul>
+          {canNotify && payment.status === 'processing' && !notices.some((n) => n.kind === 'payment_processing') && (
+            <button className="btn btn-outline" disabled={Boolean(working)} onClick={() => act('draft-processing', () => api.draftNotice(payment._id, 'payment_processing'))}>
+              Draft an "in progress" notice
+            </button>
+          )}
+          {canNotify && payment.status === 'failed' && !notices.some((n) => n.kind === 'payment_failed' && n.status !== 'discarded') && (
+            <button className="btn btn-outline" disabled={Boolean(working)} onClick={() => act('draft-failed', () => api.draftNotice(payment._id, 'payment_failed'))}>
+              Draft a "not completed" notice
+            </button>
+          )}
+        </>
+      )}
     </section>
   );
 }
@@ -1062,13 +1272,33 @@ function Outcome({ invoice, payment }) {
     case 'payment_pending':
       return (
         <section className="outcome outcome-ok">
-          <h2>Payment scheduled (simulated)</h2>
+          <h2>Payment scheduled (simulated): not paid yet</h2>
           <p>
             {money(payment?.amount, cur)} to {payment?.vendorName || e.vendorName}
-            {payment?.scheduledFor ? ` on ${day(payment.scheduledFor)}` : ''} by {payment?.method || 'EFT'}.
-            {payment?.paidAmount ? ` ${money(payment.paidAmount, cur)} recorded so far (part payment).` : ' Not paid yet.'}
+            {payment?.route === 'bank' && payment?.scheduledAt
+              ? ` on ${zoned(payment.scheduledAt, payment.timeZone)}`
+              : payment?.scheduledFor
+                ? ` on ${day(payment.scheduledFor)}`
+                : ''}{' '}
+            by {payment?.method || 'EFT'}.{payment?.paidAmount ? ` ${money(payment.paidAmount, cur)} recorded so far (part payment).` : ' Not paid yet.'}
           </p>
+          {payment?.route === 'bank' && (
+            <p className="outcome-note">
+              It goes to the simulated bank at that time. It counts as paid only when the bank confirms it. It can be rescheduled or cancelled until then.
+            </p>
+          )}
           <ApprovalNote approval={invoice.approval} />
+        </section>
+      );
+    case 'payment_processing':
+      return (
+        <section className="outcome outcome-wait">
+          <h2>Payment processing at the simulated bank</h2>
+          <p>
+            {money(payment?.submission?.amount ?? payment?.amount, cur)} by {payment?.method}
+            {payment?.submission?.txnRef ? `, transaction ${payment.submission.txnRef}` : ''}. The bank has not confirmed it yet, so it is not paid.
+          </p>
+          <p className="outcome-note">It cannot be cancelled now: it will complete or fail. If it completes and should not have, start a recovery.</p>
         </section>
       );
     case 'payment_completed':
@@ -1077,8 +1307,10 @@ function Outcome({ invoice, payment }) {
           <h2>{invoice.recovery?.status === 'open' ? 'Paid: recovery open' : 'Paid'}</h2>
           <p>
             {money(payment?.paidAmount ?? payment?.amount, cur)} paid{payment?.paidOn ? ` on ${day(payment.paidOn)}` : ''}
-            {payment?.reference ? `, reference ${payment.reference}` : ''}
-            {payment?.recordedBy ? `, recorded by ${payment.recordedBy}` : ''}. Simulated: no money moved.
+            {invoice.paymentConfirmation
+              ? `, confirmed by the simulated bank as ${invoice.paymentConfirmation.txnRef}`
+              : `${payment?.reference ? `, reference ${payment.reference}` : ''}${payment?.recordedBy ? `, recorded by ${payment.recordedBy}` : ''}`}
+            . Simulated: no money moved.
           </p>
           {invoice.recovery && (
             <p className="outcome-note">
@@ -1152,8 +1384,9 @@ function ApprovalNote({ approval }) {
 }
 
 const PRIMARY = ['approve', 'approve_received', 'schedule_payment', 'record_payment'];
-const DANGER = ['reject', 'reverse_approval', 'cancel', 'payment_failed', 'start_recovery'];
-const WITH_FIELDS = ['link_po', 'schedule_payment', 'record_payment', 'edit_fields'];
+const DANGER = ['reject', 'reverse_approval', 'cancel', 'payment_failed', 'start_recovery', 'cancel_payment'];
+const WITH_FIELDS = ['link_po', 'schedule_payment', 'reschedule_payment', 'record_payment', 'edit_fields'];
+const SCHEDULING = ['schedule_payment', 'reschedule_payment'];
 
 // Fields a reviewer can correct (the server checks them again: see corrections.js).
 const EDIT_FIELDS = [
@@ -1203,11 +1436,10 @@ const todayIso = () => {
 
 // What a person can do next. The buttons come from the server, which decides
 // what is allowed; consequential actions ask for confirmation first.
-function Actions({ data, busy, onAct }) {
-  const { invoice, payment, actions = [], receivedOnly: partial, linkablePos = [], paymentMethods = ['EFT'] } = data;
+function Actions({ data, busy, onAct, user }) {
+  const { invoice, payment, actions = [], receivedOnly: partial, linkablePos = [], paymentMethods = ['EFT'], bankMethods = [], paymentCalendar: cal } = data;
   const e = invoice.extracted || {};
   const cur = e.currency || 'AUD';
-  const [name, setName] = useState(readName);
   const [note, setNote] = useState('');
   const [pending, setPending] = useState(null);
   const [fields, setFields] = useState({});
@@ -1228,20 +1460,27 @@ function Actions({ data, busy, onAct }) {
 
   const start = (a) => {
     setHint(null);
-    if (!name.trim()) return setHint('Enter your name so the decision is on record.');
+    if (a.permitted === false) return setHint(`You need the ${ROLE_LABEL[a.role] || a.role} role to ${a.label.toLowerCase()}.`);
     if (a.noteRequired && !note.trim()) return setHint(`Add a note with the reason to ${a.label.toLowerCase()}.`);
     if (a.id === 'link_po') setFields({ poNumber: invoice.match?.suggestions?.[0]?.poNumber || linkablePos[0]?.poNumber || '' });
-    if (a.id === 'schedule_payment')
-      setFields({ method: payment?.method || 'EFT', scheduledFor: invoice.due?.date && invoice.due.date >= todayIso() ? invoice.due.date : todayIso(), reference: '' });
+    if (SCHEDULING.includes(a.id)) {
+      const next = cal?.nextSlot || { date: todayIso(), time: '09:00' };
+      const due = invoice.due?.date && invoice.due.date > next.date ? invoice.due.date : null;
+      setFields({
+        method: payment?.method || 'EFT',
+        scheduledFor: a.id === 'reschedule_payment' && payment?.scheduledFor >= next.date ? payment.scheduledFor : due || next.date,
+        scheduledTime: due ? cal?.defaultTime || '09:00' : next.time,
+        reference: '',
+      });
+    }
     if (a.id === 'edit_fields') setFields(editableFrom(e));
     if (a.id === 'record_payment') setFields({ amount: remaining ?? '', paidOn: todayIso(), method: payment?.method || 'EFT', reference: '' });
     if (a.confirm || WITH_FIELDS.includes(a.id)) return setPending(a);
     submit(a, {});
   };
-  const submit = (a, extra) => {
-    saveName(name.trim());
-    onAct(a.id, { decidedBy: name.trim(), note: note.trim(), ...extra });
-  };
+  // Recorded under the signed-in person's name; the server decides who acted.
+  const submit = (a, extra) => onAct(a.id, { note: note.trim(), ...extra });
+  const viaBank = (method) => bankMethods.includes(method);
 
   const amountFor = (id) => (id === 'approve_received' ? partial?.total : id === 'approve' ? e.total : (payment?.amount ?? invoice.approval?.amount));
   const confirmText = (a) => {
@@ -1256,7 +1495,12 @@ function Actions({ data, busy, onAct }) {
       case 'clear_duplicate':
         return 'Confirm this is not a duplicate of the earlier invoice? The agent will check it again. A second payment for the same invoice is still refused.';
       case 'schedule_payment':
-        return `Schedule a payment of ${money(amountFor(a.id), cur)} to ${who}? Simulated: no money moves.`;
+      case 'reschedule_payment':
+        return viaBank(fields.method)
+          ? `${a.id === 'schedule_payment' ? 'Schedule' : 'Reschedule'} ${money(amountFor(a.id), cur)} to ${who} through the simulated bank? It runs on a business day before the ${cal?.cutoff || '15:00'} cut-off (${cal?.timeZone || ''}), to the supplier's verified bank details, and counts as paid only when the bank confirms it.`
+          : `${a.id === 'schedule_payment' ? 'Schedule' : 'Reschedule'} a payment of ${money(amountFor(a.id), cur)} to ${who} by ${fields.method}? It is paid outside the system and recorded with Record payment. Simulated: no money moves.`;
+      case 'cancel_payment':
+        return 'Cancel the scheduled payment before it is sent? The invoice stays approved and can be scheduled again.';
       case 'record_payment':
         return 'Record this payment as made? Enter the reference as evidence.';
       case 'reverse_approval':
@@ -1292,13 +1536,10 @@ function Actions({ data, busy, onAct }) {
   return (
     <section className="actions-card" aria-labelledby="actions-title">
       <h2 id="actions-title">What you can do</h2>
+      <p className="hint">
+        Acting as <strong>{user?.name}</strong> ({(user?.roles || []).map((r) => ROLE_LABEL[r] || r).join(', ') || 'no role'}). Your decisions are recorded under your account.
+      </p>
       <div className="decision-fields">
-        <div>
-          <label className="field-label" htmlFor="who">
-            Your name
-          </label>
-          <input id="who" type="text" value={name} onChange={(ev) => setName(ev.target.value)} autoComplete="name" />
-        </div>
         <div className="grow">
           <label className="field-label" htmlFor="note">
             Note or reason {enabled.some((a) => a.noteRequired) ? '(required for some actions)' : '(optional)'}
@@ -1312,10 +1553,10 @@ function Actions({ data, busy, onAct }) {
           {enabled.map((a) => (
             <button
               key={a.id}
-              className={`btn ${PRIMARY.includes(a.id) ? 'btn-primary' : DANGER.includes(a.id) ? 'btn-danger' : 'btn-outline'}`}
+              className={`btn ${PRIMARY.includes(a.id) ? 'btn-primary' : DANGER.includes(a.id) ? 'btn-danger' : 'btn-outline'}${a.permitted === false ? ' is-disabled' : ''}`}
               disabled={working}
               onClick={() => start(a)}
-              title={a.noteRequired ? 'Needs a note' : undefined}
+              title={a.permitted === false ? `Needs the ${ROLE_LABEL[a.role] || a.role} role` : a.noteRequired ? 'Needs a note' : undefined}
             >
               {busy === a.id ? 'Working…' : a.id === 'approve_received' && partial ? `${a.label} (${money(partial.total, cur)})` : a.label}
               {a.noteRequired ? ' *' : ''}
@@ -1360,7 +1601,7 @@ function Actions({ data, busy, onAct }) {
             </div>
           )}
           {pending.id === 'edit_fields' && <EditFields fields={fields} setFields={setFields} />}
-          {(pending.id === 'schedule_payment' || pending.id === 'record_payment') && (
+          {(SCHEDULING.includes(pending.id) || pending.id === 'record_payment') && (
             <div className="decision-fields">
               {pending.id === 'record_payment' && (
                 <div>
@@ -1381,6 +1622,14 @@ function Actions({ data, busy, onAct }) {
                   onChange={set(pending.id === 'record_payment' ? 'paidOn' : 'scheduledFor')}
                 />
               </div>
+              {SCHEDULING.includes(pending.id) && viaBank(fields.method) && (
+                <div>
+                  <label className="field-label" htmlFor="pay-time">
+                    Time ({cal?.timeZone || 'local'})
+                  </label>
+                  <input id="pay-time" type="time" value={fields.scheduledTime || ''} onChange={set('scheduledTime')} max={cal?.cutoff} />
+                </div>
+              )}
               <div>
                 <label className="field-label" htmlFor="pay-method">
                   Method
@@ -1391,13 +1640,21 @@ function Actions({ data, busy, onAct }) {
                   ))}
                 </select>
               </div>
-              <div className="grow">
-                <label className="field-label" htmlFor="pay-ref">
-                  Reference {pending.id === 'record_payment' ? '(required)' : '(optional)'}
-                </label>
-                <input id="pay-ref" type="text" value={fields.reference} onChange={set('reference')} />
-              </div>
+              {pending.id !== 'reschedule_payment' && (
+                <div className="grow">
+                  <label className="field-label" htmlFor="pay-ref">
+                    Reference {pending.id === 'record_payment' ? '(required)' : '(optional)'}
+                  </label>
+                  <input id="pay-ref" type="text" value={fields.reference} onChange={set('reference')} />
+                </div>
+              )}
             </div>
+          )}
+          {SCHEDULING.includes(pending.id) && viaBank(fields.method) && (
+            <p className="hint">
+              Business days only, not on bank holidays, no later than {cal?.cutoff || '15:00'} ({cal?.timeZone}). The amount is what is left to pay (
+              {money(amountFor(pending.id), cur)}). Cheque and Other are not sent to the bank.
+            </p>
           )}
           {pending.id === 'record_payment' && remaining !== null && Number(fields.amount) > 0 && Number(fields.amount) < remaining && (
             <p className="form-hint">This is a part payment. {money(remaining - Number(fields.amount), cur)} will still be due and the invoice stays Payment Pending.</p>

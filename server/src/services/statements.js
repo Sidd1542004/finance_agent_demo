@@ -7,9 +7,11 @@ import { needsPerson } from '../agent/finance/reconcileRules.js';
 import { money } from '../agent/finance/rules.js';
 import { bankLineId } from '../agent/finance/audit.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
-import { BankStatement } from '../models/index.js';
+import { approvedBySamePerson, SAME_PERSON_PAYS } from '../agent/finance/lifecycle.js';
+import { BankStatement, Invoice, Payment } from '../models/index.js';
 import { config } from '../config.js';
-import { HttpError, runAndRecord, latestRun, addHumanStep, whoAndWhy, failedDecision, auditFailed, recordAudit } from './runs.js';
+import { HttpError, runAndRecord, latestRun, addHumanStep, failedDecision, auditFailed, recordAudit } from './runs.js';
+import { requireActor } from './actor.js';
 
 const agent = createReconciliationAgent({
   ledger: sampleLedger,
@@ -39,10 +41,21 @@ export async function getStatementDetail(id) {
  *   confirm - accept the payment the agent suggested, and mark it as paid
  *   dismiss - this line is not a supplier payment, or is being dealt with elsewhere
  */
-export async function resolveLine(id, lineNumber, input) {
-  const { action } = input;
+async function assertNotTheApprover(paymentId, actorId, who) {
+  const payment = await Payment.findById(paymentId).select('invoiceId').lean();
+  const invoice = payment ? await Invoice.findById(payment.invoiceId).select('approval').lean() : null;
+  if (invoice && approvedBySamePerson(invoice.approval, actorId, who)) throw new HttpError(403, SAME_PERSON_PAYS);
+}
+
+// `actor`: an authenticated actor with the payer role (a typed name is ignored).
+export async function resolveLine(id, lineNumber, input, actor) {
+  requireActor(actor, 'payer');
+  const { action } = input || {};
   if (!['confirm', 'dismiss'].includes(action)) throw new HttpError(400, 'Choose to confirm the match or dismiss the line.');
-  const { who, why } = whoAndWhy(input);
+  const who = actor.name;
+  const why = String(input.note || '')
+    .trim()
+    .slice(0, 1000);
 
   const statement = await BankStatement.findById(id);
   if (!statement) throw new HttpError(404, 'That statement no longer exists.');
@@ -60,6 +73,8 @@ export async function resolveLine(id, lineNumber, input) {
   if (action === 'confirm') {
     if (!line.candidate?.paymentId) throw new HttpError(400, 'The agent has no payment to suggest for this line, so it can only be dismissed.');
     if (line.kind === 'amount_differs' && !why) throw new HttpError(400, 'Add a note explaining why the amounts differ.');
+    // Confirming the match records the payment, so the same rule as "Record payment" applies.
+    if (config.policy.segregateDuties) await assertNotTheApprover(line.candidate.paymentId, actor.id, who);
     const paid = await sampleLedger.markPaid(line.candidate.paymentId, { statementId: String(statement._id), line: line.n, date: line.date, description: line.description });
     if (!paid) throw new HttpError(409, `The payment for invoice ${line.candidate.invoiceNumber} is no longer waiting to be paid, so it cannot be matched to this line.`);
     paidId = line.candidate.paymentId;
@@ -89,6 +104,7 @@ export async function resolveLine(id, lineNumber, input) {
     subjectKind: 'bank_line',
     subjectId: bankLineId(String(statement._id), line.n),
     actor: who,
+    actorId: actor.id,
     action,
     from: lineFrom,
     to: line.status,
@@ -100,6 +116,7 @@ export async function resolveLine(id, lineNumber, input) {
       subjectKind: 'statement',
       subjectId: statement._id,
       actor: who,
+      actorId: actor.id,
       action: 'reconciled',
       from: 'needs_person',
       to: 'reconciled',

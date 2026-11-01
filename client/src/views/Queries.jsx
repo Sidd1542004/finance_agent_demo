@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { money, day, when, QUERY_STATUS, STATUS } from '../format.js';
-import { Rail, Checks, Reasons, RecordList, AuditTrail, useBusy, useRecords } from '../shared.jsx';
+import { money, day, when, hasRole, QUERY_STATUS, STATUS } from '../format.js';
+import { Rail, Checks, Reasons, RecordList, AuditTrail, RoleNote, useBusy, useRecords } from '../shared.jsx';
 
 const INTENT = {
   payment_status: 'Payment status question',
@@ -10,7 +10,9 @@ const INTENT = {
   other: 'Something else',
 };
 
-export default function QueriesView({ onError }) {
+export default function QueriesView({ user, onError }) {
+  // Adding, answering, closing and re-processing emails: reviewers (as on the server).
+  const canAct = hasRole(user, 'reviewer');
   const records = useRecords(api.queries, api.query, onError);
   const [busy, run] = useBusy(onError);
   const [samples, setSamples] = useState([]);
@@ -51,13 +53,20 @@ export default function QueriesView({ onError }) {
   return (
     <div className="layout">
       <aside className="side">
-        <AddEmail
-          samples={samples}
-          busy={busy === 'process'}
-          disabled={Boolean(busy)}
-          onSample={(id) => process(() => api.processQuerySample(id))}
-          onEmail={(email) => process(() => api.processQuery(email))}
-        />
+        {canAct ? (
+          <AddEmail
+            samples={samples}
+            busy={busy === 'process'}
+            disabled={Boolean(busy)}
+            onSample={(id) => process(() => api.processQuerySample(id))}
+            onEmail={(email) => process(() => api.processQuery(email))}
+          />
+        ) : (
+          <section className="card add">
+            <h2>Add a supplier email</h2>
+            <RoleNote role="reviewer" what="Processing supplier emails" />
+          </section>
+        )}
         <section className="card">
           <h2>Emails</h2>
           <RecordList
@@ -78,6 +87,7 @@ export default function QueriesView({ onError }) {
             data={records.detail}
             fresh={records.freshId === records.detail.query._id}
             busy={busy}
+            canAct={canAct}
             onResolve={resolve}
             onRerun={() => process(() => api.rerunQuery(records.detail.query._id))}
           />
@@ -160,7 +170,7 @@ function AddEmail({ samples, busy, disabled, onSample, onEmail }) {
   );
 }
 
-function QueryDetail({ data, fresh, busy, onResolve, onRerun }) {
+function QueryDetail({ data, fresh, busy, canAct, onResolve, onRerun }) {
   const { query, run, message } = data;
   const status = QUERY_STATUS[query.status] || QUERY_STATUS.received;
   const u = query.understood;
@@ -180,7 +190,7 @@ function QueryDetail({ data, fresh, busy, onResolve, onRerun }) {
 
       <Rail steps={run?.steps || []} fresh={fresh} />
 
-      <QueryOutcome query={query} message={message} busy={busy} onResolve={onResolve} onRerun={onRerun} />
+      <QueryOutcome query={query} message={message} busy={busy} canAct={canAct} onResolve={onResolve} onRerun={onRerun} />
 
       <div className="panels">
         <section className="panel">
@@ -243,7 +253,13 @@ function QueryDetail({ data, fresh, busy, onResolve, onRerun }) {
 
             {query.reading && (
               <p className="hint">
-                Read by the {query.reading.method === 'groq' ? `AI reader (${query.reading.model})` : 'keyword reader'}, {Math.round(query.reading.confidence * 100)}% confident.
+                Read by the{' '}
+                {query.reading.fallback
+                  ? 'keyword reader, because the AI reader was unavailable (a person replies)'
+                  : query.reading.method === 'groq'
+                    ? `AI reader (${query.reading.model})`
+                    : 'keyword reader'}
+                , {Math.round(query.reading.confidence * 100)}% confident.
                 {query.reading.notes ? ` ${query.reading.notes}` : ''}
               </p>
             )}
@@ -263,8 +279,8 @@ function QueryDetail({ data, fresh, busy, onResolve, onRerun }) {
   );
 }
 
-function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
-  const [name, setName] = useState('');
+// Replies and closes are recorded under the signed-in person's name.
+function QueryOutcome({ query, message, busy, canAct, onResolve, onRerun }) {
   const [reply, setReply] = useState(query.draft?.body || '');
   const [note, setNote] = useState('');
   const reasons = query.decision?.reasons || [];
@@ -274,43 +290,36 @@ function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
   if (query.status === 'needs_person') {
     return (
       <section className="outcome outcome-wait" aria-labelledby="q-decision">
-        <h2 id="q-decision">The agent did not reply and needs your decision</h2>
+        <h2 id="q-decision">The agent did not reply and needs {canAct ? 'your' : 'a reviewer’s'} decision</h2>
         <Reasons reasons={reasons} />
-        <div className="decision-form">
-          <label className="field-label" htmlFor="q-reply">
-            Reply to the supplier{query.draft ? ' (drafted by the agent from the records, edit as needed)' : ''}
-          </label>
-          <textarea id="q-reply" rows={query.draft ? 12 : 5} value={reply} onChange={(e) => setReply(e.target.value)} />
-          <div className="decision-fields">
-            <div>
-              <label className="field-label" htmlFor="q-who">
-                Your name
-              </label>
-              <input id="q-who" type="text" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+        {!canAct && <RoleNote role="reviewer" what="Replying to or closing a supplier email" />}
+        {canAct && (
+          <div className="decision-form">
+            <label className="field-label" htmlFor="q-reply">
+              Reply to the supplier{query.draft ? ' (drafted by the agent from the records, edit as needed)' : ''}
+            </label>
+            <textarea id="q-reply" rows={query.draft ? 12 : 5} value={reply} onChange={(e) => setReply(e.target.value)} />
+            <div className="decision-fields">
+              <div className="grow">
+                <label className="field-label" htmlFor="q-note">
+                  Note (required to close without a reply)
+                </label>
+                <input id="q-note" type="text" value={note} onChange={(e) => setNote(e.target.value)} />
+              </div>
             </div>
-            <div className="grow">
-              <label className="field-label" htmlFor="q-note">
-                Note (required to close without a reply)
-              </label>
-              <input id="q-note" type="text" value={note} onChange={(e) => setNote(e.target.value)} />
+            <div className="decision-actions">
+              <button className="btn btn-primary" disabled={working || !reply.trim()} onClick={() => onResolve({ action: 'send', body: reply, note })}>
+                Send reply
+              </button>
+              <button className="btn btn-danger" disabled={working || !note.trim()} onClick={() => onResolve({ action: 'close', note })}>
+                Close without replying
+              </button>
+              <button className="btn btn-outline" disabled={working} onClick={onRerun}>
+                {busy === 'process' ? 'Processing…' : 'Process again'}
+              </button>
             </div>
           </div>
-          <div className="decision-actions">
-            <button
-              className="btn btn-primary"
-              disabled={working || !name.trim() || !reply.trim()}
-              onClick={() => onResolve({ action: 'send', decidedBy: name, body: reply, note })}
-            >
-              Send reply
-            </button>
-            <button className="btn btn-danger" disabled={working || !name.trim() || !note.trim()} onClick={() => onResolve({ action: 'close', decidedBy: name, note })}>
-              Close without replying
-            </button>
-            <button className="btn btn-outline" disabled={working} onClick={onRerun}>
-              {busy === 'process' ? 'Processing…' : 'Process again'}
-            </button>
-          </div>
-        </div>
+        )}
       </section>
     );
   }
@@ -359,11 +368,15 @@ function QueryOutcome({ query, message, busy, onResolve, onRerun }) {
         <h2>The agent could not finish this email</h2>
         <Reasons reasons={reasons} />
         <p className="outcome-note">Nothing was sent. Fix the cause, then process it again.</p>
-        <div className="decision-actions">
-          <button className="btn btn-primary" disabled={working} onClick={onRerun}>
-            {busy === 'process' ? 'Processing…' : 'Process again'}
-          </button>
-        </div>
+        {canAct ? (
+          <div className="decision-actions">
+            <button className="btn btn-primary" disabled={working} onClick={onRerun}>
+              {busy === 'process' ? 'Processing…' : 'Process again'}
+            </button>
+          </div>
+        ) : (
+          <RoleNote role="reviewer" what="Processing an email again" />
+        )}
       </section>
     );
   }

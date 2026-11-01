@@ -47,6 +47,7 @@ export const mentionsBankDetails = (text) => BANK_DETAILS.test(String(text ?? ''
 const RANK = {
   payment_completed: 0,
   payment_pending: 1,
+  payment_processing: 1,
   approved: 2,
   under_review: 3,
   needs_review: 3,
@@ -67,6 +68,8 @@ export function shareable(invoice) {
   if (!invoice) return false;
   if (['under_review', 'needs_review', 'on_hold', 'approved'].includes(invoice.status)) return true;
   if (invoice.status === 'payment_pending') return invoice.payment?.status === 'queued';
+  // Sent to the bank, not yet confirmed: the reply says exactly that, never "paid".
+  if (invoice.status === 'payment_processing') return invoice.payment?.status === 'processing';
   return invoice.status === 'payment_completed' && invoice.payment?.status === 'paid';
 }
 
@@ -86,6 +89,9 @@ export function statusLine(invoice) {
   const pay = invoice.payment;
   const part = pay && isNum(pay.amount) && isNum(invoice.total) && cents(pay.amount) !== cents(invoice.total);
   if (pay?.status === 'paid') return `${head}: ${part ? `${money(pay.amount)} paid, for the quantity we have received` : 'paid'}${pay.paidOn ? ` on ${day(pay.paidOn)}` : ''}.`;
+  if (invoice.status === 'payment_processing') {
+    return `${head}: payment has been sent to the bank and is being processed. It is not confirmed yet.`;
+  }
   if (invoice.status === 'payment_pending') {
     return `${head}: ${part ? `approved for ${money(pay.amount)}, the quantity we have received, and scheduled for payment` : 'approved and scheduled for payment'}${invoice.dueDate ? `, due ${day(invoice.dueDate)}` : ''}.`;
   }
@@ -127,6 +133,16 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
   const add = (id, label, status, detail) => checks.push({ id, label, status, detail });
   const pct = (x) => `${Math.round(x * 100)}%`;
 
+  // The AI reader failed and the keyword reader stood in (readQuery.js): never answered automatically.
+  if (reading?.fallback) {
+    add(
+      'ai_reader_unavailable',
+      'Email was read by the AI reader',
+      'fail',
+      `The AI reader was unavailable (${reading.fallback.reason}), so the keyword reader read this email. It is not answered automatically: a person checks it and replies.`,
+    );
+  }
+
   add(
     'sender_known',
     'Sender is an approved supplier',
@@ -152,13 +168,15 @@ export function runQueryChecks({ text, understood, reading, vendor, sender, item
   );
 
   const confidence = isNum(reading?.confidence) ? reading.confidence : 0;
+  // Supplier emails have their own floor (MIN_EMAIL_CONFIDENCE); the invoice one is stricter.
+  const floor = isNum(policy.emailMinConfidence) ? policy.emailMinConfidence : policy.minConfidence;
   add(
     'reader_confidence',
     'Email was read with enough confidence',
-    confidence >= policy.minConfidence ? 'pass' : 'fail',
-    confidence >= policy.minConfidence
-      ? `Reader confidence ${pct(confidence)} (minimum ${pct(policy.minConfidence)}).`
-      : `Reader confidence ${pct(confidence)} is below the ${pct(policy.minConfidence)} minimum.${reading?.notes ? ` ${reading.notes}` : ''}`,
+    confidence >= floor ? 'pass' : 'fail',
+    confidence >= floor
+      ? `Reader confidence ${pct(confidence)} (minimum ${pct(floor)}).`
+      : `Reader confidence ${pct(confidence)} is below the ${pct(floor)} minimum.${reading?.notes ? ` ${reading.notes}` : ''}`,
   );
 
   const named = understood.invoiceNumbers || [];
