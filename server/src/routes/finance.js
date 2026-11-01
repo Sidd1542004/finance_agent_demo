@@ -4,7 +4,7 @@
 import { inRequestDeadline } from '../llm/deadline.js';
 import mongoose from 'mongoose';
 
-import { VendorQuery, BankStatement, Report } from '../models/index.js';
+import { VendorQuery, BankStatement } from '../models/index.js';
 import { sampleQueries, findSampleQuery, sampleStatement } from '../seed/data.js';
 import { emailAddress } from '../agent/finance/queryRules.js';
 import { isMonth, monthOf, figuresToCsv } from '../agent/finance/reportFigures.js';
@@ -14,7 +14,7 @@ import { processStatement, getStatementDetail, resolveLine } from '../services/s
 import { writeReport, getReportDetail } from '../services/reports.js';
 import { loadDemoMonth } from '../services/demo.js';
 import { withDemoWipe } from '../services/demoReset.js';
-import { pageOf, pageParams } from './paging.js';
+import { listQueries, listStatements, listReports } from '../services/listings.js';
 import { requireRole, actorOf } from '../auth/middleware.js';
 
 // Inside the request's deadline (llm/deadline.js), even after a body parser.
@@ -35,7 +35,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/queries',
     wrap(async (req, res) => {
-      res.json(await pageOf(VendorQuery, {}, pageParams(req.query), { select: 'status from subject createdAt supplier.name decision.outcome' }));
+      res.json(await listQueries(actorOf(req), req.query));
     }),
   );
 
@@ -109,19 +109,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/statements',
     wrap(async (req, res) => {
-      res.json(
-        await pageOf(BankStatement, {}, pageParams(req.query), {
-          select: 'status source createdAt lines.status lines.amount',
-          map: (s) => ({
-            _id: s._id,
-            status: s.status,
-            source: s.source,
-            createdAt: s.createdAt,
-            lineCount: s.lines.length,
-            openCount: s.lines.filter((l) => ['suggested', 'exception', 'unmatched'].includes(l.status)).length,
-          }),
-        }),
-      );
+      res.json(await listStatements(actorOf(req), req.query));
     }),
   );
 
@@ -195,7 +183,7 @@ export function registerFinanceRoutes(api, { upload, work }) {
   api.get(
     '/reports',
     wrap(async (req, res) => {
-      res.json(await pageOf(Report, {}, pageParams(req.query), { select: 'month status createdAt figures.label' }));
+      res.json(await listReports(actorOf(req), req.query));
     }),
   );
 

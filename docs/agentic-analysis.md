@@ -975,25 +975,55 @@ Risks
 9. **Cost**: graphs that re-plan on every tool error can multiply Groq calls.
    Hard limits per run.
 
+Decisions (settled 2026-11-01, before Phase 0)
+
+- **`write_report` needs no approval, but is audited.** It runs inside the
+  graph without a person, at most once per run (§9.2), and writes a
+  `tool_called` audit entry like every other tool (§10.6). Answers question 1.
+- **The cron only continues runs a person started; it never starts runs.**
+  `/api/cron/orchestrate` picks up `paused` runs only, and every run keeps
+  the person who started it as its actor. There is no system principal for
+  the orchestrator, so the daily triage run in Phase 6 is dropped. Answers
+  question 2.
+- **Any user with the required role may resume a proposal**, whoever started
+  the run. The resume route checks `pending.role` for the resuming person
+  (§10.4 step 2), and the services still enforce segregation of duties
+  (with `SEGREGATE_DUTIES` on, the person who approved an invoice cannot pay
+  it or confirm its bank line) and every other rule, with that person as the
+  actor. Answers question 3.
+- **Reviewers get no bank details from any orchestrator tool**, not even
+  masked: the tool views drop them for reviewers, as the existing API does
+  (`services/bankViews.js`), and mask them for everyone else, even approvers
+  (§9.1 `list_suppliers`). Answers question 5 for bank details; other read
+  access stays as in the existing API.
+
 Open questions
 
-1. Should `write_report` run without approval (it changes no existing record),
-   or be gated like everything else?
-2. Should the cron be able to **start** runs (for example a daily triage after
-   ingestion) under a system principal with read-only rights, or only
-   continue runs a person started?
-3. Who may resume a proposal from someone else's run: anyone with the role
-   (recommended), or the starter only?
+1. ~~Should `write_report` run without approval (it changes no existing
+   record), or be gated like everything else?~~ Decided above: no approval,
+   audited.
+2. ~~Should the cron be able to **start** runs (for example a daily triage
+   after ingestion) under a system principal with read-only rights, or only
+   continue runs a person started?~~ Decided above: continue only.
+3. ~~Who may resume a proposal from someone else's run: anyone with the role
+   (recommended), or the starter only?~~ Decided above: anyone with the role.
 4. Is `openai/gpt-oss-120b` on Groq reliable enough in JSON mode for
-   `understand` at temperature 0, and how fast is it? (Not verified; the code
-   has only been tested against stand-ins.)
+   `understand` at temperature 0, and how fast is it? First measurement
+   (2026-11-01, `scripts/groq-json-check.js`, 20 prompts over the demo
+   month's 8 invoice summaries): 20/20 valid JSON, 20/20 schema-valid (refs
+   from the summaries only, actions from the closed list). Latency p50
+   1.5 s / p95 3.0 s for calls answered first time; 8 of 20 calls hit
+   Groq's per-minute rate limit (about 1,350 prompt + 630 completion tokens
+   per call), which pushed the overall p95 to 14.5 s and needed 3 longer
+   pauses. One small run on one day: repeat it before relying on it, and
+   budget for rate limits (§10.7).
 5. Should read access be narrowed by role for the orchestrator (for example
    reviewers not seeing payment details), given the existing API does not
-   narrow it?
-6. Are the uncommitted and untracked working-tree changes (24 modified files,
-   plus ingestion, roles, demo reset and their tests) meant to be committed
-   first? The analysis is based on them, and the orchestrator work should start
-   from a clean commit.
+   narrow it? Partly decided above: reviewers get no bank details from any
+   tool; other read access follows the existing API.
+6. ~~Are the uncommitted and untracked working-tree changes (24 modified
+   files, plus ingestion, roles, demo reset and their tests) meant to be
+   committed first?~~ Done: Phase 0 starts from a clean tree.
 7. Which external scheduler will drive `/api/cron/tick`, `/api/cron/ingest` and
    the new `/api/cron/orchestrate` in the demo?
 

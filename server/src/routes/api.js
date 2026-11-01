@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import multer from 'multer';
 
 import { config } from '../config.js';
-import { Invoice, Vendor, PurchaseOrder, GoodsReceipt } from '../models/index.js';
+import { Invoice } from '../models/index.js';
 import { sampleInvoices, findSample, renderInvoiceText, sampleTotals } from '../seed/data.js';
 import { resetEverything } from '../seed/seed.js';
 import {
@@ -19,14 +19,11 @@ import {
   readerFallbackStatus,
 } from '../services/invoices.js';
 import { readUpload, uploadKind, NEEDS_OCR } from '../services/uploads.js';
-import { referenceVendor, auditEntryFor } from '../services/bankViews.js';
 import { policySnapshot } from '../services/policySettings.js';
 import { keepInvoiceDocument, listInvoiceDocuments, openInvoiceDocument, inlineDisposition, DOCUMENT_HEADERS } from '../services/invoiceDocuments.js';
-import { sampleLedger } from '../integrations/sampleLedger.js';
+import { listInvoices, getReference, listAuditEntries } from '../services/listings.js';
 import { HttpError, recordAudit } from '../services/runs.js';
 import { registerFinanceRoutes } from './finance.js';
-import { pageOf, pageParams } from './paging.js';
-import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { createWorkLimiter } from '../rateLimit.js';
 import { requireUser, requireRole, requireAnyRole, actorOf } from '../auth/middleware.js';
 import { createDemoResetHandler, demoResetBlocked } from '../services/demoReset.js';
@@ -48,23 +45,6 @@ const work = createWorkLimiter(config.rateLimit);
 // Person's actions that send the invoice back through the agent.
 const RERUN_ACTIONS = new Set(['rerun', 'link_po', 'clear_duplicate', 'edit_fields']);
 const workIfRerun = (req, res, next) => (RERUN_ACTIONS.has(req.params.action) ? work(req, res, next) : next());
-
-const INVOICE_FILTERS = {
-  waiting: { status: { $in: [...AWAITING_DECISION, 'failed'] } },
-  pay: { status: { $in: ['approved', 'payment_pending', 'payment_processing', 'payment_failed'] } },
-};
-
-async function invoiceCounts() {
-  const [all, waiting, toPay, inQueue, matchedByAgent, exceptions] = await Promise.all([
-    Invoice.countDocuments(),
-    Invoice.countDocuments(INVOICE_FILTERS.waiting),
-    Invoice.countDocuments(INVOICE_FILTERS.pay),
-    Invoice.countDocuments({ status: { $nin: ['payment_completed', 'rejected', 'cancelled'] } }),
-    Invoice.countDocuments({ 'decision.outcome': 'under_review', status: { $ne: 'cancelled' } }),
-    Invoice.countDocuments({ status: { $in: ['needs_review', 'on_hold', 'failed', 'payment_failed'] } }),
-  ]);
-  return { all, waiting, toPay, kpis: { inQueue, matchedByAgent, exceptions, awaitingPayment: toPay } };
-}
 
 // Express 4 does not catch errors from async handlers on its own.
 // Inside the request's deadline (llm/deadline.js), even after a body parser.
@@ -139,30 +119,19 @@ api.get('/samples', (req, res) => {
 });
 
 // Suppliers, purchase orders and deliveries the agent checks against.
+// Never the suppliers' bank details: only whether they are verified (see services/listings.js).
 api.get(
   '/reference',
   wrap(async (req, res) => {
-    const [vendors, purchaseOrders, goodsReceipts] = await Promise.all([
-      Vendor.find().sort({ name: 1 }).lean(),
-      PurchaseOrder.find().sort({ poNumber: 1 }).lean(),
-      GoodsReceipt.find().sort({ poNumber: 1 }).lean(),
-    ]);
-    // Never the suppliers' bank details: only whether they are verified (see services/bankViews.js).
-    res.json({ vendors: vendors.map(referenceVendor), purchaseOrders, goodsReceipts });
+    res.json(await getReference(actorOf(req)));
   }),
 );
 
 api.get(
   '/invoices',
   wrap(async (req, res) => {
-    // ?filter=waiting (needs a person) | pay (approved, to pay) | all, plus ?before= and ?limit= (see paging.js).
-    const filter = INVOICE_FILTERS[req.query.filter] || {};
-    const page = await pageOf(Invoice, filter, pageParams(req.query), {
-      select:
-        'status source createdAt extracted.vendorName extracted.invoiceNumber extracted.total extracted.currency decision checks.id checks.status approval.decision due match.score.total recovery.status',
-    });
-    // The tab counts and the KPIs cover every invoice, not just the ones loaded.
-    res.json({ ...page, counts: await invoiceCounts() });
+    // ?filter=waiting (needs a person) | pay (approved, to pay) | all, plus ?before= and ?limit= (see services/paging.js).
+    res.json(await listInvoices(actorOf(req), req.query));
   }),
 );
 
@@ -280,11 +249,8 @@ api.post(
 api.get(
   '/audit',
   wrap(async (req, res) => {
-    const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId.trim().slice(0, 100) : '';
-    const limit = Math.min(500, Math.max(1, Math.floor(Number(req.query.limit)) || 200));
     // Bank-detail entries are masked, or hidden from reviewers.
-    const items = await sampleLedger.listAudit({ subjectId: subjectId || null, limit });
-    res.json({ items: items.map((e) => auditEntryFor(e, req.user)) });
+    res.json(await listAuditEntries(actorOf(req), req.query));
   }),
 );
 

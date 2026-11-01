@@ -49,6 +49,12 @@ export class GroqError extends Error {
 
 /**
  * Send one chat request. `body` is the request body without the model.
+ *
+ * `onUsage(usage, { model, purpose })`, optional: called once when Groq
+ * answers, before the answer is checked (tokens are spent even when it is not
+ * valid JSON). `usage` is Groq's object ({ prompt_tokens, completion_tokens,
+ * total_tokens, ... }), or null if the answer had none. `purpose` is passed
+ * through as given. An error thrown (or rejected) by the callback is ignored.
  * @returns the parsed object from the message content
  */
 export async function groqChat({
@@ -61,6 +67,8 @@ export async function groqChat({
   budgetMs = RETRY.budgetMs,
   sleep = sleepFor,
   now = Date.now,
+  onUsage = null,
+  purpose = null,
 }) {
   if (!apiKey) throw new GroqError('not_configured', 'GROQ_API_KEY is not set.');
 
@@ -103,7 +111,7 @@ export async function groqChat({
       wait = retryAfterMs(res.headers?.get?.('retry-after'));
     }
 
-    if (!failure) return readContent(res);
+    if (!failure) return readContent(res, onUsage && ((usage) => reportUsage(onUsage, usage, { model, purpose })));
 
     // Try again only if there is time for the wait and a reasonable attempt after it.
     attempt += 1;
@@ -113,13 +121,24 @@ export async function groqChat({
   }
 }
 
-async function readContent(res) {
+// Token accounting must never break the call it accounts for.
+function reportUsage(onUsage, usage, meta) {
+  try {
+    const done = onUsage(usage && typeof usage === 'object' ? usage : null, meta);
+    if (typeof done?.catch === 'function') done.catch(() => {});
+  } catch {
+    /* ignored */
+  }
+}
+
+async function readContent(res, usageSeen = null) {
   let data;
   try {
     data = await res.json();
   } catch (err) {
     throw new GroqError('network', `Could not read Groq's response (${err?.message || 'network error'}).`);
   }
+  if (usageSeen) usageSeen(data?.usage);
   const content = data?.choices?.[0]?.message?.content;
   try {
     const parsed = JSON.parse(content);

@@ -4,17 +4,15 @@
 //   registerPaymentRoutes(api)        after sign-in
 //   registerAdminPaymentRoutes(r)     on the admin router (admin role)
 
-import mongoose from 'mongoose';
-import { requireRole } from '../auth/middleware.js';
-import { Payment, PaymentJob } from '../models/index.js';
+import { requireRole, actorOf } from '../auth/middleware.js';
 import { HttpError, recordAudit } from '../services/runs.js';
-import { paymentFor, transactionFor, noticeFor } from '../services/bankViews.js';
+import { transactionFor, noticeFor } from '../services/bankViews.js';
+import { listPayments, getPayment } from '../services/listings.js';
 import { simBank, paymentExecutor, paymentNotices, emailDelivery } from '../services/paymentSystem.js';
 import { paymentCalendar } from '../services/invoices.js';
 import { SimBankError, SCENARIOS } from '../bank/simBank.js';
 
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
-const STATUSES = ['queued', 'processing', 'paid', 'failed', 'cancelled', 'on_hold'];
 
 // Simulated bank refusals become ordinary HTTP errors.
 const bankCall = async (fn) => {
@@ -36,59 +34,20 @@ export function registerPaymentCron(router) {
   router.post('/tick', tick);
 }
 
-const listItem = (p) => ({
-  _id: p._id,
-  invoiceId: p.invoiceId,
-  invoiceNumber: p.invoiceNumber,
-  vendorName: p.vendorName,
-  amount: p.amount,
-  paidAmount: p.paidAmount,
-  currency: p.currency || 'AUD',
-  method: p.method,
-  route: p.route || 'manual',
-  status: p.status,
-  scheduledFor: p.scheduledFor,
-  scheduledAt: p.scheduledAt,
-  scheduledBy: p.scheduledBy,
-  txnRef: p.confirmation?.txnRef || p.submission?.txnRef || null,
-  completesAt: p.submission?.completesAt || null,
-  confirmedAt: p.confirmation?.confirmedAt || null,
-  failure: p.failure ? { reason: p.failure.reason, code: p.failure.code } : null,
-  updatedAt: p.updatedAt,
-  simulated: true,
-});
-
 export function registerPaymentRoutes(api) {
-  // ?status=queued|processing|paid|failed|cancelled (several comma-separated)
+  // ?status=queued|processing|paid|failed|cancelled|on_hold (several comma-separated). See services/listings.js.
   api.get(
     '/payments',
     wrap(async (req, res) => {
-      const wanted = String(req.query.status || '')
-        .split(',')
-        .filter((s) => STATUSES.includes(s));
-      const docs = await Payment.find(wanted.length ? { status: { $in: wanted } } : {})
-        .sort({ updatedAt: -1 })
-        .limit(200)
-        .lean();
-      const counts = Object.fromEntries(await Promise.all(STATUSES.map(async (s) => [s, await Payment.countDocuments({ status: s })])));
-      res.json({ items: docs.map(listItem), counts });
+      res.json(await listPayments(actorOf(req), req.query));
     }),
   );
 
+  // Bank details masked, or hidden from reviewers.
   api.get(
     '/payments/:id',
     wrap(async (req, res) => {
-      if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'That payment does not exist.');
-      const p = await Payment.findById(req.params.id).lean();
-      if (!p) throw new HttpError(404, 'That payment does not exist.');
-      const ref = p.confirmation?.txnRef || p.submission?.txnRef;
-      const [jobs, transaction, notices] = await Promise.all([
-        PaymentJob.find({ paymentId: p._id }).sort({ createdAt: 1 }).lean(),
-        ref ? simBank.getTransaction(ref) : null,
-        paymentNotices.list({ paymentId: p._id }),
-      ]);
-      // Bank details masked, or hidden from reviewers.
-      res.json({ payment: paymentFor(p, req.user), jobs, transaction: transactionFor(transaction, req.user), notices: notices.map((n) => noticeFor(n, req.user)) });
+      res.json(await getPayment(actorOf(req), req.params.id));
     }),
   );
 
