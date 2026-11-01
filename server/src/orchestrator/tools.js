@@ -12,12 +12,14 @@
 //   3. removes any actor, decidedBy, actorId, userId or roles field from the
 //      arguments, then validates them against the tool's schema (400); the
 //      actor always comes from the context, never from the arguments;
-//   4. runs the tool with ctx.actor and returns a compact view (views.js);
+//   4. runs the tool with ctx.actor and returns a compact view (views.js),
+//      with bank-like numbers in outside text hidden for reviewers;
 //   5. writes ONE audit entry (subject "orchestrator", the run id, action
 //      "tool_called"): the tool, ok or the refusal's status, the time taken
-//      and the ids returned. Never the arguments or the result;
+//      and the ids returned (the first 40). Never the arguments or the result;
 //   6. records the ids it returned in the context (id provenance).
-// If the audit entry cannot be written, the call fails and returns nothing.
+// If the audit entry cannot be written, the call fails with 500 and returns
+// nothing. A failure never carries an internal error to the caller.
 //
 // What the orchestrator must never reach is listed in neverExposed.js.
 
@@ -46,8 +48,10 @@ import { listSuppliers } from '../services/beneficiaries.js';
 import { ingestion } from '../services/ingestion.js';
 import { requireActor } from '../services/actor.js';
 import { HttpError, recordAudit } from '../services/runs.js';
+import { redactSecrets } from '../safeUri.js';
 import { isToolContext } from './context.js';
 import {
+  forViewer,
   invoiceList,
   invoiceDetail,
   payables,
@@ -112,9 +116,10 @@ const LIST = [
     run: async (actor, a) => reference(await getReference(actor), a),
   }),
   tool('get_history', {
-    description: "One record's audit history, oldest first. subjectId: a record id, a supplier ABN, or a bank line id (<statement id>:<line number>).",
+    description:
+      "What happened to one record and when, oldest first: each entry's action, status change and a fixed summary (never the log's own text). subjectId: a record id, a supplier ABN, or a bank line id (<statement id>:<line number>).",
     input: z.strictObject({ subjectId: z.string().regex(/^[A-Za-z0-9:_-]{1,100}$/), limit: pageLimit(100).optional() }),
-    run: async (actor, a) => history(await listAuditEntries(actor, { subjectId: a.subjectId, limit: a.limit ?? 50 }), actor),
+    run: async (actor, a) => history(await listAuditEntries(actor, { subjectId: a.subjectId, limit: a.limit ?? 50 })),
   }),
   tool('list_payments', {
     description: 'Payments (simulated bank), latest first, optionally by status, with counts per status.',
@@ -241,24 +246,43 @@ async function auditCall(ctx, name, failure, ids, ms) {
   });
 }
 
-/** Run one read-only tool for the context's actor. Throws HttpError (400, 401, 403, 404, 500). */
+export const TOOL_FAILED = 'The tool could not finish.';
+export const NOT_RECORDED = 'The tool call could not be recorded in the audit log, so its result was withheld.';
+
+// What the caller (and so the model) is told: the status and our own message,
+// never an internal error, its stack, its cause or any extra data. Internal
+// errors go to the server log only, with credentials removed.
+function safeFailure(err, name) {
+  if (err instanceof HttpError) return new HttpError(err.status, err.message);
+  console.error(`Orchestrator tool ${name} failed: ${redactSecrets(err?.message ?? String(err))}`);
+  return new HttpError(500, TOOL_FAILED);
+}
+
+/** Run one read-only tool for the context's actor. Throws HttpError (400, 401, 403, 404, 500), never anything else. */
 export async function callTool(ctx, name, args) {
   if (!isToolContext(ctx)) throw new HttpError(401, 'Sign in to continue.');
   const t = typeof name === 'string' && Object.hasOwn(TOOLS, name) ? TOOLS[name] : null;
+  // A name the model made up is recorded as "unknown", not as given.
+  const recorded = t ? t.name : 'unknown';
   const started = performance.now();
   let result;
   let failure = null;
   try {
     if (!t) throw new HttpError(404, 'There is no such tool.');
     requireActor(ctx.actor, ...t.roles);
-    result = await t.run(ctx.actor, parseArguments(t, args));
+    // Bank-like numbers in outside text are hidden here for anyone who may not see bank details.
+    result = forViewer(await t.run(ctx.actor, parseArguments(t, args)), ctx.actor);
   } catch (err) {
-    failure = err instanceof HttpError ? err : new HttpError(500, 'The tool could not finish.');
-    if (!(err instanceof HttpError)) failure.cause = err;
+    failure = safeFailure(err, recorded);
   }
   const ids = failure ? [] : [...idsIn(result)];
-  // A name the model made up is recorded as "unknown", not as given.
-  await auditCall(ctx, t ? t.name : 'unknown', failure, ids, Math.round(performance.now() - started));
+  try {
+    await auditCall(ctx, recorded, failure, ids, Math.round(performance.now() - started));
+  } catch (err) {
+    // Fail closed: no result, and no ids remembered, without its audit entry.
+    console.error(`Orchestrator tool ${recorded}: the audit entry could not be written: ${redactSecrets(err?.message ?? String(err))}`);
+    throw new HttpError(500, NOT_RECORDED);
+  }
   if (failure) throw failure;
   ctx.remember(ids);
   return result;

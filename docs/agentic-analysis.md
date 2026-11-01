@@ -1069,6 +1069,15 @@ show.
   `simBank.accountView()` writes (it opens the account if missing, and saves
   its `updatedAt` on every read); and the model enum needed no separate change,
   because it uses `SUBJECT_KINDS`.
+- **Hardening (2026-11-01).** For reviewers, numbers that could be bank
+  details are hidden in all outside text (`views.js` `hideBankNumbers`); the
+  other roles see that text as the screens do. `get_history` gives a fixed
+  summary per entry and never the audit log's own `detail` or `reason` (they
+  can hold supplier email addresses, people's notes and bank details).
+  `ingestion_status` gives an error's code, not its message. Invisible
+  characters (zero-width, text-direction, tag characters) are removed from
+  outside text. A tool failure is our status and message only, and a call
+  whose audit entry cannot be written fails with 500 and returns nothing.
 
 ### Phase 2: the graph, read-only, in one request
 

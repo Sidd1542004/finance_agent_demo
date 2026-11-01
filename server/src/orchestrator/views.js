@@ -10,8 +10,16 @@
 //   payers, approvers and administrators. Reviewers get no bank field at all.
 // - Text from outside (supplier names, line descriptions, email subjects,
 //   bank-line descriptions) and any sentence that can quote it (check details,
-//   reasons) is wrapped as { untrusted_text } and cut to UNTRUSTED_MAX
-//   characters. The model's prompt says such text is data, not instructions.
+//   reasons) is wrapped as { untrusted_text }, without invisible characters,
+//   and cut to UNTRUSTED_MAX characters. The model's prompt says such text is
+//   data, not instructions.
+// - For anyone who may not see bank details (reviewers), numbers in that text
+//   that could be bank details are hidden (forViewer). Outside text can carry
+//   an account number someone typed; payers, approvers and admins see it as
+//   the existing screens show it.
+// - The audit log's own text (detail, reason) never reaches the model: it can
+//   hold email addresses, people's notes and bank details. History entries
+//   carry a fixed summary of the action instead.
 // - Plain values are only ids, numbers, booleans, dates and the statuses and
 //   kinds our own code sets, each checked for its shape. A document identifier
 //   (invoice, PO or item number) stays plain only when it looks like one;
@@ -26,14 +34,93 @@ export const UNTRUSTED_FIELD = 'untrusted_text';
 // Control characters, including line and paragraph separators.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g;
 
-/** Outside text as { untrusted_text }, one line, at most UNTRUSTED_MAX characters ({ truncated: true } when cut). */
+// Characters that do not show but can hide or reorder text: the soft hyphen,
+// zero-width spaces and joiners, text-direction marks, embeddings, overrides
+// and isolates, invisible operators, variation selectors, the byte-order mark,
+// filler characters, interlinear annotation marks, and Unicode "tag"
+// characters (which can carry invisible instructions to a model). Built from
+// code points, so this file contains none of them itself.
+const INVISIBLE_RANGES = [
+  [0x00ad, 0x00ad],
+  [0x034f, 0x034f],
+  [0x061c, 0x061c],
+  [0x115f, 0x1160],
+  [0x17b4, 0x17b5],
+  [0x180b, 0x180f],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x206f],
+  [0x3164, 0x3164],
+  [0xfe00, 0xfe0f],
+  [0xfeff, 0xfeff],
+  [0xffa0, 0xffa0],
+  [0xfff9, 0xfffb],
+  [0xe0000, 0xe007f],
+  [0xe0100, 0xe01ef],
+];
+export const INVISIBLE = new RegExp(`[${INVISIBLE_RANGES.map(([a, b]) => `${String.fromCodePoint(a)}-${String.fromCodePoint(b)}`).join('')}]`, 'gu');
+
+/**
+ * Outside text as { untrusted_text }: invisible characters removed, one line,
+ * at most UNTRUSTED_MAX characters ({ truncated: true } when cut). A cut never
+ * leaves the first digits of a longer number behind.
+ */
 export function untrusted(value) {
   if (value === null || value === undefined) return null;
-  const s = String(value).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
+  const s = String(value).replace(INVISIBLE, '').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
   if (!s) return null;
   const chars = Array.from(s); // never splits a character in two
-  return chars.length > UNTRUSTED_MAX ? { [UNTRUSTED_FIELD]: chars.slice(0, UNTRUSTED_MAX).join(''), truncated: true } : { [UNTRUSTED_FIELD]: s };
+  if (chars.length <= UNTRUSTED_MAX) return { [UNTRUSTED_FIELD]: s };
+  let cut = chars.slice(0, UNTRUSTED_MAX).join('');
+  if (/\d$/.test(cut) && /^[ -]?\d/.test(chars.slice(UNTRUSTED_MAX, UNTRUSTED_MAX + 2).join(''))) cut = cut.replace(/\d(?:[ -]?\d)*$/, '');
+  return { [UNTRUSTED_FIELD]: cut.trimEnd(), truncated: true };
 }
+
+// ----- numbers that could be bank details, in outside text -----
+
+export const NUMBER_HIDDEN = '[number hidden]';
+// Words that say a number nearby is about a bank account, a biller or a card.
+const BANK_WORDS = /\b(?:bsb|bpay|biller|crn|acct|a\/c|account|bank|banking|card|iban|swift|routing|sort\s*code|remit)/i;
+// A run of digits, optionally grouped by single spaces or hyphens, that is not
+// part of a code (HOS-10482, SIMTXN-2026...), an amount ($1,402.50, 727.10) or a date (01/11/2026).
+const digitRun = (min) => new RegExp(`(?<![A-Za-z0-9.,/-])\\d(?:[ -]?\\d){${min - 1},}(?![0-9A-Za-z]|[.,]\\d)`, 'g');
+const LONG_RUN = digitRun(6); // BSBs, account numbers, CRNs, card numbers
+const SHORT_RUN = digitRun(4); // also biller codes, when the text talks about banking
+const CARD_TOKEN = /\bSIMCARD-[A-Za-z0-9]+/gi;
+const digitCount = (s) => s.replace(/\D/g, '').length;
+
+/**
+ * Hide every number in `text` that could be a bank detail: a BSB, account
+ * number, biller code, CRN or card. Kept: ISO dates, years (when looking for
+ * short numbers) and an 11-digit ABN that says it is one ("ABN 57 600 410 275").
+ */
+export function hideBankNumbers(text) {
+  const s = String(text).replace(CARD_TOKEN, NUMBER_HIDDEN);
+  const bankish = BANK_WORDS.test(s);
+  return s.replace(bankish ? SHORT_RUN : LONG_RUN, (m, offset) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(m)) return m;
+    if (bankish && /^(?:19|20)\d{2}$/.test(m)) return m;
+    if (digitCount(m) === 11 && /\bABN[\s:#]{0,3}$/i.test(s.slice(Math.max(0, offset - 8), offset))) return m;
+    return NUMBER_HIDDEN;
+  });
+}
+
+function hideInText(value) {
+  if (Array.isArray(value)) return value.map(hideInText);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = k === UNTRUSTED_FIELD && typeof v === 'string' ? hideBankNumbers(v) : hideInText(v);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * A view as this person may see it. Payers, approvers and administrators: as
+ * built. Anyone else (reviewers): numbers that could be bank details are
+ * hidden in every untrusted text. Applied by tools.js to every tool's result.
+ */
+export const forViewer = (view, viewer) => (seesMaskedBankDetails(viewer) ? view : hideInText(view));
 
 const CODE = /^[A-Za-z0-9][A-Za-z0-9._/#-]{0,39}$/;
 /** A document identifier: plain when it looks like one, otherwise untrusted text. */
@@ -422,23 +509,78 @@ export function reference(r, { abn: wantAbn, poNumber } = {}) {
 
 // ----- the audit log -----
 
-/** listAuditEntries(actor, ...): entries already masked by the service; no names, only whether a person acted. */
-export function history(r, viewer) {
+// The audit log's text (detail, reason) is never passed on: it can hold
+// supplier email addresses ("intended for accounts@..."), people's names and
+// notes, masked bank details and tool-call records. Each entry is given a
+// fixed summary of its action instead, from this list or, for any other
+// action, built from the action's own name (lower-case words only).
+const ACTION_SUMMARIES = Object.freeze({
+  received: 'The invoice was received.',
+  processed: 'The agent processed it.',
+  failed: 'The agent could not finish.',
+  approve: 'A person approved it.',
+  approve_received: 'A person approved the received quantity only.',
+  reject: 'A person rejected it.',
+  hold: 'A person put it on hold.',
+  cancel: 'A person cancelled it.',
+  reopen: 'A person reopened it.',
+  link_po: 'A person linked a purchase order.',
+  edit_fields: 'A person corrected fields read from the invoice.',
+  clear_duplicate: 'A person cleared the possible duplicate.',
+  request_correction: 'A person asked the supplier for a corrected invoice.',
+  schedule_payment: 'A person scheduled the payment.',
+  cancel_payment: 'A person cancelled the scheduled payment.',
+  payment_confirmed: 'The simulated bank confirmed the payment.',
+  payment_failed: 'The payment failed.',
+  payment_matched: 'A bank line was matched to the payment.',
+  payment_unmatched: 'A bank line was unmatched from the payment.',
+  part_payment: 'A part payment was recorded.',
+  reconciled: 'The bank line was reconciled.',
+  drafted: 'A notice to the supplier was drafted.',
+  approved_and_sent: 'A person approved the notice to the supplier.',
+  discarded: 'A person discarded the notice to the supplier.',
+  bank_details_proposed: 'New bank details were proposed for the supplier.',
+  bank_details_approved: 'The proposed bank details were approved.',
+  bank_details_rejected: 'The proposed bank details were rejected.',
+  bank_details_revealed: 'The full bank details were shown to an authorised person.',
+  user_created: 'An account was created.',
+  user_updated: 'An account was changed.',
+  password_reset: 'A password was reset.',
+  password_changed: 'A password was changed.',
+  signed_in: 'Someone signed in.',
+  signed_out: 'Someone signed out.',
+  locked: 'An account was locked after failed sign-ins.',
+  policy_changed: 'The agent policy was changed.',
+  demo_loaded: 'The demo data was loaded.',
+  tool_called: 'An orchestrator tool was used.',
+});
+
+// A status or action name our code wrote: lower-case words only, so never a name or a sentence.
+const label = (v) => (typeof v === 'string' && /^[a-z][a-z0-9_]{0,39}$/.test(v) ? v : null);
+
+function summaryOf(action, from, to) {
+  const base = (action && ACTION_SUMMARIES[action]) || (action ? `Recorded: ${action.replace(/_/g, ' ')}.` : 'Recorded.');
+  return from && to && from !== to ? `${base} Status ${from} to ${to}.` : base;
+}
+
+/** listAuditEntries(actor, ...): what happened and when, never the entries' own text or who did it. */
+export function history(r) {
   return {
     items: r.items.map((e) => {
-      // Bank-detail entries: reviewers get only the fact that something happened.
-      const hidden = e.subjectKind === 'supplier' && !seesMaskedBankDetails(viewer);
+      const action = label(e.action);
+      const from = label(e.from);
+      const to = label(e.to);
       return {
         id: oid(e._id),
         at: when(e.at),
-        subjectKind: word(e.subjectKind),
+        subjectKind: label(e.subjectKind),
         subjectId: subjectId(e.subjectId),
-        action: word(e.action),
-        from: word(e.from) ?? untrusted(e.from),
-        to: word(e.to) ?? untrusted(e.to),
-        reason: hidden ? null : untrusted(e.reason),
-        detail: hidden ? untrusted('Bank details are hidden for your role.') : untrusted(e.detail),
+        action,
+        from,
+        to,
+        summary: summaryOf(action, from, to),
         byPerson: Boolean(e.actorId),
+        noteRecorded: Boolean(e.reason), // the note itself is on the record's screen
       };
     }),
   };
@@ -459,7 +601,7 @@ export const simBankAccount = (a) =>
       }
     : { opened: false, simulated: true }; // no payment has reached the simulated bank yet
 
-/** ingestion().status(): per provider, never the mailbox address, scopes or who connected it. */
+/** ingestion().status(): per provider, never the mailbox address, scopes, who connected it or an error's text. */
 export const ingestionStatus = (r) => ({
   providers: list(
     r.providers,
@@ -470,7 +612,8 @@ export const ingestionStatus = (r) => ({
       syncing: bool(p?.syncing),
       lastPollAt: when(p?.lastPollAt),
       lastSuccessAt: when(p?.lastSuccessAt),
-      lastError: untrusted(p?.lastError && typeof p.lastError === 'object' ? p.lastError.message : p?.lastError),
+      // The error's code only: its message can quote the mailbox address.
+      lastError: p?.lastError ? { code: word(typeof p.lastError === 'object' ? p.lastError.code : null), at: when(p.lastError?.at) } : null,
       counts: numbersOnly(p?.counts),
     }),
     5,
