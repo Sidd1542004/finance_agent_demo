@@ -286,6 +286,50 @@ auditSchema.pre('save', function auditInsertOnly() {
 auditSchema.pre('bulkWrite', refuse);
 export const AuditEvent = model('AuditEvent', auditSchema);
 
+// The assistant's conversation threads (orchestrator/threads.js): per person,
+// what was asked (the intent) and which records each answer showed, plus a
+// pending clarification's options. Never the question, an answer, a name or an
+// amount. Strict: no other field can be stored. Deleted 24 h after they start
+// (TTL index on expiresAt); every read checks expiresAt too.
+const threadRecord = new Schema(
+  { kind: { type: String, enum: ['invoice', 'payment', 'supplier', 'bank_line'], required: true }, id: { type: String, required: true, maxlength: 64 } },
+  { _id: false, strict: 'throw' },
+);
+export const OrchestratorThread = model(
+  'OrchestratorThread',
+  new Schema(
+    {
+      _id: { type: String, required: true },
+      ownerId: { type: String, required: true, index: true },
+      expiresAt: { type: Date, required: true },
+      turns: {
+        type: [
+          new Schema(
+            { at: { type: Date, required: true }, intent: { type: String, required: true, maxlength: 40 }, records: { type: [threadRecord], default: [] } },
+            { _id: false, strict: 'throw' },
+          ),
+        ],
+        default: [],
+      },
+      options: {
+        type: [
+          new Schema(
+            {
+              optionId: { type: String, required: true },
+              intent: { type: String, required: true, maxlength: 40 },
+              args: { type: Mixed, default: {} },
+              records: { type: [threadRecord], default: [] },
+            },
+            { _id: false, strict: 'throw', minimize: false },
+          ),
+        ],
+        default: [],
+      },
+    },
+    { timestamps: true, strict: 'throw' },
+  ).index({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+);
+
 // One record per agent run: the audit trail of the six stages.
 export const AgentRun = model(
   'AgentRun',

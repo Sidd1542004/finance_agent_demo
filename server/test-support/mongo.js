@@ -139,6 +139,11 @@ export function testEnv(uri, extra = {}) {
     SMTP_HOST: '',
     ALERT_EMAILS: '',
     ADMIN_SETUP_TOKEN: '',
+    // The assistant: generous limits, so tests check answers, not how fast this machine is; the
+    // tests of timeouts set their own. No reasoning effort unless a test asks for it.
+    ORCHESTRATOR_BUDGET_SECONDS: '120',
+    ORCHESTRATOR_STEP_SECONDS: '60',
+    GROQ_CLASSIFY_REASONING_EFFORT: '',
     // Empty: the defaults in config.js, whatever a local server/.env says
     // (dotenv never replaces a variable that is already set, even to '').
     MATCH_THRESHOLD: '',

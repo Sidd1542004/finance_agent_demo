@@ -72,6 +72,8 @@ export const config = {
   // 'high', for models that support it): empty sends none (the model's default).
   orchestrator: {
     budgetSeconds: Math.min(Math.max(5, num(process.env.ORCHESTRATOR_BUDGET_SECONDS, 30)), 120),
+    // The most one tool call (a database read) may take before the answer goes on without it.
+    stepSeconds: Math.min(Math.max(1, num(process.env.ORCHESTRATOR_STEP_SECONDS, 5)), 60),
     classifyReasoningEffort: ['low', 'medium', 'high'].includes(process.env.GROQ_CLASSIFY_REASONING_EFFORT) ? process.env.GROQ_CLASSIFY_REASONING_EFFORT : null,
   },
 

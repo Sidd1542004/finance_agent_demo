@@ -24,6 +24,7 @@ import {
   SimBankAttempt,
   SimBankAccount,
   IngestionItem,
+  OrchestratorThread,
 } from '../models/index.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleBeneficiaries } from './data.js';
 
@@ -68,6 +69,7 @@ export const DEMO_DATA_MODELS = [
   SimBankTransaction,
   SimBankAttempt,
   SimBankAccount,
+  OrchestratorThread, // the assistant's conversation threads (intents and record ids only)
 ];
 
 const deleteAll = async (models) => Object.fromEntries(await Promise.all(models.map(async (m) => [m.modelName, (await m.deleteMany({})).deletedCount])));

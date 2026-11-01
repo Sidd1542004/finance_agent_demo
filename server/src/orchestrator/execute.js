@@ -11,8 +11,10 @@
 
 import { callTool } from './tools.js';
 import { timeLeftMs } from '../llm/deadline.js';
+import { config } from '../config.js';
 
-export const LIMITS = Object.freeze({ maxCalls: 8, stepMs: 5000, minLeftMs: 4000 });
+// stepMs: ORCHESTRATOR_STEP_SECONDS (5 s by default).
+export const LIMITS = Object.freeze({ maxCalls: 8, stepMs: config.orchestrator.stepSeconds * 1000, minLeftMs: 4000 });
 
 // What a refusal from callTool means, in the words the answer uses.
 const CODES = { 400: 'invalid', 401: 'not_signed_in', 403: 'not_permitted', 404: 'not_found' };
