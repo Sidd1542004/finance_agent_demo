@@ -15,7 +15,12 @@ export const BLUEGUM = { abn: '36600733916', name: 'Bluegum IT Services Pty Ltd'
 export const payer = person('Sam Payer', ['payer']);
 export const approver = person('Priya Approver', ['approver']);
 
-export async function startPayments({ delaySeconds = 20, delayedSeconds = 600, openingBalance = 100000, env = {} } = {}) {
+// `bankTimeoutMs`: how long the adapter waits for the simulated bank, in REAL time
+// (everything else here runs on the injected clock). Kept well above any database
+// stall a busy machine can cause, so a slow MongoDB call is never mistaken for the
+// bank not answering. Tests of the timeout behaviour itself use adapters that
+// throw BankUnavailable({ timeout: true }) explicitly (paymentExecution.test.js).
+export async function startPayments({ delaySeconds = 20, delayedSeconds = 600, openingBalance = 100000, bankTimeoutMs = 60000, env = {} } = {}) {
   const db = await startTestDatabase();
   testEnv(db.uri, env);
   await mongoose.connect(db.uri);
@@ -43,7 +48,7 @@ export async function startPayments({ delaySeconds = 20, delayedSeconds = 600, o
   };
 
   const simBank = createSimBank({ delaySeconds, delayedSeconds, openingBalance, bsbPrefix: '999', temporaryFailures: 1 });
-  const adapter = createSimBankAdapter({ simBank, timeoutMs: 5000 });
+  const adapter = createSimBankAdapter({ simBank, timeoutMs: bankTimeoutMs });
   const policy = { matchThreshold: 85, missingAbn: 'review', segregateDuties: false, priceTolerancePct: 2, minConfidence: 0.8, gstRatePct: 10, roundingTolerance: 0.05 };
   const actions = createInvoiceActions({ store: sampleLedger, policy, rerun: async () => {}, now, bank: { calendar, methods: ['EFT', 'BPAY', 'Card'], currencies: ['AUD'] } });
   const delivery = createEmailDelivery({ appEnv: 'development', mode: 'outbox' });
