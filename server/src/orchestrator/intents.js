@@ -79,5 +79,19 @@ export function keepTypedArgs(args, question) {
   return { args: kept, dropped };
 }
 
+/**
+ * The questions offered when a question cannot be classified (the model
+ * failed, or it is unknown): each a complete request that needs no record, so
+ * choosing one runs it with no model call.
+ */
+export const MENU = Object.freeze([
+  { intent: 'list_pending_invoices', args: { stage: 'any' }, label: 'Invoices waiting for a person' },
+  { intent: 'list_unpaid_invoices', args: {}, label: 'Unpaid invoices' },
+  { intent: 'supplier_summary', args: { unpaidOnly: true }, label: 'Suppliers with unpaid invoices' },
+  { intent: 'payment_status', args: {}, label: 'What is blocking payments' },
+  { intent: 'reconciliation_exceptions', args: {}, label: 'Bank lines that need a decision' },
+  { intent: 'ingestion_status', args: {}, label: 'Mailbox ingestion status' },
+]);
+
 /** The argument naming the record an intent is about, if it needs one. */
 export const REF_ARG = Object.freeze({ find_invoice: 'invoiceRef', explain_invoice_status: 'invoiceRef', payment_status: 'invoiceRef', record_history: 'recordRef' });

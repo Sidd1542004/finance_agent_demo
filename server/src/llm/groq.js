@@ -41,9 +41,11 @@ const retryable = (status) => status === 429 || (status >= 500 && status <= 599)
  *   bad_request     another 4xx            bad_output   the answer was not a JSON object
  */
 export class GroqError extends Error {
-  constructor(code, message) {
+  constructor(code, message, { retryAfterMs = null } = {}) {
     super(message); // still shown as "Error: ...", as before
     this.code = code;
+    // How long Groq asked us to wait (Retry-After on a 429 or 5xx), when it said.
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -116,7 +118,7 @@ export async function groqChat({
     // Try again only if there is time for the wait and a reasonable attempt after it.
     attempt += 1;
     const delay = Math.min(RETRY.maxDelayMs, wait ?? RETRY.baseDelayMs * 2 ** (attempt - 1) + Math.floor(Math.random() * 200));
-    if (attempt > retries || now() + delay + MIN_ATTEMPT_MS > deadline) throw new GroqError(failureCode, failure);
+    if (attempt > retries || now() + delay + MIN_ATTEMPT_MS > deadline) throw new GroqError(failureCode, failure, { retryAfterMs: wait });
     await sleep(delay);
   }
 }
@@ -151,9 +153,14 @@ async function readContent(res, usageSeen = null) {
 
 /**
  * Ask the model for a JSON object.
+ *
+ * Optional, per call (the request body is unchanged without them):
+ *   retries          how many times to try again after a 429, 5xx or timeout (default RETRY.retries)
+ *   maxTokens        the most output tokens the answer may use (max_completion_tokens)
+ *   reasoningEffort  'low' | 'medium' | 'high', for the models that support it (reasoning_effort)
  * @returns the parsed object
  */
-export function groqJson({ apiKey, model, system, user, ...options }) {
+export function groqJson({ apiKey, model, system, user, maxTokens = null, reasoningEffort = null, ...options }) {
   return groqChat({
     apiKey,
     model,
@@ -161,6 +168,8 @@ export function groqJson({ apiKey, model, system, user, ...options }) {
     body: {
       temperature: 0,
       response_format: { type: 'json_object' },
+      ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
