@@ -6,6 +6,7 @@
 // supplier: beneficiary (bank detail) changes. user: accounts and roles.
 // sim_bank: simulated bank settings. payment_email: payment notices to suppliers.
 // settings: the agent's policy (services/policySettings.js).
+// orchestrator: the orchestrator's tool calls (orchestrator/tools.js), one entry per call.
 export const SUBJECT_KINDS = [
   'invoice',
   'payment',
@@ -20,6 +21,7 @@ export const SUBJECT_KINDS = [
   'payment_email',
   'ingestion',
   'settings',
+  'orchestrator',
 ];
 
 /** One audit entry, in a fixed shape. `actorId` (the signed-in user's id) is added only when known. */
