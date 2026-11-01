@@ -562,6 +562,9 @@ const ACTION_SUMMARIES = Object.freeze({
   policy_changed: 'The agent policy was changed.',
   demo_loaded: 'The demo data was loaded.',
   tool_called: 'An orchestrator tool was used.',
+  question_received: 'A question was put to the assistant.',
+  model_called: 'The assistant used the AI model.',
+  question_answered: 'The assistant answered.',
 });
 
 // A status or action name our code wrote: lower-case words only, so never a name or a sentence.
