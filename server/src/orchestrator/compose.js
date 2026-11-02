@@ -15,7 +15,10 @@ import { EXPLAINED } from './intents.js';
 import { timeLeftMs } from '../llm/deadline.js';
 
 // minLeftMs: groq.js needs 5 s for an attempt plus a 3 s margin; below this the template is used at once.
-export const COMPOSE = Object.freeze({ maxTokens: 400, timeoutMs: 12000, minLeftMs: 9000, maxRecords: 15 });
+// maxTokens: openai/gpt-oss-120b counts its reasoning as output. Real explanations used 540 to 705
+// output tokens, 415 to 467 of them reasoning (2026-11-02); with a 400 cap it ran out before writing
+// any JSON and Groq refused every call (400 json_validate_failed). 1200 leaves room.
+export const COMPOSE = Object.freeze({ maxTokens: 1200, timeoutMs: 12000, minLeftMs: 9000, maxRecords: 15 });
 
 export const COMPOSE_SYSTEM = [
   'You explain accounts payable records to the person who asked about them.',

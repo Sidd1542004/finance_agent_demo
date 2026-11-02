@@ -15,7 +15,7 @@ const { createToolContext } = await import('../src/orchestrator/context.js');
 const { createExecutor } = await import('../src/orchestrator/execute.js');
 const { planFor, runPlan } = await import('../src/orchestrator/plans.js');
 const { buildAnswer, LABELS, fallbackNote } = await import('../src/orchestrator/answer.js');
-const { COMPOSE_SYSTEM } = await import('../src/orchestrator/compose.js');
+const { COMPOSE_SYSTEM, COMPOSE } = await import('../src/orchestrator/compose.js');
 const { resetModelPause } = await import('../src/orchestrator/model.js');
 const { withDeadline } = await import('../src/llm/deadline.js');
 const { Invoice, VendorQuery, BankStatement, Vendor, BeneficiaryChange } = await import('../src/models/index.js');
@@ -122,7 +122,7 @@ test('what the model is sent: a task and record views; never the question, ids, 
       assert.equal(bodies.length, 1, `${key} ${intent}`);
       const [body] = bodies;
       assert.equal(body.messages[0].content, COMPOSE_SYSTEM);
-      assert.equal(body.max_completion_tokens, 400);
+      assert.equal(body.max_completion_tokens, COMPOSE.maxTokens);
       const user = userOf(body);
       const label = `${key} ${intent}`;
       assert.ok(!/[a-f0-9]{24}/.test(user), `${label}: a record id`);
