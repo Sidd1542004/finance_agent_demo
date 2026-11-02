@@ -1262,3 +1262,67 @@ dependency).
 
 The accuracy script is named `scripts/intent-accuracy.js` (this document
 earlier called it `intent-check.js`).
+
+---
+
+## 18. Built: results and differences from this design (2026-11-02)
+
+Built on `feature/orchestrator-phase2` in the order of §15, one commit per step.
+
+### 18.1 Intent accuracy on real Groq
+
+`scripts/intent-accuracy.js` on the 33 fixture questions
+(`server/test/fixtures/orchestrator-questions.json`), throwaway database, calls
+paced 8 s apart. "Wrong without asking": a different intent or wrong
+arguments, marked clear, so it would have run without asking.
+
+| Run | Accuracy | Wrong without asking | Errors | Latency p50 / p95 | Tokens (prompt / completion) |
+|---|---|---|---|---|---|
+| As the assistant runs: router, then `openai/gpt-oss-120b` | 33/33 (100%) | 0 | none | 844 / 1,824 ms | 5,723 / 1,529 over 8 calls |
+| Every question to `openai/gpt-oss-120b` | 31/33 (93.9%) | 0 | none | 843 / 1,691 ms | 23,654 / 4,259 over 33 calls |
+| The same with `reasoning_effort: "low"` | 31/33 (93.9%) | **1** | none | 624 / 1,513 ms | 23,654 / 1,925 |
+| Every question to `openai/gpt-oss-20b` (comparison only) | 32/33 (97%) | 0 | 2 `bad_request` | 715 / 1,804 ms | 22,218 / 4,028 |
+
+- The router answered 25 of the 33 questions with no model call, all
+  correctly; the model got the other 8, all correct.
+- **`reasoning_effort: "low"` is not used.** It halved the completion tokens
+  and cut about 0.2 s, but it answered one question wrongly without asking
+  ("What's in my approval queue?" lost its `approval` stage), so it fails
+  decision 7's "no loss". `GROQ_CLASSIFY_REASONING_EFFORT` stays empty.
+- **The classify output cap is 500 tokens, not 200 (§13.1).** gpt-oss counts
+  its reasoning as output: a short classification used about 190 completion
+  tokens, and with a 200 cap Groq refused some answers as bad requests (4 of
+  the 8 model calls in the first run). With 500 there were none.
+- `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` answered **404** ("does
+  not exist or you do not have access to it") for this account, although Groq
+  lists them. Note: `llama-3.3-70b-versatile` is the app's default when
+  `GROQ_MODEL` is not set (`config.js`), so a deployment without `GROQ_MODEL`
+  would get no AI with this account.
+- One run each, on one day: repeat before relying on the numbers.
+
+### 18.2 Differences from the design
+
+- **Compose needs 9 s left, not 6 s (§3.7, §13.2):** `groq.js` refuses a call
+  with less than 5 s for the attempt plus its 3 s margin, so the explanation is
+  skipped (template, `timeout`) below 9 s.
+- **`ORCHESTRATOR_STEP_SECONDS`** (default 5): the per-tool-call limit of
+  §3.5 is configurable. The test environment sets generous limits
+  (`ORCHESTRATOR_BUDGET_SECONDS` 120, `ORCHESTRATOR_STEP_SECONDS` 60) so the
+  suite does not depend on the test machine's speed; the timeout tests set
+  their own.
+- Two extra files: `model.js` (the one model call both steps use: no retries,
+  output cap, rate-limit pause, reason codes) and `answer.js` (assembles facts
+  and explanation). `views.js` keeps the history summaries for the new audit
+  actions.
+- The compose input leaves out bank fields for every role, not just reviewers:
+  no explanation needs them.
+- Facts for a list show at most 100 records; the template says how many there
+  are in all.
+
+### 18.3 Bundle and load time
+
+`@vercel/nft` on `api/index.js`: 52,143,633 bytes and 1,352 files, against
+50,135,047 and 1,140 after Phase 1 (+2.0 MB, +212 files, mostly zod; no
+LangChain files). Loading `app.js` took about 2.1 s on the development machine
+(Windows), and the first question about 0.35 s more for the lazily loaded
+pipeline. Not measured on Vercel.

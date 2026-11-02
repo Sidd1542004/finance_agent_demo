@@ -516,6 +516,8 @@ invoice from also paying it, administrators included. The earlier typed-name lis
 | `GET /api/ingestion`, `GET /api/ingestion/items` | Administrators: mailbox status and counts; what happened to each attachment. Never returns tokens. |
 | `POST /api/ingestion/:provider/connect` · `/disconnect` · `/sync`, `PUT /api/ingestion/:provider/enabled`, `POST /api/ingestion/items/:id/retry` | Administrators: connect (returns the provider's sign-in URL), disconnect, sync now, polling on/off, retry a failed attachment. |
 | `GET /api/ingestion/oauth/:provider/callback` | Where Google or Microsoft sends the administrator back; redirects to the dashboard with a result code. |
+| `POST /api/orchestrator/ask` | Any role: a question about the records in plain English (`{ question, threadId? }`, or `{ threadId, choice }` to pick an option). Read-only; answers with facts from the records and an AI or template explanation. See [docs/phase2-design.md](docs/phase2-design.md). |
+| `GET`, `DELETE /api/orchestrator/threads/:id` | The person's own conversation (intents and record ids only, 24 h); anyone else, administrators included, gets 404. |
 
 `AUTO_APPROVE_LIMIT` is gone; the new settings are `MATCH_THRESHOLD`,
 `MISSING_ABN_POLICY`, `ABR_GUID`, `REVIEWERS`, `APPROVERS`, `PAYERS`,

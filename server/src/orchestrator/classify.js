@@ -13,7 +13,10 @@ import { z } from 'zod';
 import { callModel } from './model.js';
 import { INTENTS, parseIntent, keepTypedArgs } from './intents.js';
 
-export const CLASSIFY = Object.freeze({ maxTokens: 200, timeoutMs: 6000 });
+// maxTokens: openai/gpt-oss-120b's reasoning counts as output, and at its default effort a
+// short answer used about 190 tokens (scripts/intent-accuracy.js, 2026-11-01): a 200 cap cut
+// some answers off (Groq refused them as bad requests). 500 leaves room.
+export const CLASSIFY = Object.freeze({ maxTokens: 500, timeoutMs: 6000 });
 
 export const CLASSIFY_SYSTEM = [
   'You sort questions for an accounts payable assistant into ONE intent from a closed list.',
