@@ -2066,3 +2066,101 @@ input[type='date'] {
 .document-view .decision-actions {
   align-items: center;
 }
+
+/* ----- Ask: questions about the records (views/Ask.jsx, askAnswer.js) ----- */
+.ask-layout {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.ask-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: end;
+}
+.ask-form .field-label {
+  grid-column: 1 / -1;
+}
+.ask-form textarea {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  resize: vertical;
+}
+.ask-question {
+  margin: 16px 0 4px;
+  color: var(--muted);
+  font-style: italic;
+}
+.ask-answer {
+  margin-top: 12px;
+}
+.ask-facts {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+}
+.ask-facts td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+.ask-handle {
+  display: inline-block;
+  min-width: 2em;
+  font-size: 12px;
+  color: var(--muted);
+}
+button.ask-ref {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--blue);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ask-explanation {
+  border-left: 3px solid var(--line);
+  padding: 4px 0 4px 12px;
+  margin: 12px 0;
+}
+.ask-explanation.ask-ai {
+  border-left-color: var(--gold);
+}
+.ask-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+.ask-note {
+  margin: 0 0 6px;
+}
+.ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ask-history {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--muted);
+}
+.ask-failures p {
+  margin: 4px 0;
+  color: #9b1c1c;
+}
+@media (max-width: 640px) {
+  .ask-layout {
+    padding: 16px;
+  }
+  .ask-form {
+    grid-template-columns: 1fr;
+  }
+}
