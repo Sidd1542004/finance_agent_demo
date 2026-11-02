@@ -17,8 +17,11 @@ import { timeLeftMs } from '../llm/deadline.js';
 // minLeftMs: groq.js needs 5 s for an attempt plus a 3 s margin; below this the template is used at once.
 // maxTokens: openai/gpt-oss-120b counts its reasoning as output. Real explanations used 540 to 705
 // output tokens, 415 to 467 of them reasoning (2026-11-02); with a 400 cap it ran out before writing
-// any JSON and Groq refused every call (400 json_validate_failed). 1200 leaves room.
-export const COMPOSE = Object.freeze({ maxTokens: 1200, timeoutMs: 12000, minLeftMs: 9000, maxRecords: 15 });
+// any JSON and Groq refused every call (400 json_validate_failed).
+// reasoningEffort: with 'low', explanations used 134 to 315 output tokens (2026-11-02), were about
+// 0.8 s faster and stayed within the item limit (16/16 AI answers, against 13/16 at the default).
+// maxTokens 1000 keeps more than 3x the most observed.
+export const COMPOSE = Object.freeze({ maxTokens: 1000, reasoningEffort: 'low', timeoutMs: 12000, minLeftMs: 9000, maxRecords: 15 });
 
 export const COMPOSE_SYSTEM = [
   'You explain accounts payable records to the person who asked about them.',
@@ -187,6 +190,7 @@ export async function compose(intent, facts, state, { apiKey, model, fetchImpl }
     system: COMPOSE_SYSTEM,
     user: JSON.stringify({ task: composeTask(intent, facts, state), records: composeRecords(facts, state) }),
     maxTokens: COMPOSE.maxTokens,
+    reasoningEffort: COMPOSE.reasoningEffort,
     timeoutMs: COMPOSE.timeoutMs,
     fetchImpl,
   });

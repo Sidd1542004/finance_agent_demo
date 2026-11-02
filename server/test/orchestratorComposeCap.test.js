@@ -3,8 +3,9 @@
 // output: when the cap is too small it runs out before writing any JSON, and
 // Groq refuses the call with 400 json_validate_failed. The stand-in below does
 // the same, using the most output tokens a real call needed (measured
-// 2026-11-02 with the configured model): 705 for an explanation (compose),
-// about 200 for a classification.
+// 2026-11-02 with the configured model): 705 for an explanation (compose) at
+// the default reasoning effort, 315 with reasoning_effort "low" (what compose
+// now sends), and about 200 for a classification.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +15,7 @@ import { classify, CLASSIFY } from '../src/orchestrator/classify.js';
 import { callModel, resetModelPause } from '../src/orchestrator/model.js';
 import { invoiceClaims } from '../src/orchestrator/ground.js';
 
-const NEEDED = { compose: 705, classify: 200 };
+const NEEDED = { compose: 705, composeLow: 315, classify: 200 };
 
 // Answers like Groq for gpt-oss: a cap below what the answer needs is a 400 json_validate_failed.
 function groqLike(content, needed) {
@@ -72,20 +73,22 @@ const deps = (fetchImpl) => ({ apiKey: 'test-key', model: 'openai/gpt-oss-120b',
 
 test.beforeEach(() => resetModelPause());
 
-test('the caps: compose 1200 output tokens, classify unchanged at 500', () => {
-  assert.equal(COMPOSE.maxTokens, 1200);
+test('the caps: compose 1000 output tokens with reasoning effort low, classify unchanged at 500', () => {
+  assert.equal(COMPOSE.maxTokens, 1000);
+  assert.equal(COMPOSE.reasoningEffort, 'low');
+  assert.ok(COMPOSE.maxTokens >= NEEDED.composeLow * 3, 'more than 3x the most a low-effort explanation used');
   assert.equal(CLASSIFY.maxTokens, 500);
-  assert.ok(COMPOSE.maxTokens >= NEEDED.compose * 1.5, 'room above the most a real explanation used');
+  assert.ok(COMPOSE.maxTokens >= NEEDED.compose, 'still above the most a default-effort explanation used');
   assert.ok(CLASSIFY.maxTokens >= NEEDED.classify * 2);
 });
 
-test('compose sends its 1200 cap and gets an explanation from a reasoning model', async () => {
+test('compose sends its 1000 cap and reasoning_effort low, and gets an explanation', async () => {
   const g = groqLike(EXPLANATION, NEEDED.compose);
   const r = await compose('explain_invoice_status', facts, {}, deps(g.fetchImpl));
   assert.equal(g.bodies.length, 1);
-  assert.equal(g.bodies[0].max_completion_tokens, 1200);
+  assert.equal(g.bodies[0].max_completion_tokens, 1000);
   assert.equal(g.bodies[0].model, 'openai/gpt-oss-120b', 'the configured model, as for classification');
-  assert.equal(g.bodies[0].reasoning_effort, undefined, 'no reasoning effort for compose');
+  assert.equal(g.bodies[0].reasoning_effort, 'low');
   assert.equal(r.source, 'model');
   assert.equal(r.summary, 'HOS-10517 is on hold.');
   assert.equal(r.call.outcome, 'ok');
@@ -102,6 +105,7 @@ test('classification still sends its 500 cap and works', async () => {
   const g = groqLike({ intent: 'unknown', args: {}, clarity: 'clear' }, NEEDED.classify);
   const r = await classify('hello there', deps(g.fetchImpl));
   assert.equal(g.bodies[0].max_completion_tokens, 500);
+  assert.equal(g.bodies[0].reasoning_effort, undefined, 'classify sends no reasoning effort, as before');
   assert.deepEqual([r.ok, r.intent], [true, 'unknown']);
 });
 
