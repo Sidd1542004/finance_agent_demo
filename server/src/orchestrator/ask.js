@@ -24,6 +24,7 @@ import { MENU, REF_ARG } from './intents.js';
 import { resolveInvoice, resolveSupplier, resolveThis, resolveRecord } from './resolve.js';
 import { planFor, runPlan } from './plans.js';
 import { buildAnswer } from './answer.js';
+import { premisesIn } from './stateReason.js';
 import { loadThread, previousTurn, makeOptions, saveTurn, takeOption } from './threads.js';
 
 // ----- the request body -----
@@ -263,7 +264,7 @@ export async function ask({ actor, question = null, threadId = null, choice = nu
     if (run.status === 'not_permitted') {
       reply = { status: 'not_permitted', message: `This needs the ${run.roles.join(' or ')} role.` };
     } else {
-      answer = await buildAnswer({ intent, args, run, model: deps });
+      answer = await buildAnswer({ intent, args, run, model: deps, viewer: actor, premises: q ? premisesIn(q) : [] });
       modelCalls.push(...answer.modelCalls);
       status = run.status;
     }

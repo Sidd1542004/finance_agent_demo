@@ -211,6 +211,18 @@ test('the counts and reasons are recorded on the call, which the audit log keeps
     { trimmed: 1, dropped: 2, reasons: ['too_long_trimmed', 'too_long_dropped_has_facts', 'too_long_no_boundary'] },
   );
   const detail = JSON.parse(JSON.stringify(r.call)); // what ask.js writes as the model_called entry
-  assert.deepEqual(Object.keys(detail).sort(), ['completionTokens', 'itemReasons', 'itemsDropped', 'itemsTrimmed', 'model', 'ms', 'outcome', 'promptTokens', 'purpose']);
+  assert.deepEqual(Object.keys(detail).sort(), [
+    'completionTokens',
+    'itemReasons',
+    'itemsDropped',
+    'itemsRejected',
+    'itemsTrimmed',
+    'model',
+    'ms',
+    'outcome',
+    'promptTokens',
+    'purpose',
+    'rejectReasons',
+  ]);
   assert.ok(!JSON.stringify(detail).includes('Pallets'), 'no text from the answer in the record');
 });

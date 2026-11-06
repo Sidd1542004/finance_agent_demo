@@ -166,3 +166,113 @@ export function groundExplanation({ summary, items = [] }, { records, numbers, r
   const useTemplate = !summaryText || dropped.length * 2 > total;
   return { summary: summaryText || null, items: keptItems, dropped, total, useTemplate };
 }
+
+// ----- contradictions of the state code worked out (stateReason.js) -----
+
+// Words just before a phrase that deny it ("has not been paid", "is not on hold").
+const NEGATED = /(?:\bnot|\bnever|\bno longer|n't|\byet to be|\bto be|\bwill be|\buntil|\bunless)\s+(?:\w+\s+){0,2}$/i;
+const negated = (sentence, index) => NEGATED.test(sentence.slice(Math.max(0, index - 30), index));
+
+// A claim that the invoice is in a status now ("is in needs_review", "remains on hold", "status is approved").
+const STATUS_PHRASES = [
+  ['needs[ _]review', 'needs_review'],
+  ['under[ _]review', 'under_review'],
+  ['on[ _]hold', 'on_hold'],
+  ['payment[ _]pending', 'payment_pending'],
+  ['payment[ _]processing', 'payment_processing'],
+  ['payment[ _]completed', 'payment_completed'],
+  ['payment[ _]failed', 'payment_failed'],
+  ['rejected', 'rejected'],
+  ['cancell?ed', 'cancelled'],
+];
+const NOW = String.raw`\b(?:is|remains|stays|is still|is now|is currently|currently|status is|status of)\s+(?:in\s+)?(?:the\s+|a\s+)?`;
+
+// Saying a payment does not exist, or cannot be made, when one has been scheduled.
+const NO_PAYMENT =
+  /\b(?:not (?:yet )?(?:been )?scheduled|cannot be (?:scheduled|paid|recorded)|can(?:no|')t be (?:scheduled|paid|recorded)|before (?:a |any )?payment can be scheduled|no payment (?:is |has been |was )?(?:scheduled|set up|exists)|there is no payment|not (?:yet )?eligible for payment|ineligible for payment|prevents? (?:any )?payment|payment actions? (?:are|is) not permitted)\b/i;
+const PAID = /\b(?:has been|have been|was|is|already been|already) paid\b/gi;
+// Saying checks a person has already decided past still hold the invoice back.
+const OVERRIDDEN_BLOCK = [
+  /\bbecause\b[^.]*\b(?:checks?|confidence|quantity|match score|score)\b[^.]*\bfail/i,
+  /\bchecks?\b[^.]*\b(?:prevent|block|stop|keep(?:s|ing)?|hold(?:s|ing)? (?:it|the invoice) back|make[s]? (?:it|the invoice) ineligible)/i,
+  /\b(?:ineligible|not eligible)\b/i,
+  /\b(?:checks?|issues?) (?:must|need to|needs to) be (?:resolved|addressed|cleared|fixed|corrected)\b/i,
+];
+// Actions the app has, as a sentence recommends them (base form), and the next steps that allow them.
+// An action with no allowing step (reverse the approval, reopen, cancel, put on hold) is never recommended.
+const ACTION_MENTIONS = [
+  [/\bapprove\b|\breject\b/i, ['decide']],
+  [
+    /\b(?:edit|correct) (?:the |any )?fields?\b|\blink (?:the |a )?(?:purchase order|po)\b|\brequest (?:a )?corrected\b|\bask the supplier for a corrected\b/i,
+    ['correct', 'review_hold'],
+  ],
+  [/\bprocess (?:it |the invoice )?again\b|\brerun\b/i, ['review_hold']],
+  [/\b(?:re)?schedule (?:the |a |its )?payment\b|\bschedule it\b/i, ['schedule_payment', 'check_payment']],
+  [/\brecord (?:the |a |its )?payment\b|\bmark (?:it|the cheque|the payment) (?:as )?paid\b|\bmatch it to the bank statement\b/i, ['record_payment']],
+  [/\breverse (?:the |its )?approval\b|\breverse_approval\b/i, []],
+  [/\breopen\b/i, []],
+  [/\bcancel (?:the |this |its )?(?:invoice|payment|it)\b/i, []],
+  [/\b(?:put|place) (?:it |the invoice )?on hold\b/i, []],
+  [/\bmark (?:the payment |it )?(?:as )?failed\b/i, []],
+  [/\bclear (?:the |it as )?(?:a )?duplicate\b/i, []],
+];
+
+/**
+ * Why `sentence` contradicts `state` (stateReason.js), or null:
+ *   payment_exists          says there is no payment, or it cannot be scheduled, when one exists
+ *   not_paid                says it has been paid when no payment is completed
+ *   status                  says it is in a status other than its own
+ *   overridden_checks       says checks a person decided past still block it
+ *   action_not_recommended  recommends an action that is not in its recommended next steps
+ */
+export function contradictsState(sentence, state) {
+  if (!state) return null;
+  const s = String(sentence);
+  const pay = state.payment?.state || 'none';
+  if (!['none', 'cancelled'].includes(pay) && NO_PAYMENT.test(s)) return 'payment_exists';
+  if (pay !== 'completed' && state.status !== 'payment_completed') for (const m of s.matchAll(PAID)) if (!negated(s, m.index)) return 'not_paid';
+  for (const [phrase, status] of STATUS_PHRASES) {
+    for (const m of s.matchAll(new RegExp(String.raw`${NOW}${phrase}\b`, 'gi'))) if (status !== state.status && !negated(s, m.index)) return 'status';
+  }
+  if (state.overriddenChecks?.length && OVERRIDDEN_BLOCK.some((re) => re.test(s))) return 'overridden_checks';
+  const allowed = new Set((state.recommendedNextSteps || []).map((x) => x.action));
+  for (const [re, by] of ACTION_MENTIONS) {
+    if (by.some((a) => allowed.has(a))) continue;
+    for (const m of s.matchAll(new RegExp(re.source, 'gi'))) if (recommends(s, m.index)) return 'action_not_recommended';
+  }
+  return null;
+}
+
+// Is the action at `index` recommended (an instruction or a "can / should / must ..."), not told as
+// something that happened ("a reviewer put it on hold")?
+const RECOMMENDING = /\b(?:can|could|should|must|may|might|need(?:s)? to|ha(?:s|ve) to|recommend\w*|suggest\w*|consider|try|option|you)\b/i;
+function recommends(sentence, index) {
+  const before = sentence.slice(0, index);
+  if (!before.trim() || /^(?:please|then|next|first|now|so)\W*$/i.test(before.trim())) return true; // an instruction
+  return RECOMMENDING.test(before.slice(-60));
+}
+
+/**
+ * Check the explanation against the state code worked out, before the other
+ * grounding checks: a contradicting item is dropped whole; a contradicting
+ * summary sentence is dropped. `stateOf(handle)` gives an item's state; the
+ * summary is checked against every state. Returns { summary, items, rejected: [{ handle, reason }] }.
+ */
+export function rejectContradictions({ summary, items = [] }, stateOf, states) {
+  const rejected = [];
+  const keptItems = [];
+  for (const item of items) {
+    const st = stateOf(item.handle);
+    const reason = sentencesOf(item.text)
+      .map((x) => contradictsState(x, st))
+      .find(Boolean);
+    if (reason) rejected.push({ handle: item.handle, reason });
+    else keptItems.push(item);
+  }
+  const keptSummary = sentencesOf(summary).filter((x) => {
+    const reason = states.map((st) => contradictsState(x, st)).find(Boolean);
+    if (reason) rejected.push({ handle: null, reason });
+    return !reason;
+  });
+  return { summary: keptSummary.join(' '), items: keptItems, rejected };
+}

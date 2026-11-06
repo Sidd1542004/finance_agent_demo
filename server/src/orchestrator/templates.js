@@ -39,6 +39,17 @@ function invoiceStory(view, history) {
   ]);
 }
 
+// The same story from the state code worked out (stateReason.js): what happened, what blocks it, what next.
+function stateStory(st) {
+  const events = st.events.map((e) => (e.date ? `${e.date}: ${e.what}` : e.what));
+  return join([
+    events.length ? `What happened: ${events.map(sentence).join(' ')}` : '',
+    st.overriddenChecks.length ? `Checks that failed before the approval were decided past by an approver: ${st.overriddenChecks.map((c) => words(c.id)).join(', ')}.` : '',
+    st.blockers.length ? `What blocks the next step: ${st.blockers.join(' ')}` : '',
+    st.recommendedNextSteps.length ? `Next steps: ${st.recommendedNextSteps.map((x) => `${x.text} (${x.role})`).join(' ')}` : '',
+  ]);
+}
+
 function paymentLine(p) {
   const parts = [
     money(p.amount, p.currency),
@@ -84,9 +95,14 @@ export function templateAnswer(intent, args, facts, state) {
     case 'explain_invoice_status': {
       const f = invoices[0];
       if (!f) return { summary: 'That invoice could not be read.', items: [] };
+      const st = f.state;
       return {
-        summary: `${ref(f)} from ${f.supplier || 'an unknown supplier'} is ${words(f.status)}${dueText(f.due) ? `, ${dueText(f.due)}` : ''}.`,
-        items: [{ handle: f.handle, text: invoiceStory(state.invoice || {}, facts.history) || invoiceLine(f) }, ...itemsFor(payments, paymentLine)],
+        summary: join([
+          st?.premiseCorrection || '',
+          `${ref(f)} from ${f.supplier || 'an unknown supplier'} is ${words(f.status)}${dueText(f.due) ? `, ${dueText(f.due)}` : ''}.`,
+          st?.overdueCause || '',
+        ]),
+        items: [{ handle: f.handle, text: (st ? stateStory(st) : invoiceStory(state.invoice || {}, facts.history)) || invoiceLine(f) }, ...itemsFor(payments, paymentLine)],
       };
     }
     case 'payment_status': {
@@ -94,12 +110,14 @@ export function templateAnswer(intent, args, facts, state) {
         const f = invoices[0];
         const p = payments[0];
         if (!f) return { summary: 'That invoice could not be read.', items: [] };
-        const summary = p
+        const st = f.state;
+        const position = p
           ? `${ref(f)}: ${paymentLine(p)}`
           : f.status === 'approved'
             ? `${ref(f)} is approved, but no payment is scheduled yet.`
             : `${ref(f)} is not approved for payment yet: it is ${words(f.status)}.`;
-        return { summary, items: [{ handle: f.handle, text: invoiceStory(state.invoice || {}, []) || invoiceLine(f) }] };
+        const summary = join([st?.premiseCorrection || '', position, st?.overdueCause || '']);
+        return { summary, items: [{ handle: f.handle, text: (st ? stateStory(st) : invoiceStory(state.invoice || {}, [])) || invoiceLine(f) }] };
       }
       const approved = invoices.filter((i) => i.status === 'approved').length;
       const failedInvoices = invoices.filter((i) => i.status === 'payment_failed').length;

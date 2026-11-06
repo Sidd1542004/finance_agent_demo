@@ -46,8 +46,10 @@ export function planMessages(run) {
  * { facts, history, explanation, notes, failures, modelCalls, records }.
  * records: the { kind, id } of every record the answer shows (for the thread).
  */
-export async function buildAnswer({ intent, args, run, model = {} }) {
-  const facts = buildFacts(intent, args, run.state);
+// viewer: the person asking (for the recommended next steps); premises: statuses the question assumed
+// (stateReason.js premisesIn), so a wrong assumption is corrected first. The question itself is not used.
+export async function buildAnswer({ intent, args, run, model = {}, viewer = null, premises = [] }) {
+  const facts = buildFacts(intent, args, run.state, { viewer, premises });
   const template = templateAnswer(intent, args, facts, run.state);
   const modelCalls = [];
   let explanation = { source: 'template', label: LABELS.template, summary: template.summary, items: template.items, fallback: null, note: null };

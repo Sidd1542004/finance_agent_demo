@@ -9,6 +9,7 @@
 
 import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { invoiceClaims, paymentClaims } from './ground.js';
+import { stateReason } from './stateReason.js';
 
 const text = (v) => (v && typeof v === 'object' ? (v.untrusted_text ?? null) : (v ?? null));
 const MAX_LISTED = 100;
@@ -82,7 +83,7 @@ const STAGE_STATUSES = {
  *   extra    figures code computed (counts, totals), allowed in the explanation
  *   grounding { records: [{ handle, refs, claims }], views }
  */
-export function buildFacts(intent, args, state) {
+export function buildFacts(intent, args, state, { viewer = null, premises = [], today = undefined } = {}) {
   const records = [];
   const grounding = [];
   const views = [];
@@ -117,9 +118,18 @@ export function buildFacts(intent, args, state) {
     case 'find_invoice':
     case 'explain_invoice_status':
     case 'payment_status': {
-      if (state.invoice) addInvoice(state.invoice);
+      if (state.invoice) {
+        // Why it is where it is, worked out by code (stateReason.js); the explanation must not contradict it.
+        const f = addInvoice(state.invoice);
+        f.state = stateReason(state.invoice, { payment: state.payment?.payment || null, history: state.history?.items || [], viewer, premises, ...(today ? { today } : {}) });
+        grounding[grounding.length - 1].state = f.state;
+        views.push(f.state);
+      }
+      const invoiceState = records.find((r) => r.kind === 'invoice')?.state || null;
       if (state.payment?.payment) addPayment(state.payment.payment);
       else if (state.invoice?.payment) addPayment(state.invoice.payment);
+      // The invoice's payment is explained by the same state.
+      if (invoiceState && grounding.at(-1)?.handle?.startsWith('P')) grounding.at(-1).state = invoiceState;
       history = historyOf(state.history);
       // What blocks payments (payment_status with no invoice named).
       for (const i of (state.toPay?.items || []).filter((x) => ['approved', 'payment_failed'].includes(x.status)).slice(0, 30)) addInvoice(i);
