@@ -171,8 +171,7 @@ export function composeRecords(facts, state) {
         unpaid_invoices: f.openCount,
         unpaid_total: money(f.openTotal),
         overdue_invoices: f.overdue,
-        // The earliest due date among its unpaid invoices: not when they became overdue.
-        oldest_due_date: f.oldestDue,
+        // No dates: the oldest due date stays in the facts block (the model read it as "overdue since").
         // Only when there is one, so a hold is never mentioned for a supplier without one.
         ...(f.pendingChange ? { bank_details_change_pending: true } : {}),
       });
@@ -192,8 +191,7 @@ export function composeTask(intent, facts, state) {
   if (intent === 'payment_status' && state.invoiceId)
     return `Explain the payment position of invoice ${first} using its state_reason: whether it is approved, whether a payment is scheduled or done, and what is still needed.${lead}`;
   if (intent === 'payment_status') return 'Explain what is stopping these payments from going ahead, most urgent first.';
-  const holds =
-    'Mention a bank-details hold only for a supplier whose record has bank_details_change_pending; otherwise say nothing about bank details. Call oldest_due_date the oldest due date, not the date anything became overdue.';
+  const holds = 'Mention a bank-details hold only for a supplier whose record has bank_details_change_pending; otherwise say nothing about bank details.';
   if (state.abn) return `Summarise supplier ${first}: its unpaid invoices and anything overdue. ${holds}`;
   return `Summarise these suppliers with unpaid invoices: who is owed the most and who is overdue. ${holds}`;
 }

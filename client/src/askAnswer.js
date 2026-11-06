@@ -133,9 +133,10 @@ function factRow(f, onOpenInvoice) {
     payment: [f.supplier, statusLabel('payment', f.status), amount(f.amount, f.currency), f.scheduledFor ? `Scheduled ${f.scheduledFor}` : f.method || ''],
     supplier: [
       f.state,
-      f.openCount !== undefined ? `${f.openCount} unpaid` : '',
+      f.openCount !== undefined ? `${f.openCount} unpaid${f.overdue ? `, ${f.overdue} overdue` : ''}` : '',
       f.openTotal !== undefined ? amount(f.openTotal) : '',
-      f.pendingChange ? 'Bank details change pending' : '',
+      // The oldest due date is shown here only: the explanation is not given it.
+      [f.oldestDue ? `Oldest due ${f.oldestDue}` : '', f.pendingChange ? 'Bank details change pending' : ''].filter(Boolean).join('; '),
     ],
     bank_line: [f.date, statusLabel('bank_line', f.status), amount(f.amount), f.description],
     mailbox: [f.state, f.enabled ? 'Polling on' : 'Polling off', f.lastPollAt ? `Last checked ${f.lastPollAt.slice(0, 16).replace('T', ' ')} UTC` : '', ''],

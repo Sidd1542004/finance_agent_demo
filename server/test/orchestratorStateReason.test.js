@@ -77,6 +77,19 @@ const HOS = {
 const scpState = (viewer = APPROVER, premises = []) => stateReason(SCP, { payment: SCP_PAYMENT, history: SCP_HISTORY, viewer, premises, today: TODAY });
 const hosState = (premises = []) => stateReason(HOS, { history: [], viewer: APPROVER, premises, today: TODAY });
 
+test('without history, the payment event says only what is set, not when it was scheduled', () => {
+  const st = stateReason(SCP, { payment: SCP_PAYMENT, history: [], viewer: APPROVER, today: TODAY });
+  assert.deepEqual(st.events, [
+    { date: '2026-11-02', what: 'A person approved the received quantity only' },
+    { date: null, what: 'A Cheque payment is set for 2026-10-03' },
+  ]);
+  const eft = stateReason(SCP, { payment: { ...SCP_PAYMENT, method: 'EFT', route: 'bank' }, history: [], viewer: APPROVER, today: TODAY });
+  assert.equal(eft.events[1].what, 'An EFT payment is set for 2026-10-03');
+  const other = stateReason(SCP, { payment: { ...SCP_PAYMENT, method: 'Other' }, history: [], viewer: APPROVER, today: TODAY });
+  assert.equal(other.events[1].what, 'A payment is set for 2026-10-03');
+  assert.ok(![st, eft, other].some((x) => /was scheduled/.test(JSON.stringify(x.events))));
+});
+
 test('SCP-7731: scheduled, queued, overdue because the queued payment has not run; its checks are overridden', () => {
   const st = scpState();
   assert.equal(st.status, 'payment_pending');

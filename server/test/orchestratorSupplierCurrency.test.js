@@ -21,7 +21,7 @@ const supplier = (over = {}) => ({
   ...over,
 });
 
-test('supplier input: the date is the oldest due date, and a bank-details hold appears only when there is one', () => {
+test('supplier input: no dates go to the model, and a bank-details hold appears only when there is one', () => {
   const [plain, held] = composeRecords({ records: [supplier(), supplier({ handle: 'S2', pendingChange: true })] }, {});
   assert.deepEqual(plain, {
     handle: 'S1',
@@ -30,16 +30,14 @@ test('supplier input: the date is the oldest due date, and a bank-details hold a
     unpaid_invoices: 2,
     unpaid_total: 'AUD 18,953.00',
     overdue_invoices: 2,
-    oldest_due_date: '2026-10-25',
   });
   assert.equal(held.bank_details_change_pending, true);
-  assert.ok(!/overdue.?since|oldestDue|pendingBankChange/i.test(JSON.stringify([plain, held])));
+  assert.ok(!/2026-10-25|oldest|due_date|overdue.?since|pendingBankChange/i.test(JSON.stringify([plain, held])), 'the oldest due date stays in the facts block');
 
   for (const state of [{}, { abn: '51824753556' }]) {
     const task = composeTask('supplier_summary', { records: [supplier()] }, state);
-    assert.match(task, /Mention a bank-details hold only for a supplier whose record has bank_details_change_pending; otherwise say nothing about bank details\./);
-    assert.match(task, /Call oldest_due_date the oldest due date, not the date anything became overdue\./);
-    assert.ok(!/whether a bank-details change is holding|whose payments are held/.test(task));
+    assert.match(task, /Mention a bank-details hold only for a supplier whose record has bank_details_change_pending; otherwise say nothing about bank details\.$/);
+    assert.ok(!/oldest|whether a bank-details change is holding|whose payments are held/.test(task));
   }
 });
 

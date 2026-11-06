@@ -193,6 +193,14 @@ test('every amount in the facts block carries its currency code', () => {
   assert.ok(!/\$\d/.test(html), 'no bare dollar sign');
   const supplier = render({ ...ANSWERED, facts: [{ handle: 'S1', kind: 'supplier', id: '1', name: 'Bluegum IT', state: 'verified', openCount: 2, openTotal: 18953 }] });
   assert.match(supplier, /AUD 18,953\.00/);
+  const dated = render({
+    ...ANSWERED,
+    facts: [
+      { handle: 'S1', kind: 'supplier', id: '1', name: 'Bluegum IT', state: 'verified', openCount: 2, openTotal: 18953, overdue: 2, oldestDue: '2026-10-25', pendingChange: true },
+    ],
+  });
+  assert.match(dated, /2 unpaid, 2 overdue/);
+  assert.match(dated, /Oldest due 2026-10-25; Bank details change pending/, 'the oldest due date is shown in the facts block');
 });
 
 test("the state block: Status, Why and Next steps with the role, from the response's state", () => {

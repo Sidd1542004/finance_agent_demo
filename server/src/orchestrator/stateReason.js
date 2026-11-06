@@ -42,6 +42,9 @@ export const money = (n, currency = 'AUD') =>
     ? `${/^[A-Z]{3}$/.test(currency || '') ? currency : 'AUD'} ${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : null;
 
+// "A Cheque payment", "An EFT payment", "A payment" (no method, or Other).
+const paymentNoun = (method) => (!method || method === 'Other' ? 'A payment' : `${/^[AEIOU]/i.test(method) ? 'An' : 'A'} ${method} payment`);
+
 // History actions that decide where an invoice goes, in plain words.
 const DECISIVE = {
   approve: 'approved it',
@@ -156,7 +159,8 @@ export function stateReason(invoice, { payment = null, history = [], viewer = nu
     .map((e) => ({ date: day(e.at), what: `${e.action === 'payment_confirmed' ? '' : e.byPerson ? 'A person ' : 'The system '}${DECISIVE[e.action]}`.trim() }));
   if (!events.length) {
     if (approval) events.push({ date: approvedOn, what: `A person ${DECISIVE[approval.decision]}` });
-    if (pay.state !== 'none' && pay.date) events.push({ date: null, what: `A payment by ${pay.method || 'an unknown method'} was scheduled for ${pay.date}` });
+    // Without history there is no date for when it was scheduled, so the wording says only what is set.
+    if (pay.state !== 'none' && pay.date) events.push({ date: null, what: `${paymentNoun(pay.method)} is set for ${pay.date}` });
   }
 
   // Failed checks: open while the invoice awaits a decision; overridden once a person approved it.
