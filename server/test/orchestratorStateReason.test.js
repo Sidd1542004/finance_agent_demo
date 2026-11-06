@@ -111,14 +111,27 @@ test('recommended next steps: never reverse_approval or reopen for an approved, 
       viewer === PAYER ? [true, true] : [false, false],
     );
   }
-  // HOS-10517 awaits a decision: decide (approver) and correct (reviewer).
+  // HOS-10517 awaits a decision: corrective steps (reviewer) come before the decision (approver).
   assert.deepEqual(
     hosState().recommendedNextSteps.map((x) => [x.action, x.role]),
     [
-      ['decide', 'approver'],
       ['correct', 'reviewer'],
+      ['decide', 'approver'],
     ],
   );
+});
+
+test('recommended next steps: corrective (reviewer) before decision (approver) in every state that has both', () => {
+  for (const status of ['needs_review', 'under_review', 'on_hold']) {
+    const st = stateReason({ ...HOS, status }, { history: [], viewer: APPROVER, today: TODAY });
+    const roles = st.recommendedNextSteps.map((x) => x.role);
+    const firstApprover = roles.indexOf('approver');
+    assert.ok(firstApprover >= 0, status);
+    assert.ok(
+      roles.slice(firstApprover).every((r) => r === 'approver'),
+      `${status}: ${roles.join(', ')}`,
+    );
+  }
 });
 
 test('a premise the record does not support is corrected; a question that asks presupposes nothing', () => {

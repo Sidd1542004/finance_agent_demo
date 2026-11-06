@@ -196,11 +196,12 @@ export function stateReason(invoice, { payment = null, history = [], viewer = nu
   else if (pay.state === 'on_hold') blockers.push('The payment is on hold.');
 
   // Recommended next steps: rules for this state; each names the role that can do it.
+  // Corrective steps (reviewer) come before the decision (approver): a decision is made on corrected data.
   const steps = [];
   const add = (action, role, words) => steps.push({ action, role, text: words, yours: viewer ? hasRole(viewer, role) : null });
   if (status === 'needs_review' || status === 'under_review') {
-    add('decide', 'approver', 'Review the failed checks on the invoice screen, then approve, approve the received quantity only, or reject it.');
     if (status === 'needs_review') add('correct', 'reviewer', 'Correct any fields read wrongly, link the purchase order, or ask the supplier for a corrected invoice.');
+    add('decide', 'approver', 'Review the failed checks on the invoice screen, then approve, approve the received quantity only, or reject it.');
   } else if (status === 'on_hold') {
     add('review_hold', 'reviewer', 'Read the hold note on the invoice screen and process it again or ask the supplier for a corrected invoice.');
     add('decide', 'approver', 'Once the reason for the hold is resolved, approve, approve the received quantity only, or reject it.');

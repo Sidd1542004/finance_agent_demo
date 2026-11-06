@@ -3,10 +3,12 @@
 // model is unavailable or its text does not match the records. Every figure
 // here comes from the facts (facts.js); nothing is invented.
 
+import { money as withCurrency } from './stateReason.js';
+
 const words = (s) => String(s ?? '').replace(/_/g, ' ');
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-const money = (n, currency = 'AUD') =>
-  typeof n === 'number' ? new Intl.NumberFormat('en-AU', { style: 'currency', currency: /^[A-Z]{3}$/.test(currency || '') ? currency : 'AUD' }).format(n) : 'an unknown amount';
+// Every amount with its currency code ("AUD 727.10"), as the facts block shows it.
+const money = (n, currency = 'AUD') => withCurrency(n, currency) ?? 'an unknown amount';
 const text = (v) => (v && typeof v === 'object' ? (v.untrusted_text ?? null) : (v ?? null));
 const sentence = (s) => (s && !/[.!?]$/.test(s) ? `${s}.` : s);
 const join = (parts) => parts.filter(Boolean).join(' ');

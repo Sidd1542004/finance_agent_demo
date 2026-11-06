@@ -2147,6 +2147,25 @@ button.ask-ref {
   gap: 8px;
   margin-top: 8px;
 }
+.ask-premise {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--gold);
+  font-weight: 600;
+}
+.ask-state {
+  margin: 0 0 12px;
+}
+.ask-state p {
+  margin: 4px 0;
+}
+.ask-state ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.ask-role {
+  color: var(--muted);
+}
 .ask-history {
   margin: 0 0 8px;
   padding-left: 18px;

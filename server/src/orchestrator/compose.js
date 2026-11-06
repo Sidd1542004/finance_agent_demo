@@ -168,11 +168,13 @@ export function composeRecords(facts, state) {
         handle: f.handle,
         name: untrusted(f.name),
         state: f.state,
-        pendingBankChange: f.pendingChange,
-        openCount: f.openCount,
-        openTotal: money(f.openTotal),
-        overdue: f.overdue,
-        oldestDue: f.oldestDue,
+        unpaid_invoices: f.openCount,
+        unpaid_total: money(f.openTotal),
+        overdue_invoices: f.overdue,
+        // The earliest due date among its unpaid invoices: not when they became overdue.
+        oldest_due_date: f.oldestDue,
+        // Only when there is one, so a hold is never mentioned for a supplier without one.
+        ...(f.pendingChange ? { bank_details_change_pending: true } : {}),
       });
     } else if (f.kind === 'account') {
       out.push({ simulatedAccountAvailable: money(f.available, f.currency) });
@@ -190,8 +192,10 @@ export function composeTask(intent, facts, state) {
   if (intent === 'payment_status' && state.invoiceId)
     return `Explain the payment position of invoice ${first} using its state_reason: whether it is approved, whether a payment is scheduled or done, and what is still needed.${lead}`;
   if (intent === 'payment_status') return 'Explain what is stopping these payments from going ahead, most urgent first.';
-  if (state.abn) return `Summarise supplier ${first}: its unpaid invoices, anything overdue, and whether a bank-details change is holding its payments.`;
-  return 'Summarise these suppliers with unpaid invoices: who is owed the most, who is overdue, and whose payments are held by a bank-details change.';
+  const holds =
+    'Mention a bank-details hold only for a supplier whose record has bank_details_change_pending; otherwise say nothing about bank details. Call oldest_due_date the oldest due date, not the date anything became overdue.';
+  if (state.abn) return `Summarise supplier ${first}: its unpaid invoices and anything overdue. ${holds}`;
+  return `Summarise these suppliers with unpaid invoices: who is owed the most and who is overdue. ${holds}`;
 }
 
 /**

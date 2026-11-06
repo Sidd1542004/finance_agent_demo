@@ -2,6 +2,7 @@
 // and keep its six-step trail.
 
 import { runAgent } from '../agent/core/loop.js';
+import { stamp, stampIso } from '../clock.js';
 import { AgentRun } from '../models/index.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { bankLineId } from '../agent/finance/audit.js';
@@ -29,7 +30,7 @@ export async function runAndRecord(agent, input, { kind, id }) {
     },
   });
   run.status = result.outcome || 'failed';
-  run.finishedAt = new Date();
+  run.finishedAt = stamp();
   await run.save();
 
   // The agent's status change, and for a statement each line's result.
@@ -72,7 +73,7 @@ export const latestRun = (id) => AgentRun.findOne({ subjectId: id }).sort({ crea
 export async function addHumanStep(id, summary, status) {
   const run = await AgentRun.findOne({ subjectId: id }).sort({ createdAt: -1 });
   if (!run) return;
-  run.steps = [...run.steps, { stage: 'human', status: 'done', summary, detail: null, ms: 0, at: new Date().toISOString() }];
+  run.steps = [...run.steps, { stage: 'human', status: 'done', summary, detail: null, ms: 0, at: stampIso() }];
   if (status) run.status = status;
   await run.save();
 }

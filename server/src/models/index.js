@@ -1,5 +1,10 @@
 import mongoose from 'mongoose';
 import { SUBJECT_KINDS } from '../agent/finance/audit.js';
+import { stamp } from '../clock.js';
+
+// Record timestamps on the records whose history people read: the demo month
+// stamps them with its own dates while it loads (see clock.js).
+const STAMPED = { currentTime: () => stamp() };
 
 const { Schema, model } = mongoose;
 const Mixed = Schema.Types.Mixed;
@@ -202,7 +207,7 @@ const invoiceSchema = new Schema(
     corrections: { type: [Mixed], default: [] }, // fields a reviewer corrected: { field, from, to, by, note, at }. Append only.
     events: { type: [Mixed], default: [] }, // status history: { at, actor, action, from, to, reason }. Append only.
   },
-  { timestamps: true, minimize: false },
+  { timestamps: STAMPED, minimize: false },
 );
 // The same attachment never becomes two invoices, even with two workers at once.
 // Partial: only invoices imported from a mailbox carry a file hash.
@@ -346,7 +351,7 @@ export const AgentRun = model(
       policy: { type: Mixed, default: null },
       finishedAt: Date,
     },
-    { timestamps: true },
+    { timestamps: STAMPED },
   ),
 );
 
@@ -396,7 +401,7 @@ const paymentSchema = new Schema(
     history: { type: [Mixed], default: [] },
     bank: { type: Mixed, default: null }, // { statementId, line, date, description }
   },
-  { timestamps: true },
+  { timestamps: STAMPED },
 );
 paymentSchema.index({ route: 1, status: 1 });
 export const Payment = model('Payment', paymentSchema);
@@ -419,7 +424,7 @@ const paymentJobSchema = new Schema(
     result: { type: String, default: null },
     history: { type: [Mixed], default: [] },
   },
-  { timestamps: true },
+  { timestamps: STAMPED },
 );
 paymentJobSchema.index({ paymentId: 1 }, { name: 'one_active_job_per_payment', unique: true, partialFilterExpression: { active: true } });
 paymentJobSchema.index({ active: 1, status: 1, runAt: 1 });
