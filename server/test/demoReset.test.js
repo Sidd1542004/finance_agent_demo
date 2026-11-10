@@ -272,6 +272,7 @@ test('the reset scope is the documented demo data; users, sessions, settings (in
     'SimBankAccount',
     'SimBankAttempt',
     'SimBankTransaction',
+    'SupplierDispute',
     'SupplierHint',
     'VendorQuery',
   ]);

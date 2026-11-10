@@ -16,6 +16,8 @@ export const NEVER_EXPOSED = Object.freeze([
   // Sending email to suppliers (payment notices, the daily summary).
   ...entry('email', 'services/paymentSystem.js', 'paymentNotices', 'approveAndSend', 'discard'),
   ...entry('email', 'services/paymentSystem.js', 'emailDelivery', 'deliver'),
+  // Queries to suppliers about an invoice's variance: drafted, edited and sent by a person only.
+  ...entry('email', 'services/paymentSystem.js', 'supplierDisputes', 'draftDispute', 'editDispute', 'sendDispute', 'discardDispute', 'resolveDispute'),
   ...entry('email', 'services/dailySummary.js', null, 'createDailySummaryHandler'),
   // Supplier bank details: changes, approvals and the audited reveal.
   ...entry('bank_details', 'services/beneficiaries.js', null, 'proposeChange', 'approveChange', 'rejectChange', 'revealBankDetails'),

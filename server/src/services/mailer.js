@@ -8,13 +8,13 @@ export function createMailer({ resendApiKey, smtp = {}, from }, { fetchImpl = fe
   if (resendApiKey) {
     return {
       via: 'resend',
-      async send({ to, subject, html, text }) {
+      async send({ to, subject, html, text, replyTo = null }) {
         let res;
         try {
           res = await fetchImpl(RESEND_URL, {
             method: 'POST',
             headers: { Authorization: `Bearer ${resendApiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from, to, subject, html, text }),
+            body: JSON.stringify({ from, to, subject, html, text, ...(replyTo ? { reply_to: replyTo } : {}) }),
             signal: AbortSignal.timeout(15000),
           });
         } catch (err) {
@@ -39,7 +39,7 @@ export function createMailer({ resendApiKey, smtp = {}, from }, { fetchImpl = fe
   if (smtp.host) {
     return {
       via: 'smtp',
-      async send({ to, subject, html, text }) {
+      async send({ to, subject, html, text, replyTo = null }) {
         const { default: nodemailer } = await loadNodemailer();
         const transport = nodemailer.createTransport({
           host: smtp.host,
@@ -48,7 +48,7 @@ export function createMailer({ resendApiKey, smtp = {}, from }, { fetchImpl = fe
           auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
           connectionTimeout: 15000,
         });
-        const info = await transport.sendMail({ from, to: to.join(', '), subject, html, text });
+        const info = await transport.sendMail({ from, to: to.join(', '), subject, html, text, ...(replyTo ? { replyTo } : {}) });
         return { id: info?.messageId ?? null };
       },
     };

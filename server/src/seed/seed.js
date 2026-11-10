@@ -25,6 +25,7 @@ import {
   SimBankAccount,
   IngestionItem,
   OrchestratorThread,
+  SupplierDispute,
 } from '../models/index.js';
 import { vendors, purchaseOrders, goodsReceipts, sampleBeneficiaries } from './data.js';
 
@@ -63,6 +64,7 @@ export const DEMO_DATA_MODELS = [
   PaymentJob,
   VendorQuery,
   OutboxMessage,
+  SupplierDispute, // queries to suppliers go with their invoices
   BankStatement,
   Report,
   SupplierHint,
