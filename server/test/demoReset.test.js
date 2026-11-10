@@ -264,6 +264,7 @@ test('the reset scope is the documented demo data; users, sessions, settings (in
     'IngestionItem',
     'Invoice',
     'InvoiceDocument',
+    'OrchestratorThread',
     'OutboxMessage',
     'Payment',
     'PaymentJob',

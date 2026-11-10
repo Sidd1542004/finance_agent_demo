@@ -112,6 +112,11 @@ const TYPED_PATTERNS = TYPED.map(wholeValue);
 // Every tool with arguments that find something.
 const CASES = [
   ['list_invoices', {}],
+  ['find_invoices', { invoiceNumber: 'HOS-10482' }],
+  ['find_invoices', { invoiceNumber: 'NOPE-1' }],
+  ['list_open_invoices', {}],
+  ['list_open_invoices', { stage: 'review' }],
+  ['list_open_invoices', { abn: BLUEGUM }],
   ['list_invoices', { filter: 'waiting' }],
   ['list_invoices', { filter: 'pay', limit: 5 }],
   ['get_invoice', { invoiceId: paidInvoice }],
@@ -196,6 +201,7 @@ function checkView(view, roleKey, label) {
 test('the tool layer covers every read-only tool of §9.1, and the audit log knows the orchestrator', () => {
   assert.deepEqual([...TOOL_NAMES].sort(), [
     'check_payment_slot',
+    'find_invoices',
     'get_history',
     'get_invoice',
     'get_payables',
@@ -206,6 +212,7 @@ test('the tool layer covers every read-only tool of §9.1, and the audit log kno
     'get_statement',
     'ingestion_status',
     'list_invoices',
+    'list_open_invoices',
     'list_payments',
     'list_queries',
     'list_reports',
@@ -460,7 +467,7 @@ test('NEVER_EXPOSED: every entry is real, no tool is named after one, and no orc
   for (const e of NEVER_EXPOSED) assert.equal(typeof (await ownerOf(e))[e.name], 'function', `${e.module} ${e.owner || ''} ${e.name}`);
 
   for (const name of TOOL_NAMES) {
-    assert.match(name, /^(list|get|check)_[a-z_]+$|^(sim_bank_account|ingestion_status)$/, `${name} reads, by its name`);
+    assert.match(name, /^(list|get|check|find)_[a-z_]+$|^(sim_bank_account|ingestion_status)$/, `${name} reads, by its name`);
     for (const e of NEVER_EXPOSED) assert.ok(!name.includes(camelToSnake(e.name)) && !name.includes(e.name.toLowerCase()), `${name} ~ ${e.name}`);
   }
 

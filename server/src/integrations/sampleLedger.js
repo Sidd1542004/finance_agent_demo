@@ -19,6 +19,7 @@ import {
   AuditEvent,
   BeneficiaryChange,
 } from '../models/index.js';
+import { stampIso } from '../clock.js';
 import { normaliseAbn } from '../agent/finance/rules.js';
 import { auditEntry } from '../agent/finance/audit.js';
 import { hintsForText } from '../agent/finance/supplierHints.js';
@@ -85,10 +86,7 @@ const paymentFilter = (id, from) => (Array.isArray(from) ? { _id: id, status: { 
 
 async function revertInvoice(invoiceId) {
   const event = { actor: 'Bank reconciliation', action: 'payment_unmatched', from: 'payment_completed', to: 'payment_pending', reason: 'The bank match was undone.' };
-  const done = await Invoice.updateOne(
-    { _id: invoiceId, status: 'payment_completed' },
-    { $set: { status: 'payment_pending' }, $push: { events: { at: new Date().toISOString(), ...event } } },
-  );
+  const done = await Invoice.updateOne({ _id: invoiceId, status: 'payment_completed' }, { $set: { status: 'payment_pending' }, $push: { events: { at: stampIso(), ...event } } });
   if (done.modifiedCount) await audit({ subjectKind: 'invoice', subjectId: invoiceId, ...event });
 }
 
@@ -126,7 +124,7 @@ export const sampleLedger = {
 
   // One active job per payment (unique index): a second one is refused.
   async createPaymentJob({ paymentId, invoiceId, runAt, scheduleVersion, by = 'System' }) {
-    const job = await PaymentJob.create({ paymentId, invoiceId, runAt, scheduleVersion, history: [{ at: new Date().toISOString(), event: 'created', by, runAt }] });
+    const job = await PaymentJob.create({ paymentId, invoiceId, runAt, scheduleVersion, history: [{ at: stampIso(), event: 'created', by, runAt }] });
     return { ...job.toObject(), id: String(job._id) };
   },
 
@@ -134,7 +132,7 @@ export const sampleLedger = {
   async cancelPaymentJobs(paymentId, { status = 'cancelled', by = 'System', reason = null } = {}) {
     const r = await PaymentJob.updateMany(
       { paymentId, active: true },
-      { $set: { status, active: false, leaseOwner: null, leaseUntil: null }, $push: { history: { at: new Date().toISOString(), event: status, by, reason } } },
+      { $set: { status, active: false, leaseOwner: null, leaseUntil: null }, $push: { history: { at: stampIso(), event: status, by, reason } } },
     );
     return r.modifiedCount;
   },
@@ -248,7 +246,7 @@ export const sampleLedger = {
 
   async claimInvoice(id, from, set, event) {
     const update = { $set: set };
-    if (event) update.$push = { events: { at: new Date().toISOString(), ...event } };
+    if (event) update.$push = { events: { at: stampIso(), ...event } };
     const d = await Invoice.findOneAndUpdate({ _id: id, status: from }, update, { new: true }).lean();
     if (d && event) await this.recordAudit({ subjectKind: 'invoice', subjectId: id, ...event, ...auditChanges(event) });
     return d ? { ...d, id: String(d._id) } : null;
@@ -256,7 +254,7 @@ export const sampleLedger = {
 
   async updateInvoice(id, set, event) {
     const update = { $set: set };
-    if (event) update.$push = { events: { at: new Date().toISOString(), ...event } };
+    if (event) update.$push = { events: { at: stampIso(), ...event } };
     const d = await Invoice.findByIdAndUpdate(id, update, { new: true }).lean();
     if (d && event) await this.recordAudit({ subjectKind: 'invoice', subjectId: id, ...event, ...auditChanges(event) });
     return d ? { ...d, id: String(d._id) } : null;
@@ -269,14 +267,14 @@ export const sampleLedger = {
 
   // The unique index on invoiceId refuses a second payment for the same invoice.
   async createPayment(payment) {
-    const history = { at: new Date().toISOString(), event: 'scheduled', by: payment.scheduledBy };
+    const history = { at: stampIso(), event: 'scheduled', by: payment.scheduledBy };
     const p = (await Payment.create({ ...payment, history: [history] })).toObject();
     await auditPayment(p, null, { ...history, detail: `${p.amount} by ${p.method || 'EFT'}, for ${p.scheduledFor || 'no date'}. Simulated.` });
     return { ...p, id: String(p._id), invoiceId: String(p.invoiceId) };
   },
 
   async updatePayment(id, from, set, history) {
-    const entry = history ? { at: new Date().toISOString(), ...history } : null;
+    const entry = history ? { at: stampIso(), ...history } : null;
     const update = { $set: set };
     if (entry) update.$push = { history: entry };
     // The record before the change, so the log shows the status it moved from.
@@ -362,7 +360,7 @@ export const sampleLedger = {
       { _id: paymentId, status: 'queued' },
       {
         $set: { status: 'paid', paidOn: bank.date ?? null, bank, recordedBy: 'Bank reconciliation' },
-        $push: { history: { at: new Date().toISOString(), event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
+        $push: { history: { at: stampIso(), event: 'paid', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
       },
       { new: true },
     ).lean();
@@ -377,7 +375,7 @@ export const sampleLedger = {
     };
     const moved = await Invoice.updateOne(
       { _id: doc.invoiceId, status: 'payment_pending' },
-      { $set: { status: 'payment_completed' }, $push: { events: { at: new Date().toISOString(), ...event } } },
+      { $set: { status: 'payment_completed' }, $push: { events: { at: stampIso(), ...event } } },
     );
     if (moved.modifiedCount) await audit({ subjectKind: 'invoice', subjectId: doc.invoiceId, ...event, reason: `Bank line ${bank.line} matches the payment.` });
     return paymentSummary(doc);
@@ -390,7 +388,7 @@ export const sampleLedger = {
       { _id: paymentId, status: 'paid', route: 'bank', $or: [{ bank: null }, { bank: { $exists: false } }, { 'bank.statementId': bank.statementId }] },
       {
         $set: { bank },
-        $push: { history: { at: new Date().toISOString(), event: 'reconciled', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
+        $push: { history: { at: stampIso(), event: 'reconciled', by: 'Bank reconciliation', detail: `Bank line ${bank.line}: ${bank.description}` } },
       },
       { new: true },
     ).lean();

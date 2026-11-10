@@ -12,6 +12,7 @@ import { assertAction, ActionError, failedChecks, STATUS_LABEL, PROCESSING } fro
 import { receivedOnly, cents, isNum } from '../agent/finance/rules.js';
 import { fmtMoney } from '../agent/finance/validation.js';
 import { todayIso } from '../agent/finance/due.js';
+import { stamp } from '../clock.js';
 import { correctionChanges, describeChange } from '../agent/finance/corrections.js';
 import { buildHints } from '../agent/finance/supplierHints.js';
 import { beneficiaryBlock, beneficiarySnapshot } from '../agent/finance/beneficiary.js';
@@ -85,7 +86,7 @@ export function createInvoiceActions({ store, policy, rerun, now = () => new Dat
     const idOf = actorId ? { actorId } : {};
     const byId = actorId ? { byId: actorId } : {};
 
-    const at = now().toISOString();
+    const at = stamp(now()).toISOString();
     const from = invoice.status;
     const cur = invoice.extracted?.currency || 'AUD';
     const m = (n) => fmtMoney(n, cur);

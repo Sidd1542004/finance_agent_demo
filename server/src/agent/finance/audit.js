@@ -3,6 +3,8 @@
 // ever added: nothing updates or deletes them (see AuditEvent in
 // models/index.js, which refuses both).
 
+import { stamp } from '../../clock.js';
+
 // supplier: beneficiary (bank detail) changes. user: accounts and roles.
 // sim_bank: simulated bank settings. payment_email: payment notices to suppliers.
 // settings: the agent's policy (services/policySettings.js).
@@ -25,7 +27,7 @@ export const SUBJECT_KINDS = [
 ];
 
 /** One audit entry, in a fixed shape. `actorId` (the signed-in user's id) is added only when known. */
-export function auditEntry({ subjectKind, subjectId, actor, actorId = null, action, from = null, to = null, reason = null, detail = null, at = new Date() }) {
+export function auditEntry({ subjectKind, subjectId, actor, actorId = null, action, from = null, to = null, reason = null, detail = null, at = stamp() }) {
   if (!SUBJECT_KINDS.includes(subjectKind)) throw new Error(`Unknown audit subject: ${subjectKind}`);
   return {
     ...(actorId ? { actorId: String(actorId).slice(0, 64) } : {}),

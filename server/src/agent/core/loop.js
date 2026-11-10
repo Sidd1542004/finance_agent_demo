@@ -17,6 +17,8 @@
 //   * Every stage is recorded (what happened, how long it took), so each run
 //     leaves an audit trail.
 
+import { stampIso } from '../../clock.js';
+
 export const STAGES = ['receive', 'understand', 'decide', 'act', 'verify', 'escalate'];
 
 // Stage handlers call this to say "a person needs to look at this".
@@ -57,6 +59,7 @@ export async function runAgent(agent, input, { onStep } = {}) {
 
   for (const stage of STAGES) {
     const startedAt = new Date();
+    const at = stampIso(startedAt); // the real time, or the demo month's (clock.js); ms stays real
 
     if (state.error && stage !== 'escalate') {
       await record({
@@ -65,7 +68,7 @@ export async function runAgent(agent, input, { onStep } = {}) {
         summary: 'Skipped because an earlier step failed.',
         detail: null,
         ms: 0,
-        at: startedAt.toISOString(),
+        at,
       });
       continue;
     }
@@ -78,7 +81,7 @@ export async function runAgent(agent, input, { onStep } = {}) {
         summary: out.summary || '',
         detail: out.detail ?? null,
         ms: Date.now() - startedAt.getTime(),
-        at: startedAt.toISOString(),
+        at,
       });
     } catch (err) {
       // Keep the first failure: that is the one a person needs to see.
@@ -89,7 +92,7 @@ export async function runAgent(agent, input, { onStep } = {}) {
         summary: err?.message || String(err),
         detail: null,
         ms: Date.now() - startedAt.getTime(),
-        at: startedAt.toISOString(),
+        at,
       });
     }
   }

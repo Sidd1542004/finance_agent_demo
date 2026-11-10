@@ -77,6 +77,9 @@ export const api = {
   // Signed in, any role: invoices read by the rules reader because the AI reader failed.
   invoiceSummary: () => request('/invoices/summary'),
 
+  // The assistant (any role): a question, or a choice from its options. Read-only.
+  ask: (body) => request('/orchestrator/ask', json(body)),
+
   // Signing in
   me: () => request('/auth/me'),
   login: (email, password) => request('/auth/login', json({ email, password })),

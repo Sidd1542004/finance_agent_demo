@@ -19,6 +19,7 @@
 // goes to "Under Review": eligible for approval, still waiting for a person.
 
 import { requestEscalation } from '../core/loop.js';
+import { stampIso } from '../../clock.js';
 import { validateInvoice, identifyVendor, fmtMoney } from './validation.js';
 import { matchToPo, suggestPurchaseOrders, resolvePurchaseOrder } from './matching.js';
 import { fingerprints, duplicateCheck } from './duplicates.js';
@@ -30,7 +31,7 @@ const SOURCE = { sample: 'from the sample set', upload: 'as an uploaded file', p
 
 export function pushEvent(invoice, event) {
   if (!Array.isArray(invoice.events)) invoice.events = [];
-  invoice.events.push({ at: new Date().toISOString(), ...event });
+  invoice.events.push({ at: stampIso(), ...event });
 }
 
 /** The fallback check, from the invoice's aiFallback record and the corrections made since. */
@@ -106,7 +107,7 @@ export function createInvoiceAgent({ ledger, extract, fallback = null, abr = nul
           } catch (err) {
             if (!fallback) throw err;
             // Never a dead end, never an approval: the rules reader reads it, and a person checks it.
-            fellBack = { code: err?.code || 'error', reason: String(err?.message || err).slice(0, 300), at: new Date().toISOString() };
+            fellBack = { code: err?.code || 'error', reason: String(err?.message || err).slice(0, 300), at: stampIso() };
             reading = await fallback(invoice.rawText, fellBack);
           }
         }

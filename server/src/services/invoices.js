@@ -3,6 +3,7 @@
 // keep the audit trail.
 
 import { runAgent } from '../agent/core/loop.js';
+import { stamp, stampIso } from '../clock.js';
 import { createInvoiceAgent } from '../agent/finance/invoiceAgent.js';
 import { createExtractor, createVisionReader, extractWithRules } from '../agent/finance/extract.js';
 import { createAbrLookup } from '../agent/finance/abr.js';
@@ -82,7 +83,7 @@ export async function processInvoice(invoice, { reading = null } = {}) {
   }
 
   run.status = result.outcome || 'failed';
-  run.finishedAt = new Date();
+  run.finishedAt = stamp();
   await run.save();
   return result;
 }
@@ -154,7 +155,7 @@ export async function getInvoiceDetail(id, actor = null) {
 async function addHumanStep(id, summary) {
   const run = await AgentRun.findOne({ invoiceId: id }).sort({ createdAt: -1 });
   if (!run) return;
-  run.steps = [...run.steps, { stage: 'human', status: 'done', summary, detail: null, ms: 0, at: new Date().toISOString() }];
+  run.steps = [...run.steps, { stage: 'human', status: 'done', summary, detail: null, ms: 0, at: stampIso() }];
   await run.save();
 }
 

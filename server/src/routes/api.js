@@ -28,6 +28,7 @@ import { createWorkLimiter } from '../rateLimit.js';
 import { requireUser, requireRole, requireAnyRole, actorOf } from '../auth/middleware.js';
 import { createDemoResetHandler, demoResetBlocked } from '../services/demoReset.js';
 import { registerIngestionPublicRoutes, registerIngestionRoutes } from './ingestion.js';
+import { registerOrchestratorRoutes } from './orchestrator.js';
 import { createAuthRouter } from './auth.js';
 import { createAdminRouter } from './admin.js';
 import { createSettingsRouter } from './settings.js';
@@ -271,6 +272,8 @@ registerFinanceRoutes(api, { upload, work });
 registerSupplierRoutes(api, { work });
 registerPaymentRoutes(api);
 registerIngestionRoutes(api, { work });
+// The assistant: read-only questions about the records (routes/orchestrator.js).
+registerOrchestratorRoutes(api, { work });
 
 api.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 

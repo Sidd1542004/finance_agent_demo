@@ -11,6 +11,8 @@
 //   listReports(actor, { before, limit })            GET /api/reports
 //   getReference(actor)                              GET /api/reference
 //   listAuditEntries(actor, { subjectId, limit })    GET /api/audit
+//   findInvoicesByNumber(actor, number)              orchestrator tool find_invoices
+//   listOpenInvoices(actor, { stage, abn })          orchestrator tool list_open_invoices
 //
 // The query arguments take the same values as the routes' query strings.
 // Bank details: reviewers see none, payers, approvers and administrators see
@@ -21,6 +23,7 @@ import mongoose from 'mongoose';
 
 import { ROLES, Invoice, Vendor, PurchaseOrder, GoodsReceipt, Payment, PaymentJob, VendorQuery, BankStatement, Report } from '../models/index.js';
 import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
+import { invoiceKey } from '../agent/finance/duplicates.js';
 import { sampleLedger } from '../integrations/sampleLedger.js';
 import { referenceVendor, paymentFor, transactionFor, noticeFor, auditEntryFor } from './bankViews.js';
 import { simBank, paymentNotices } from './paymentSystem.js';
@@ -59,6 +62,55 @@ export async function listInvoices(actor, { filter, ...paging } = {}) {
   const page = await pageOf(Invoice, where, pageParams(paging), { select: INVOICE_LIST_FIELDS });
   // The tab counts and the KPIs cover every invoice, not just the ones loaded.
   return { ...page, counts: await invoiceCounts() };
+}
+
+// ----- lookups for the orchestrator (no route uses these) -----
+
+// Up to `limit` invoices, newest first, with the matched supplier's ABN.
+const openListFields = `${INVOICE_LIST_FIELDS} supplier.abn`;
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Invoices whose number is `number`, compared as duplicate detection compares
+ * them (agent/finance/duplicates.js invoiceKey: case, punctuation and leading
+ * zeros ignored). At most 10, newest first. Found through the indexed
+ * fingerprints, or the number as written for an invoice that has none.
+ */
+export async function findInvoicesByNumber(actor, number) {
+  anyRole(actor);
+  const key = invoiceKey(number);
+  if (!key) return { items: [] };
+  const typed = String(number).trim();
+  const docs = await Invoice.find({
+    $or: [
+      { 'fingerprints.looseKey': new RegExp(`^${escapeRegex(key)}\\|`) },
+      { 'fingerprints.numberKey': new RegExp(`\\|${escapeRegex(key)}$`) },
+      { 'extracted.invoiceNumber': new RegExp(`^${escapeRegex(typed)}$`, 'i') },
+    ],
+  })
+    .select(openListFields)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(50)
+    .lean();
+  return { items: docs.filter((d) => invoiceKey(d.extracted?.invoiceNumber) === key).slice(0, 10) };
+}
+
+// Invoices still to be paid, by stage. Not "failed" (could not be read) or closed ones.
+export const OPEN_STAGES = Object.freeze({
+  approval: ['under_review'],
+  review: ['needs_review'],
+  on_hold: ['on_hold'],
+  payment: ['approved', 'payment_pending', 'payment_processing', 'payment_failed'],
+});
+const ALL_OPEN = Object.values(OPEN_STAGES).flat();
+
+/** Unpaid invoices (optionally one stage, or one supplier by ABN), newest first, at most 100, with the total count. */
+export async function listOpenInvoices(actor, { stage, abn } = {}) {
+  anyRole(actor);
+  const where = { status: { $in: OPEN_STAGES[stage] || ALL_OPEN } };
+  if (abn) where['supplier.abn'] = String(abn);
+  const [docs, total] = await Promise.all([Invoice.find(where).select(openListFields).sort({ createdAt: -1, _id: -1 }).limit(100).lean(), Invoice.countDocuments(where)]);
+  return { items: docs, total };
 }
 
 // ----- payments -----

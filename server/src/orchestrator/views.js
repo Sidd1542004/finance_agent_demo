@@ -210,6 +210,15 @@ export const invoiceListItem = (d) => ({
 
 export const invoiceList = (page) => ({ items: page.items.map(invoiceListItem), nextCursor: when(page.nextCursor), counts: numbersOnly(page.counts) });
 
+// A list item plus the ABN of the supplier the agent matched it to (null when not matched).
+const withSupplierAbn = (d) => ({ ...invoiceListItem(d), supplierAbn: abn(d.supplier?.abn) });
+
+/** listings.findInvoicesByNumber: the invoices with that number. */
+export const foundInvoices = (r) => ({ items: r.items.map(withSupplierAbn) });
+
+/** listings.listOpenInvoices: unpaid invoices, at most 100, and how many there are in all. */
+export const openInvoiceList = (r) => ({ items: r.items.map(withSupplierAbn), total: num(r.total), more: num(r.total) !== null && r.total > r.items.length });
+
 const poView = (p) => ({
   poNumber: code(p.poNumber),
   supplierAbn: abn(p.vendorAbn),
@@ -553,6 +562,9 @@ const ACTION_SUMMARIES = Object.freeze({
   policy_changed: 'The agent policy was changed.',
   demo_loaded: 'The demo data was loaded.',
   tool_called: 'An orchestrator tool was used.',
+  question_received: 'A question was put to the assistant.',
+  model_called: 'The assistant used the AI model.',
+  question_answered: 'The assistant answered.',
 });
 
 // A status or action name our code wrote: lower-case words only, so never a name or a sentence.

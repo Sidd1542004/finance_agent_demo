@@ -66,6 +66,17 @@ export const config = {
   // maxDuration (300 s in vercel.json), with room to answer.
   requestBudgetSeconds: Math.max(5, num(process.env.REQUEST_BUDGET_SECONDS, 270)),
 
+  // The assistant (POST /api/orchestrator/ask, docs/phase2-design.md). A person is
+  // waiting, so a question has its own, shorter budget inside the request's. It
+  // classifies with GROQ_MODEL. Reasoning effort for that call ('low', 'medium' or
+  // 'high', for models that support it): empty sends none (the model's default).
+  orchestrator: {
+    budgetSeconds: Math.min(Math.max(5, num(process.env.ORCHESTRATOR_BUDGET_SECONDS, 30)), 120),
+    // The most one tool call (a database read) may take before the answer goes on without it.
+    stepSeconds: Math.min(Math.max(1, num(process.env.ORCHESTRATOR_STEP_SECONDS, 5)), 60),
+    classifyReasoningEffort: ['low', 'medium', 'high'].includes(process.env.GROQ_CLASSIFY_REASONING_EFFORT) ? process.env.GROQ_CLASSIFY_REASONING_EFFORT : null,
+  },
+
   // The scheduler endpoints (/api/cron/*, routes/cron.js): refused requests from one
   // address before it is slowed down (429). CRON_FAILURE_LIMIT=0 turns it off.
   cron: {

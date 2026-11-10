@@ -1,5 +1,10 @@
 import mongoose from 'mongoose';
 import { SUBJECT_KINDS } from '../agent/finance/audit.js';
+import { stamp } from '../clock.js';
+
+// Record timestamps on the records whose history people read: the demo month
+// stamps them with its own dates while it loads (see clock.js).
+const STAMPED = { currentTime: () => stamp() };
 
 const { Schema, model } = mongoose;
 const Mixed = Schema.Types.Mixed;
@@ -202,7 +207,7 @@ const invoiceSchema = new Schema(
     corrections: { type: [Mixed], default: [] }, // fields a reviewer corrected: { field, from, to, by, note, at }. Append only.
     events: { type: [Mixed], default: [] }, // status history: { at, actor, action, from, to, reason }. Append only.
   },
-  { timestamps: true, minimize: false },
+  { timestamps: STAMPED, minimize: false },
 );
 // The same attachment never becomes two invoices, even with two workers at once.
 // Partial: only invoices imported from a mailbox carry a file hash.
@@ -286,6 +291,50 @@ auditSchema.pre('save', function auditInsertOnly() {
 auditSchema.pre('bulkWrite', refuse);
 export const AuditEvent = model('AuditEvent', auditSchema);
 
+// The assistant's conversation threads (orchestrator/threads.js): per person,
+// what was asked (the intent) and which records each answer showed, plus a
+// pending clarification's options. Never the question, an answer, a name or an
+// amount. Strict: no other field can be stored. Deleted 24 h after they start
+// (TTL index on expiresAt); every read checks expiresAt too.
+const threadRecord = new Schema(
+  { kind: { type: String, enum: ['invoice', 'payment', 'supplier', 'bank_line'], required: true }, id: { type: String, required: true, maxlength: 64 } },
+  { _id: false, strict: 'throw' },
+);
+export const OrchestratorThread = model(
+  'OrchestratorThread',
+  new Schema(
+    {
+      _id: { type: String, required: true },
+      ownerId: { type: String, required: true, index: true },
+      expiresAt: { type: Date, required: true },
+      turns: {
+        type: [
+          new Schema(
+            { at: { type: Date, required: true }, intent: { type: String, required: true, maxlength: 40 }, records: { type: [threadRecord], default: [] } },
+            { _id: false, strict: 'throw' },
+          ),
+        ],
+        default: [],
+      },
+      options: {
+        type: [
+          new Schema(
+            {
+              optionId: { type: String, required: true },
+              intent: { type: String, required: true, maxlength: 40 },
+              args: { type: Mixed, default: {} },
+              records: { type: [threadRecord], default: [] },
+            },
+            { _id: false, strict: 'throw', minimize: false },
+          ),
+        ],
+        default: [],
+      },
+    },
+    { timestamps: true, strict: 'throw' },
+  ).index({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+);
+
 // One record per agent run: the audit trail of the six stages.
 export const AgentRun = model(
   'AgentRun',
@@ -302,7 +351,7 @@ export const AgentRun = model(
       policy: { type: Mixed, default: null },
       finishedAt: Date,
     },
-    { timestamps: true },
+    { timestamps: STAMPED },
   ),
 );
 
@@ -352,7 +401,7 @@ const paymentSchema = new Schema(
     history: { type: [Mixed], default: [] },
     bank: { type: Mixed, default: null }, // { statementId, line, date, description }
   },
-  { timestamps: true },
+  { timestamps: STAMPED },
 );
 paymentSchema.index({ route: 1, status: 1 });
 export const Payment = model('Payment', paymentSchema);
@@ -375,7 +424,7 @@ const paymentJobSchema = new Schema(
     result: { type: String, default: null },
     history: { type: [Mixed], default: [] },
   },
-  { timestamps: true },
+  { timestamps: STAMPED },
 );
 paymentJobSchema.index({ paymentId: 1 }, { name: 'one_active_job_per_payment', unique: true, partialFilterExpression: { active: true } });
 paymentJobSchema.index({ active: 1, status: 1, runAt: 1 });

@@ -10,6 +10,7 @@ import ReconciliationView from './views/Reconciliation.jsx';
 import ReportView from './views/Report.jsx';
 import AdminView from './views/Admin.jsx';
 import SettingsView from './views/Settings.jsx';
+import AskView from './views/Ask.jsx';
 import Login from './views/Login.jsx';
 
 // The Finance Operations Agent's workflows. `admin`: shown to administrators only.
@@ -20,6 +21,7 @@ const TABS = [
   ['queries', 'Supplier emails', QueriesView],
   ['bank', 'Bank reconciliation', ReconciliationView],
   ['report', 'Month-end report', ReportView],
+  ['ask', 'Ask', AskView],
   ['settings', 'Settings', SettingsView, 'admin'],
   ['admin', 'Admin', AdminView, 'admin'],
 ];
@@ -38,7 +40,7 @@ const CONNECT_ERROR = {
 const RESET_SCOPE = [
   'Reset the demo data?',
   '',
-  'Deleted: every invoice (with its original PDF), payment and scheduled payment job, supplier email and outbox message, bank statement, month-end report, learned supplier hint, agent run, the record of imported email attachments, and the simulated bank’s account and transactions.',
+  'Deleted: every invoice (with its original PDF), payment and scheduled payment job, supplier email and outbox message, bank statement, month-end report, learned supplier hint, agent run, the record of imported email attachments, the simulated bank’s account and transactions, and the assistant’s conversations.',
   'Replaced with the samples: suppliers (with their sample bank details), purchase orders, deliveries; pending bank-detail proposals are removed.',
   'Kept: user accounts and sign-ins, settings, the simulated bank’s test scenarios, connected mailboxes, and the audit log (the reset is added to it).',
   '',

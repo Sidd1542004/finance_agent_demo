@@ -1093,6 +1093,13 @@ show.
   routes; CSRF.
 - **Demo**: "Explain my approval queue" on the demo month, with each node and
   tool call visible in the API response.
+- **Status (2026-11-01): built differently, as designed in
+  [phase2-design.md](phase2-design.md).** Questions instead of goals: a closed
+  intent list (keyword router, then one classify call), fixed tool plans, facts
+  from the records, and a grounded model explanation for three intents only,
+  with a template fallback. `POST /api/orchestrator/ask` and conversation
+  threads (`OrchestratorThread`) instead of `OrchestratorRun`; no LangGraph
+  runtime yet (the steps keep its node shape for Phase 4).
 
 ### Phase 3: persistence, budgets and resumption on serverless
 
