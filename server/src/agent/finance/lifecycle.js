@@ -91,6 +91,15 @@ export const PROCESSING = 'The simulated bank is processing this payment. It can
 
 export const failedChecks = (invoice) => (invoice?.checks || []).filter((c) => c.status === 'fail');
 
+// A check that could not be confirmed and must not be passed over: today only
+// quantity_match when goods have no delivery slip (matching.js). It counts like a
+// failure for where the invoice goes and for approval, but is shown as unverified.
+export const blockingUnverified = (checks) => (checks || []).filter((c) => c.status === 'unverified' && c.blocking === true);
+export const UNVERIFIED_BLOCKERS = {
+  quantity_match:
+    'No delivery slip (goods receipt) is recorded for the purchase order, so delivery is not confirmed. Once the receipt is in the accounting system, process the invoice again.',
+};
+
 export const SUPPLIER_UNIDENTIFIED = 'Approval blocked: supplier could not be identified. Identify and verify the supplier before approving this invoice.';
 
 // No supplier name was read from the invoice, or the only name read is the
@@ -115,7 +124,7 @@ export function poOwnershipBlock(invoice) {
 
 // Where the agent leaves an invoice, from its checks.
 export function statusFromChecks(checks) {
-  const failed = checks.filter((c) => c.status === 'fail');
+  const failed = [...checks.filter((c) => c.status === 'fail'), ...blockingUnverified(checks)];
   if (failed.some((c) => c.severity === 'review')) return 'needs_review';
   if (failed.length) return 'on_hold';
   return 'under_review';
@@ -191,6 +200,8 @@ export function blockedReason(invoice, actionId, ctx = {}) {
       // Who is being paid comes first, then whose purchase order it is.
       if (supplierIdentityBlock(invoice)) return supplierIdentityBlock(invoice);
       if (poOwnershipBlock(invoice)) return poOwnershipBlock(invoice);
+      const unconfirmed = blockingUnverified(invoice.checks)[0];
+      if (unconfirmed) return UNVERIFIED_BLOCKERS[unconfirmed.id] || unconfirmed.detail;
       const b = failedIds.find((id) => APPROVAL_BLOCKERS[id]);
       if (b) return APPROVAL_BLOCKERS[b];
       if (typeof invoice.extracted?.total !== 'number') return 'The invoice has no total to approve.';

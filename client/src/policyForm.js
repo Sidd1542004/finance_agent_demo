@@ -1,4 +1,4 @@
-// The Admin screen's policy sliders, as plain functions (no React), so they
+// The Admin screen's policy sliders and switches, as plain functions (no React), so they
 // can be tested with node --test. The limits, steps and defaults come from
 // the server (GET /api/admin/policy); nothing here repeats them. The server
 // checks every value again when it is saved.
@@ -6,6 +6,8 @@
 const decimals = (step) => (String(step).split('.')[1] || '').length;
 const round = (n, places) => Number(n.toFixed(places));
 const isFraction = (setting) => setting.format === 'fraction';
+/** An on/off setting (type 'switch', e.g. requireDeliverySlip) rather than a slider. */
+export const isSwitch = (setting) => setting.type === 'switch';
 
 /** A stored value as shown on the slider: fractions as percentages (0.99 -> 99). */
 export function toDisplay(setting, value) {
@@ -23,10 +25,11 @@ export function displayRange(setting) {
   return { min: toDisplay(setting, setting.min), max: toDisplay(setting, setting.max), step: isFraction(setting) ? round(setting.step * 100, 4) : setting.step };
 }
 
-export const formatValue = (setting, value) => `${toDisplay(setting, value)}%`;
+export const formatValue = (setting, value) => (isSwitch(setting) ? (value ? 'On' : 'Off') : `${toDisplay(setting, value)}%`);
 
 /** Why a value would be refused, or null. The same limits the server applies. */
 export function valueProblem(setting, value) {
+  if (isSwitch(setting)) return typeof value === 'boolean' ? null : `${setting.label} must be on or off.`;
   if (typeof value !== 'number' || !Number.isFinite(value)) return `${setting.label} must be a number.`;
   if (value < setting.min || value > setting.max) return `${setting.label} must be between ${formatValue(setting, setting.min)} and ${formatValue(setting, setting.max)}.`;
   return null;

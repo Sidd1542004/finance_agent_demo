@@ -31,20 +31,21 @@ const at95 = (number, date) => {
 const score = (inv) => inv.checks.find((c) => c.id === 'match_score');
 const latestRun = (id) => AgentRun.findOne({ invoiceId: id }).sort({ createdAt: -1 }).lean();
 
-test('three settings with their limits; the document is created from the environment values (99% default), version 1', async () => {
+test('three settings with their limits and the delivery-slip switch; the document is created from the environment values (99% default), version 1', async () => {
   assert.deepEqual(
     POLICY_FIELDS.map((f) => [f.key, f.min, f.max, f.step]),
     [
       ['matchThreshold', 85, 100, 1],
       ['priceTolerancePct', 0, 10, 0.5],
       ['confidenceFloor', 50, 100, 1],
+      ['requireDeliverySlip', undefined, undefined, undefined],
     ],
   );
   const res = await reviewer.get('/api/settings/policy');
   assert.equal(res.status, 200, 'any signed-in role reads them');
   assert.equal(res.headers.get('cache-control'), 'no-store');
   assert.equal(res.data.version, 1);
-  assert.deepEqual(Object.fromEntries(res.data.fields.map((f) => [f.key, f.value])), { matchThreshold: 99, priceTolerancePct: 2, confidenceFloor: 99 });
+  assert.deepEqual(Object.fromEntries(res.data.fields.map((f) => [f.key, f.value])), { matchThreshold: 99, priceTolerancePct: 2, confidenceFloor: 99, requireDeliverySlip: true });
   const doc = await PolicySettings.findById('policy').lean();
   assert.deepEqual([doc.matchThreshold, doc.priceTolerancePct, doc.confidenceFloor, doc.version], [99, 2, 99, 1]);
   assert.equal(doc.updatedBy.id, 'system:defaults');
@@ -94,7 +95,7 @@ test('a new threshold applies to invoices processed after the save, not to exist
   assert.equal(before.status, 201, JSON.stringify(before.data));
   existingId = before.data.invoice._id;
   assert.equal(score(before.data.invoice).status, 'fail', '95% is below 99%');
-  assert.deepEqual((await latestRun(existingId)).policy, { matchThreshold: 99, priceTolerancePct: 2, confidenceFloor: 99, version: 1 });
+  assert.deepEqual((await latestRun(existingId)).policy, { matchThreshold: 99, priceTolerancePct: 2, confidenceFloor: 99, requireDeliverySlip: true, version: 1 });
 
   const saved = await put(admin, { matchThreshold: 95, confidenceFloor: 90, expectedVersion: 1, reason: 'Client trial: 95% for October.' });
   assert.equal(saved.status, 200, JSON.stringify(saved.data));
@@ -122,7 +123,7 @@ test('a new threshold applies to invoices processed after the save, not to exist
   assert.equal(score(after.data.invoice).status, 'pass', '95% meets 95%');
   assert.equal(after.data.invoice.status, 'under_review', 'only eligible for approval');
   assert.equal(after.data.invoice.approval, null);
-  assert.deepEqual(after.data.run.policy, { matchThreshold: 95, priceTolerancePct: 2, confidenceFloor: 90, version: 2 });
+  assert.deepEqual(after.data.run.policy, { matchThreshold: 95, priceTolerancePct: 2, confidenceFloor: 90, requireDeliverySlip: true, version: 2 });
 
   // The dashboard's status shows the live values.
   const status = (await reviewer.get('/api/status')).data;

@@ -3,7 +3,8 @@
 //
 //   GET /api/settings/policy   any signed-in role: values, limits, version, recent changes
 //   PUT /api/settings/policy   administrators: { matchThreshold?, priceTolerancePct?,
-//                              confidenceFloor?, expectedVersion, reason } (CSRF, audited)
+//                              confidenceFloor?, requireDeliverySlip?, expectedVersion,
+//                              reason } (CSRF, audited)
 
 import { Router } from 'express';
 import { requireRole } from '../auth/middleware.js';

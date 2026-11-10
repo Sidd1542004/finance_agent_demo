@@ -66,6 +66,8 @@ export const PolicySettings = model(
       matchThreshold: { type: Number, required: true },
       priceTolerancePct: { type: Number, required: true },
       confidenceFloor: { type: Number, required: true },
+      // Not required: a settings document from before this setting existed reads as the default (on).
+      requireDeliverySlip: { type: Boolean },
       version: { type: Number, required: true, default: 1 },
       updatedBy: { id: { type: String, default: null }, name: { type: String, default: null } },
       updatedAt: { type: Date, default: null },
@@ -125,7 +127,8 @@ export const PurchaseOrder = model(
     vendorAbn: { type: String, required: true },
     vendorName: String,
     raisedOn: String,
-    lines: [{ _id: false, sku: String, description: String, qty: Number, unitPrice: Number }],
+    // kind 'service': no delivery slip is expected for the line (matching.js). Goods unless set.
+    lines: [{ _id: false, sku: String, description: String, qty: Number, unitPrice: Number, kind: { type: String, enum: ['goods', 'service'], default: 'goods' } }],
   }),
 );
 
