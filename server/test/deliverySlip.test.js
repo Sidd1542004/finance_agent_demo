@@ -181,3 +181,75 @@ test('through the app: no slip -> Needs Review and approval refused; the switch 
     await t.stop();
   }
 });
+
+// ----- the demo samples: HOS-10560 (goods, no slip) and BG-2026-0977 (service, no slip) -----
+
+test('the demo data: PO-2046 is goods and PO-2047 a service; neither has a delivery slip, on purpose', async () => {
+  const { goodsReceipts } = await import('../src/seed/data.js');
+  const po = (n) => purchaseOrders.find((p) => p.poNumber === n);
+  assert.deepEqual(
+    po('PO-2046').lines.map((l) => [l.description, l.qty, l.unitPrice, l.kind]),
+    [['Whiteboard 1200x900', 10, 165, 'goods']],
+  );
+  assert.equal(po('PO-2046').vendorName, 'Harbour Office Supplies Pty Ltd');
+  assert.deepEqual(
+    po('PO-2047').lines.map((l) => [l.description, l.qty, l.unitPrice, l.kind]),
+    [['Network configuration, per hour', 8, 140, 'service']],
+  );
+  assert.equal(po('PO-2047').vendorName, 'Bluegum IT Services Pty Ltd');
+  assert.ok(!goodsReceipts.some((r) => ['PO-2046', 'PO-2047'].includes(r.poNumber)), 'no receipt for either');
+  assert.match(findSample('no-delivery-slip').hint, /missing on purpose/);
+});
+
+// Through the agent, with the sample ledger's POs and receipts and the app's default thresholds (99%).
+async function processSample(id) {
+  const { runAgent } = await import('../src/agent/core/loop.js');
+  const { createInvoiceAgent } = await import('../src/agent/finance/invoiceAgent.js');
+  const { extractWithRules } = await import('../src/agent/finance/extract.js');
+  const { createMemoryLedger } = await import('../src/integrations/memoryLedger.js');
+  const { goodsReceipts, renderInvoiceText } = await import('../src/seed/data.js');
+  const invoices = [];
+  const ledger = createMemoryLedger({ vendors, purchaseOrders, goodsReceipts, invoices });
+  // minConfidence 0.8: the rules reader's 90% is accepted, so the delivery slip decides.
+  const agent = createInvoiceAgent({
+    ledger,
+    extract: async (t) => extractWithRules(t),
+    policy: { ...POLICY, minConfidence: 0.8 },
+    save: async () => {},
+    today: () => '2026-10-06',
+  });
+  const invoice = { id: 'inv-1', createdAt: new Date(2026, 9, 6, 9), source: { kind: 'sample' }, rawText: renderInvoiceText(findSample(id)), status: 'received' };
+  invoices.push(invoice);
+  await runAgent(agent, { invoice });
+  return invoice;
+}
+
+test('HOS-10560 against PO-2046, no slip: quantity_match unverified and blocking, Needs Review, not eligible, approval refused', async () => {
+  const inv = await processSample('no-delivery-slip');
+  assert.equal(inv.extracted.invoiceNumber, 'HOS-10560');
+  assert.equal(inv.matchedPo, 'PO-2046');
+  const q = inv.checks.find((c) => c.id === 'quantity_match');
+  assert.deepEqual([q.status, q.blocking, q.severity], ['unverified', true, 'review']);
+  assert.equal(q.detail, 'No delivery slip (goods receipt) is recorded for PO-2046, so delivery could not be confirmed.');
+  assert.equal(inv.status, 'needs_review');
+  assert.equal(inv.match.score.eligible, false);
+  assert.equal(inv.match.score.total, 90, 'the quantity part counts half');
+  assert.ok(inv.decision.reasons.includes(q.detail), 'the person is told why');
+  assert.match(blockedReason(inv, 'approve'), /^No delivery slip \(goods receipt\) is recorded for the purchase order/);
+});
+
+test('BG-2026-0977 against PO-2047, a service with no slip: the receipt rule is skipped, eligible for approval', async () => {
+  const inv = await processSample('service-no-slip');
+  assert.equal(inv.extracted.invoiceNumber, 'BG-2026-0977');
+  assert.equal(inv.matchedPo, 'PO-2047');
+  const q = inv.checks.find((c) => c.id === 'quantity_match');
+  assert.equal(q.status, 'pass');
+  assert.equal(q.blocking, undefined, 'no delivery-slip flag');
+  assert.equal(q.detail, 'Within the quantities on PO-2047. Services only: no delivery slip is expected.');
+  assert.deepEqual(blockingUnverified(inv.checks), []);
+  assert.ok(inv.lineMatches.every((l) => l.kind === 'service' && !l.receiptUnconfirmed));
+  assert.equal(inv.match.score.total, 100);
+  assert.equal(inv.match.score.eligible, true);
+  assert.equal(inv.status, 'under_review');
+  assert.equal(blockedReason(inv, 'approve'), null, 'a person may approve it');
+});

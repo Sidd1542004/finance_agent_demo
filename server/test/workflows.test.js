@@ -394,16 +394,16 @@ test('the demo month report: figures, open items and commentary', async () => {
   assert.equal(result.outcome, 'open_items');
   // The clean invoice was sent twice: the copy is counted once, with the original, and listed on its own.
   assert.deepEqual(f.invoices, {
-    received: 7,
-    valueReceived: 25711.66,
-    clearedByAgent: 2,
+    received: 9,
+    valueReceived: 28758.66,
+    clearedByAgent: 3,
     approvedByPerson: 2,
-    waiting: 4,
+    waiting: 6,
     rejected: 1,
     cancelled: 0,
     failed: 0,
     inProgress: 0,
-    clearedPct: 29,
+    clearedPct: 33,
     duplicateCopies: 1,
     duplicateCopiesWaiting: 1,
   });
@@ -412,7 +412,7 @@ test('the demo month report: figures, open items and commentary', async () => {
   assert.deepEqual(f.bank, { statements: 1, linesMatched: 2, valueMatched: 2129.6, linesOpen: 3, linesDismissed: 0, linesRepeated: 0 });
   assert.deepEqual(f.heldReasons[0], { id: 'po_found', label: 'No matching purchase order', count: 2 });
   assert.ok(!f.heldReasons.some((r) => r.id === 'match_score'), 'a low score caused by another failure is not counted as its own reason');
-  assert.equal(f.openItems.length, 7, 'four invoices, the duplicate copy, the supplier emails and the bank lines');
+  assert.equal(f.openItems.length, 9, 'six invoices, the duplicate copy, the supplier emails and the bank lines');
   assert.ok(
     f.openItems.includes(
       'A second copy of invoice HOS-10482 from Harbour Office Supplies Pty Ltd ($1,402.50), received 1 Oct 2026, is a possible duplicate of an invoice that is payment completed. It needs review before it can be approved or paid.',
@@ -421,7 +421,7 @@ test('the demo month report: figures, open items and commentary', async () => {
   assert.deepEqual(checkFigures(f), []);
   assert.equal(report.commentary.method, 'standard');
   assert.deepEqual(ungroundedNumbers(report.commentary.text, f), []);
-  assert.match(report.commentary.text, /^In October 2026, 7 invoices were received, worth \$25,711\.66 in total\./);
+  assert.match(report.commentary.text, /^In October 2026, 9 invoices were received, worth \$28,758\.66 in total\./);
   assert.match(report.commentary.text, /1 possible duplicate copy of invoices already counted was received and not counted again\./);
 
   const csv = figuresToCsv(f);
@@ -453,16 +453,16 @@ test('an empty month is ready to close; a future month is refused', async () => 
 test('AI commentary is kept when every number is in the figures, replaced when one is not', async () => {
   const setup = await demoMonth();
   const good = await runReport(setup, '2026-10', {
-    writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received worth $25,711.66. 4 are still waiting for a decision.' },
+    writer: { model: 'm', write: async () => 'In October 2026, 9 invoices were received worth $28,758.66. 6 are still waiting for a decision.' },
   });
   assert.equal(good.report.commentary.method, 'groq');
 
   const bad = await runReport(setup, '2026-10', {
-    writer: { model: 'm', write: async () => 'In October 2026, 7 invoices were received, about $27,000 in total, up 12% on last month.' },
+    writer: { model: 'm', write: async () => 'In October 2026, 9 invoices were received, about $27,000 in total, up 12% on last month.' },
   });
   assert.equal(bad.report.commentary.method, 'standard');
   assert.match(bad.report.commentary.note, /not in the figures \(27000, 12\)/);
-  assert.match(bad.report.commentary.text, /^In October 2026, 7 invoices/);
+  assert.match(bad.report.commentary.text, /^In October 2026, 9 invoices/);
 
   const down = await runReport(setup, '2026-10', {
     writer: {
@@ -527,18 +527,18 @@ test('previous month and the comparison rows', async () => {
   assert.equal(previousMonth('2026-10'), '2026-09');
   assert.equal(previousMonth('2026-01'), '2025-12');
   const setup = await demoMonth();
-  // Move the duplicate invoice into September so last month has something in it.
-  setup.invoices[7].createdAt = new Date(2026, 8, 20);
+  // Move the duplicate invoice (sent last) into September so last month has something in it.
+  setup.invoices.at(-1).createdAt = new Date(2026, 8, 20);
   const { report } = await runReport(setup, '2026-10');
   const c = report.figures.comparison;
   assert.equal(c.label, 'September 2026');
   assert.equal(c.hasData, true);
   const row = (id) => c.rows.find((r) => r.id === id);
-  assert.deepEqual([row('received').current, row('received').previous, row('received').change], [7, 1, 6]);
-  assert.deepEqual([row('valueReceived').current, row('valueReceived').previous, row('valueReceived').change], [25711.66, 1402.5, 24309.16]);
-  assert.match(report.commentary.text, /Compared with September 2026, invoices received went from 1 to 7, value of invoices received went from \$1,402\.50 to \$25,711\.66/);
+  assert.deepEqual([row('received').current, row('received').previous, row('received').change], [9, 1, 8]);
+  assert.deepEqual([row('valueReceived').current, row('valueReceived').previous, row('valueReceived').change], [28758.66, 1402.5, 27356.16]);
+  assert.match(report.commentary.text, /Compared with September 2026, invoices received went from 1 to 9, value of invoices received went from \$1,402\.50 to \$28,758\.66/);
   assert.deepEqual(ungroundedNumbers(report.commentary.text, report.figures), []);
-  assert.ok(figuresToCsv(report.figures).includes('Compared with September 2026,Invoices received: this month / last month / change,7 / 1 / 6'));
+  assert.ok(figuresToCsv(report.figures).includes('Compared with September 2026,Invoices received: this month / last month / change,9 / 1 / 8'));
 });
 
 test('an empty previous month adds no comparison sentence; a fall is written without a minus sign', async () => {
@@ -547,8 +547,8 @@ test('an empty previous month adds no comparison sentence; a fall is written wit
   assert.equal(report.figures.comparison.hasData, false);
   assert.doesNotMatch(report.commentary.text, /Compared with/);
   const down = compareMonths(buildFigures({ month: '2026-11', invoices: [], payments: [], queries: [], statements: [] }), report.figures);
-  assert.equal(down.rows[0].change, -7);
-  assert.deepEqual(ungroundedNumbers('Invoices received fell by 7.', { comparison: down }), []);
+  assert.equal(down.rows[0].change, -9);
+  assert.deepEqual(ungroundedNumbers('Invoices received fell by 9.', { comparison: down }), []);
 });
 
 // ---------- Regression: decided bank lines are not open items ----------

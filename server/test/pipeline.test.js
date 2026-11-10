@@ -27,6 +27,8 @@ function setup({ extract = async (text) => extractWithRules(text), ledgerPatch =
 }
 
 const failed = (invoice) => invoice.checks.filter((c) => c.status === 'fail').map((c) => c.id);
+// Checks that could not be confirmed and block approval (a missing delivery slip). Most samples have none.
+const blocking = (invoice) => invoice.checks.filter((c) => c.status === 'unverified' && c.blocking).map((c) => c.id);
 
 for (const sample of sampleInvoices) {
   test(`sample "${sample.id}" -> ${sample.expect.outcome}`, async () => {
@@ -35,13 +37,14 @@ for (const sample of sampleInvoices) {
 
     assert.equal(result.outcome, sample.expect.outcome);
     assert.deepEqual(failed(invoice), sample.expect.failed);
+    assert.deepEqual(blocking(invoice), sample.expect.blocking || []);
     assert.equal(result.steps.length, 6);
     assert.equal(result.error, null);
 
     assert.equal(invoice.status, sample.expect.outcome);
     assert.equal(ledger.payments.length, 0, 'the agent never creates a payment, whatever the score');
     assert.equal(invoice.approval, undefined, 'the agent never approves');
-    assert.equal(invoice.decision.reasons.length, sample.expect.failed.length);
+    assert.equal(invoice.decision.reasons.length, sample.expect.failed.length + (sample.expect.blocking || []).length);
     assert.ok(
       invoice.events.some((e) => e.actor === 'Agent' && e.from === 'received' && e.to === sample.expect.outcome),
       'the status change is in the audit trail',

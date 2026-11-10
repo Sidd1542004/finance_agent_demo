@@ -23,7 +23,7 @@ import { stampIso } from '../../clock.js';
 import { validateInvoice, identifyVendor, fmtMoney } from './validation.js';
 import { matchToPo, suggestPurchaseOrders, resolvePurchaseOrder } from './matching.js';
 import { fingerprints, duplicateCheck } from './duplicates.js';
-import { statusFromChecks, STATUS_LABEL } from './lifecycle.js';
+import { statusFromChecks, blockingUnverified, STATUS_LABEL } from './lifecycle.js';
 import { dueInfo } from './due.js';
 import { applyCorrections, isEmptyReading } from './extract.js';
 
@@ -229,7 +229,8 @@ export function createInvoiceAgent({ ledger, extract, fallback = null, abr = nul
         await save(invoice);
 
         state.target = statusFromChecks(invoice.checks);
-        const failed = invoice.checks.filter((c) => c.status === 'fail');
+        // Failed checks, and checks that could not be confirmed and block (a missing delivery slip): each is a reason for the person.
+        const failed = [...invoice.checks.filter((c) => c.status === 'fail'), ...blockingUnverified(invoice.checks)];
         for (const c of failed) requestEscalation(state, c.detail);
         const passed = invoice.checks.filter((c) => c.status === 'pass').length;
         return {
