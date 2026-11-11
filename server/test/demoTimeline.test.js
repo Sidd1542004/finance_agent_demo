@@ -43,7 +43,7 @@ test('the clock stamps the real time unless a timeline is running', async () => 
 });
 
 test('the statuses and amounts are what the demo month always produced', () => {
-  assert.deepEqual(result.invoices, { payment_pending: 2, needs_review: 5, rejected: 1 });
+  assert.deepEqual(result.invoices, { payment_pending: 2, needs_review: 7, rejected: 1 });
   const bySample = invoices.map((i) => [i.source.sampleId, i.status, i.extracted?.total]);
   assert.deepEqual(bySample, [
     ['clean', 'payment_pending', 1402.5],
@@ -53,6 +53,9 @@ test('the statuses and amounts are what the demo month always produced', () => {
     ['over-limit', 'needs_review', 18029],
     ['unknown-supplier', 'needs_review', 814],
     ['no-po', 'needs_review', 924],
+    // The delivery-slip samples: goods with no slip, and a service that needs none.
+    ['no-delivery-slip', 'needs_review', 1815],
+    ['service-no-slip', 'needs_review', 1232],
     ['clean', 'needs_review', 1402.5],
   ]);
   assert.deepEqual(payments.map((p) => [p.method, p.scheduledFor, p.amount, p.status]).sort(), [
@@ -89,7 +92,7 @@ test("each demo invoice's history is in order, received after it was issued, and
       for (const s of list) assert.ok(t(s) >= t(inv.createdAt), `${label} ${kind} ${iso(s)} is before it was received`);
     }
     // Every stamp is in the demo month, never at load time.
-    for (const s of Object.values(stamps).flat()) assert.ok(t(s) < loadStarted && iso(s) < '2026-10-06', `${label}: ${iso(s)} is outside the demo month`);
+    for (const s of Object.values(stamps).flat()) assert.ok(t(s) < loadStarted && iso(s) < '2026-10-08', `${label}: ${iso(s)} is outside the demo month`);
     // Decisions come after the agent's steps.
     const agentDone = runs.flatMap((r) => r.steps.filter((x) => x.stage !== 'human').map((x) => x.at)).at(-1);
     if (inv.approval?.decidedAt) assert.ok(t(inv.approval.decidedAt) > t(agentDone), `${label}: approved before the agent finished`);

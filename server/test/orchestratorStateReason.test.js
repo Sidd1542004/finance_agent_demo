@@ -297,3 +297,47 @@ test('the state is in the facts block, and no bank field reaches it', () => {
     { handle: 'I1', reason: 'status' },
   ]);
 });
+
+test('a missing delivery slip: the state says so, recommends processing again once it is recorded, and never says it can be approved now', async () => {
+  const { invoiceDetail } = await import('../src/orchestrator/views.js');
+  const slip = {
+    ...HOS,
+    invoiceNumber: 'HOS-10560',
+    failedChecks: [],
+    checks: [
+      { id: 'quantity_match', status: 'unverified', severity: 'review', blocking: true, detail: { untrusted_text: 'No delivery slip (goods receipt) is recorded for PO-2046.' } },
+    ],
+  };
+  const st = stateReason(slip, { history: [], viewer: APPROVER, today: TODAY });
+  assert.deepEqual(st.openChecks, [], 'nothing failed');
+  assert.deepEqual(st.unconfirmedChecks, ['quantity_match']);
+  assert.deepEqual(st.blockers, ['No delivery slip (goods receipt) is recorded for the purchase order, so delivery is not confirmed and it cannot be approved yet.']);
+  assert.deepEqual(
+    st.recommendedNextSteps.map((x) => [x.action, x.role]),
+    [
+      ['rerun_after_receipt', 'reviewer'],
+      ['correct', 'reviewer'],
+      ['decide', 'approver'],
+    ],
+  );
+  assert.match(st.recommendedNextSteps.at(-1).text, /^Approval waits until delivery is confirmed/);
+  // Saying so passes the contradiction check; recommending a reversal does not.
+  assert.equal(contradictsState('A reviewer can process the invoice again once the delivery slip is recorded.', st), null);
+  assert.equal(contradictsState('An approver should reopen it.', st), 'action_not_recommended');
+  // The assistant's view of a check keeps the flag (and adds nothing for an ordinary check).
+  const view = invoiceDetail(
+    {
+      invoice: {
+        _id: 'b'.repeat(24),
+        status: 'needs_review',
+        checks: [
+          { ...slip.checks[0], detail: 'No delivery slip.' },
+          { id: 'arithmetic', status: 'pass', severity: 'hold', detail: 'ok' },
+        ],
+      },
+    },
+    APPROVER,
+  );
+  assert.equal(view.checks[0].blocking, true);
+  assert.equal('blocking' in view.checks[1], false);
+});

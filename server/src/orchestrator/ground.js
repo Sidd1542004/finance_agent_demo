@@ -206,7 +206,7 @@ const ACTION_MENTIONS = [
     /\b(?:edit|correct) (?:the |any )?fields?\b|\blink (?:the |a )?(?:purchase order|po)\b|\brequest (?:a )?corrected\b|\bask the supplier for a corrected\b/i,
     ['correct', 'review_hold'],
   ],
-  [/\bprocess (?:it |the invoice )?again\b|\brerun\b/i, ['review_hold']],
+  [/\bprocess (?:it |the invoice )?again\b|\brerun\b/i, ['review_hold', 'rerun_after_receipt']],
   [/\b(?:re)?schedule (?:the |a |its )?payment\b|\bschedule it\b/i, ['schedule_payment', 'check_payment']],
   [/\brecord (?:the |a |its )?payment\b|\bmark (?:it|the cheque|the payment) (?:as )?paid\b|\bmatch it to the bank statement\b/i, ['record_payment']],
   [/\breverse (?:the |its )?approval\b|\breverse_approval\b/i, []],

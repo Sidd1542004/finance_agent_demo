@@ -30,7 +30,7 @@ export function receivedAfter(invoiceDate) {
   return new Date(Date.UTC(Number(y), MONTHS[mon], Number(d) + 1, 0, 30)).toISOString();
 }
 export const DEMO_TIMELINE = Object.freeze({
-  duplicateReceived: '2026-10-05T00:30:00.000Z', // HOS-10482 sent again
+  duplicateReceived: '2026-10-07T00:30:00.000Z', // HOS-10482 sent again, after every sample
   approveClean: '2026-09-29T01:00:00.000Z', // HOS-10482, cheque dated 2026-10-02
   scheduleClean: '2026-09-29T03:00:00.000Z',
   approveQuantity: '2026-09-30T01:00:00.000Z', // SCP-7731, cheque dated 2026-10-03
@@ -69,7 +69,8 @@ async function loadSamples(timeline) {
     timeline.at(new Date(last).toISOString());
     ids[sample.id] = await submit(sample);
   }
-  timeline.at(DEMO_TIMELINE.duplicateReceived);
+  // The copy is processed last, so it is received last too (never before a sample processed earlier).
+  timeline.at(new Date(Math.max(new Date(DEMO_TIMELINE.duplicateReceived).getTime(), last + 60 * 60 * 1000)).toISOString());
   await submit(sampleInvoices.find((s) => s.id === 'clean')); // the same invoice again, to show duplicate detection
 
   // What people would do next. The agent approves nothing: every approval and

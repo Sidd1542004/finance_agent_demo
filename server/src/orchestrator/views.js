@@ -188,7 +188,14 @@ const withBank = (viewer, value) => (value && seesMaskedBankDetails(viewer) ? { 
 // ----- invoices -----
 
 const dueView = (due) => (due ? { date: day(due.date), source: word(due.source), daysUntil: num(due.daysUntil), state: word(due.state) } : null);
-const checkView = (c) => ({ id: word(c?.id), status: word(c?.status), severity: word(c?.severity), detail: untrusted(c?.detail) });
+// blocking: a check that could not be confirmed and blocks approval (a missing delivery slip, matching.js).
+const checkView = (c) => ({
+  id: word(c?.id),
+  status: word(c?.status),
+  severity: word(c?.severity),
+  ...(c?.blocking === true ? { blocking: true } : {}),
+  detail: untrusted(c?.detail),
+});
 const lineView = (l) => ({ sku: code(l?.sku), description: untrusted(l?.description), qty: num(l?.qty), unitPrice: num(l?.unitPrice), amount: num(l?.amount) });
 
 export const invoiceListItem = (d) => ({
