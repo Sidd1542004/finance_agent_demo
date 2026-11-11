@@ -2175,6 +2175,61 @@ button.ask-ref {
   margin: 4px 0;
   color: #9b1c1c;
 }
+
+/* The query to the supplier about a variance (disputePanel.js). */
+.dispute input[type='text'],
+.dispute textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 10px;
+  font: inherit;
+}
+.dispute textarea {
+  min-height: 14em;
+}
+.dispute-facts {
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+.dispute-label {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: middle;
+  border: 1px solid var(--line);
+}
+.dispute-ai {
+  border-color: var(--gold);
+}
+.dispute-body {
+  white-space: pre-wrap;
+  font: inherit;
+  padding: 8px 10px;
+  border-left: 3px solid var(--line);
+  margin: 4px 0 12px;
+}
+.dispute-subject {
+  font-weight: 600;
+  margin: 8px 0 0;
+}
+.dispute-greeting {
+  margin: 4px 0 0;
+}
+.dispute-signature {
+  white-space: pre-wrap;
+  font: inherit;
+  margin: 0 0 4px;
+  color: var(--muted);
+}
+.dispute .decision-actions select,
+.dispute .decision-actions input[type='text'] {
+  width: auto;
+  flex: 1 1 14em;
+  margin: 0;
+}
 @media (max-width: 640px) {
   .ask-layout {
     padding: 16px;

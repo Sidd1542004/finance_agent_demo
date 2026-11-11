@@ -9,6 +9,7 @@ import { stamp } from '../../clock.js';
 // sim_bank: simulated bank settings. payment_email: payment notices to suppliers.
 // settings: the agent's policy (services/policySettings.js).
 // orchestrator: the orchestrator's tool calls (orchestrator/tools.js), one entry per call.
+// supplier_dispute: queries to suppliers about an invoice's variance (never the email body).
 export const SUBJECT_KINDS = [
   'invoice',
   'payment',
@@ -24,6 +25,7 @@ export const SUBJECT_KINDS = [
   'ingestion',
   'settings',
   'orchestrator',
+  'supplier_dispute',
 ];
 
 /** One audit entry, in a fixed shape. `actorId` (the signed-in user's id) is added only when known. */

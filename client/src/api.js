@@ -150,6 +150,13 @@ export const api = {
   decide: (id, body) => request(`/invoices/${id}/approval`, json(body)),
   // Any person's action on an invoice: approve, reject, link_po, schedule_payment, ...
   action: (id, action, body) => request(`/invoices/${id}/actions/${action}`, json(body)),
+  // Queries to the supplier about a variance. Any role views; reviewer, approver or admin drafts, edits, sends, discards, resolves.
+  disputes: (invoiceId) => request(`/invoices/${invoiceId}/disputes`),
+  draftDispute: (invoiceId) => request(`/invoices/${invoiceId}/disputes`, json({})),
+  editDispute: (id, body) => request(`/disputes/${id}`, json(body, 'PUT')),
+  sendDispute: (id) => request(`/disputes/${id}/send`, json({})),
+  discardDispute: (id, note) => request(`/disputes/${id}/discard`, json({ note })),
+  resolveDispute: (id, outcome, note) => request(`/disputes/${id}/resolve`, json({ outcome, note })),
   payables: () => request('/payables'),
   // `confirm` must be the typed word RESET; the server checks it too.
   reset: (confirm) => request('/reset', json({ confirm })),

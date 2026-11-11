@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { money, abn, acn, day, when, zoned, hasRole, STATUS, AWAITING_DECISION, TO_PAY, PAYMENT_STATUS, BANK_STATUS, NOTICE_KIND, ROLE_LABEL } from '../format.js';
-import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE } from '../shared.jsx';
+import { Rail, CheckIcon, AuditTrail, LoadMore, RoleNote, PAGE_SIZE, useBusy } from '../shared.jsx';
 import { documentBlobProblem, fileSize, documentButtons, opensInNewTab } from '../documentView.js';
 import { checkedAtText } from '../policyForm.js';
 import { paidToText } from '../bankDetails.js';
+import { DisputePanel, hasVariance } from '../disputePanel.js';
 
 // Decisions are recorded under the signed-in person's name: there is no name to type.
 export default function InvoicesView({ health, user, onError, openId = null }) {
@@ -524,6 +525,8 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
 
       <Actions data={data} busy={busy} onAct={onAct} user={user} />
 
+      {hasVariance(invoice) && <Disputes key={invoice._id} invoiceId={invoice._id} user={user} onError={onError} />}
+
       {data.documents && <Documents key={invoice._id} invoiceId={invoice._id} documents={data.documents} />}
 
       {invoice.extracted && (
@@ -731,6 +734,34 @@ function Detail({ data, fresh, busy, onAct, user, onReload, onError }) {
 // the document does not exist. On a wide screen the document opens in a panel
 // here (fetched first with the same sign-in, so a missing one gives a clear
 // message instead of an error page in the frame); on a phone, in a new tab.
+// The query to the supplier about a variance (disputePanel.js). It never changes the invoice.
+function Disputes({ invoiceId, user, onError }) {
+  const [data, setData] = useState(null);
+  const [busy, run] = useBusy(onError);
+  const load = useCallback(() => api.disputes(invoiceId).then(setData), [invoiceId]);
+  useEffect(() => {
+    load().catch((err) => onError(err.message));
+  }, [load, onError]);
+  if (!data) return null;
+  const then = (kind, call) =>
+    run(kind, async () => {
+      await call();
+      await load();
+    });
+  return (
+    <DisputePanel
+      data={data}
+      user={user}
+      busy={Boolean(busy)}
+      onDraft={() => then('draft', () => api.draftDispute(invoiceId))}
+      onSave={(id, body) => then('save', () => api.editDispute(id, body))}
+      onSend={(id) => then('send', () => api.sendDispute(id))}
+      onDiscard={(id, note) => then('discard', () => api.discardDispute(id, note))}
+      onResolve={(id, outcome, note) => then('resolve', () => api.resolveDispute(id, outcome, note))}
+    />
+  );
+}
+
 function Documents({ invoiceId, documents }) {
   const [view, setView] = useState({ kind: null, url: null, loading: null, error: null });
 

@@ -29,6 +29,7 @@ import { requireUser, requireRole, requireAnyRole, actorOf } from '../auth/middl
 import { createDemoResetHandler, demoResetBlocked } from '../services/demoReset.js';
 import { registerIngestionPublicRoutes, registerIngestionRoutes } from './ingestion.js';
 import { registerOrchestratorRoutes } from './orchestrator.js';
+import { registerDisputeRoutes } from './disputes.js';
 import { createAuthRouter } from './auth.js';
 import { createAdminRouter } from './admin.js';
 import { createSettingsRouter } from './settings.js';
@@ -271,6 +272,8 @@ api.post('/reset', requireRole('admin'), wrap(createDemoResetHandler({ reset: re
 registerFinanceRoutes(api, { upload, work });
 registerSupplierRoutes(api, { work });
 registerPaymentRoutes(api);
+// Queries to suppliers about an invoice's variance (routes/disputes.js). Nothing is sent without a person.
+registerDisputeRoutes(api);
 registerIngestionRoutes(api, { work });
 // The assistant: read-only questions about the records (routes/orchestrator.js).
 registerOrchestratorRoutes(api, { work });

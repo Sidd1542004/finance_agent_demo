@@ -522,7 +522,8 @@ export const VendorQuery = model(
 // partial one before payment notices (which have no queryId) can be stored.
 const outboxSchema = new Schema(
   {
-    kind: { type: String, enum: ['query_reply', 'payment_success', 'payment_processing', 'payment_failed'], default: 'query_reply' },
+    // supplier_dispute: a query about an invoice's variance, written when a person sends it (services/supplierDisputes.js).
+    kind: { type: String, enum: ['query_reply', 'payment_success', 'payment_processing', 'payment_failed', 'supplier_dispute'], default: 'query_reply' },
     queryId: {
       type: Schema.Types.ObjectId,
       ref: 'VendorQuery',
@@ -550,6 +551,45 @@ outboxSchema.index({ queryId: 1 }, { name: 'queryId_unique_when_set', unique: tr
 outboxSchema.index({ dedupKey: 1 }, { name: 'dedupKey_unique_when_set', unique: true, partialFilterExpression: { dedupKey: { $exists: true } } });
 outboxSchema.index({ kind: 1, status: 1, createdAt: -1 });
 export const OutboxMessage = model('OutboxMessage', outboxSchema);
+
+// A query to a supplier about an invoice's variance (services/supplierDisputes.js):
+// the facts code worked out, the draft (by the model or the template), and what
+// people did with it. It never changes the invoice. One open (draft or sent) query
+// per invoice; when it is sent, the message is in the outbox (outboxMessageId).
+//   draft -> sending -> sent -> resolved      draft -> discarded
+const disputeSchema = new Schema(
+  {
+    invoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice', required: true, index: true },
+    invoiceNumber: { type: String, default: null },
+    facts: { type: Mixed, required: true }, // disputeFacts.js, as it was when drafted
+    // draft.body: the body paragraphs only. The greeting is stored; the sign-off and
+    // signature are added when it is sent, with the sender's name (disputeDraft.js).
+    to: { type: String, required: true }, // the supplier's address from our records
+    draft: {
+      subject: { type: String, required: true },
+      body: { type: String, required: true },
+      greeting: { type: String, default: null }, // code's: "Dear <supplier> accounts team,"
+      aiDrafted: { type: Boolean, required: true },
+      fallbackReason: { type: String, default: null },
+      editedBy: { type: Mixed, default: null }, // { id, name, at } of the last edit
+    },
+    status: { type: String, enum: ['draft', 'sending', 'sent', 'discarded', 'resolved'], default: 'draft', index: true },
+    // true while draft, sending or sent: the unique index allows one open query per invoice.
+    open: { type: Boolean, default: true },
+    version: { type: Number, default: 1 }, // compare-and-set for edits
+    createdBy: { id: String, name: String },
+    sentBy: { id: String, name: String },
+    sentAt: { type: Date, default: null },
+    outboxMessageId: { type: Schema.Types.ObjectId, ref: 'OutboxMessage', default: null },
+    sentEmail: { type: Mixed, default: null }, // { subject, text, replyTo }: exactly what was sent, with the sender's signature
+    delivery: { type: Mixed, default: null }, // { mode, intendedTo, deliveredTo, redirected, at }
+    discarded: { type: Mixed, default: null }, // { by, at, note }
+    resolution: { type: Mixed, default: null }, // { outcome, note, by, at }
+  },
+  { timestamps: true, minimize: false },
+);
+disputeSchema.index({ invoiceId: 1 }, { name: 'one_open_dispute_per_invoice', unique: true, partialFilterExpression: { open: true } });
+export const SupplierDispute = model('SupplierDispute', disputeSchema);
 
 /**
  * Bring the outbox's indexes up to date. Safe to run any number of times.

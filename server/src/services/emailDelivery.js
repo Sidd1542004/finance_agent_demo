@@ -39,12 +39,16 @@ export function createEmailDelivery({ appEnv = 'development', mode = 'outbox', t
             : 'Not production (or no email service): notices stay in the simulated outbox. Nothing is emailed.',
     }),
 
-    /** Deliver one message. Returns { mode, intendedTo, deliveredTo, redirected, id, at }. */
-    async deliver({ to, subject, text }) {
+    /**
+     * Deliver one message. Returns { mode, intendedTo, deliveredTo, redirected, replyTo, id, at }.
+     * replyTo (optional): where the recipient's reply goes, in every mode.
+     */
+    async deliver({ to, subject, text, replyTo = null }) {
+      const reply = replyTo ? { replyTo } : {};
       const at = new Date().toISOString();
       if (current === 'live') {
-        const r = await mailer.send({ to: [to], subject, text, html: `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>` });
-        return { mode: current, intendedTo: to, deliveredTo: to, redirected: false, id: r?.id ?? null, at };
+        const r = await mailer.send({ to: [to], subject, text, html: `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`, ...reply });
+        return { mode: current, intendedTo: to, deliveredTo: to, redirected: false, replyTo, id: r?.id ?? null, at };
       }
       if (current === 'test_recipient') {
         const body = `TEST MESSAGE. In production this would have gone to ${to}.\n\n${text}`;
@@ -53,10 +57,11 @@ export function createEmailDelivery({ appEnv = 'development', mode = 'outbox', t
           subject: `[TEST, for ${to}] ${subject}`,
           text: body,
           html: `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(body)}</pre>`,
+          ...reply,
         });
-        return { mode: current, intendedTo: to, deliveredTo: testRecipient, redirected: true, id: r?.id ?? null, at };
+        return { mode: current, intendedTo: to, deliveredTo: testRecipient, redirected: true, replyTo, id: r?.id ?? null, at };
       }
-      return { mode: current, intendedTo: to, deliveredTo: null, redirected: true, id: null, at };
+      return { mode: current, intendedTo: to, deliveredTo: null, redirected: true, replyTo, id: null, at };
     },
   };
 }

@@ -87,7 +87,8 @@ export function createPaymentNotices({ delivery, companyName, timeZone }) {
   async function loadDraft(id) {
     if (!mongoose.isValidObjectId(id)) throw new HttpError(404, 'That message does not exist.');
     const msg = await OutboxMessage.findById(id).lean();
-    if (!msg || msg.kind === 'query_reply') throw new HttpError(404, 'That message does not exist.');
+    // Payment notices only: replies and supplier queries have their own flows.
+    if (!msg || !NOTICE_KINDS.includes(msg.kind)) throw new HttpError(404, 'That message does not exist.');
     return msg;
   }
 

@@ -160,6 +160,9 @@ export const config = {
     mode: ['live', 'outbox'].includes(String(process.env.SUPPLIER_EMAIL_MODE || '').toLowerCase()) ? process.env.SUPPLIER_EMAIL_MODE.toLowerCase() : 'outbox',
     testRecipient: (process.env.TEST_EMAIL_RECIPIENT || '').trim(),
     from: process.env.SUPPLIER_EMAIL_FROM || process.env.ALERT_FROM || 'Finance Operations Agent <onboarding@resend.dev>',
+    // Where a supplier's reply to a query should go (Reply-To). Optional: otherwise the
+    // connected invoice mailbox's address, if there is one (services/supplierDisputes.js).
+    replyTo: (process.env.AP_REPLY_TO || '').trim(),
   },
 
   // Earlier typed-name role lists. Replaced by user accounts and roles; read
