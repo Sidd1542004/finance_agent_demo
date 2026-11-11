@@ -186,6 +186,9 @@ export const config = {
     emailMinConfidence: num(process.env.MIN_EMAIL_CONFIDENCE, 0.8), // below this, a person reviews a supplier email
     gstRatePct: 10, // Australian GST
     roundingTolerance: 0.05, // dollars allowed for rounding differences
+    // Goods invoiced against a PO with no delivery slip (goods receipt) go to Needs Review and cannot be
+    // approved (matching.js). An administrator can switch it off in Settings (services/policySettings.js).
+    requireDeliverySlip: true,
   },
 
   // Automatic invoice ingestion from a mailbox (see docs/ingestion.md). Off

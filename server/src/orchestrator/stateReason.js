@@ -19,6 +19,11 @@ import { AWAITING_DECISION } from '../agent/finance/lifecycle.js';
 import { todayIso } from '../agent/finance/due.js';
 import { hasRole } from '../auth/roles.js';
 
+// What a blocking, unconfirmed check means, in words (lifecycle.js blockingUnverified).
+const UNCONFIRMED = Object.freeze({
+  quantity_match: 'No delivery slip (goods receipt) is recorded for the purchase order, so delivery is not confirmed and it cannot be approved yet.',
+});
+
 export const STATUS_LABEL = Object.freeze({
   received: 'Received',
   processing: 'Processing',
@@ -165,6 +170,8 @@ export function stateReason(invoice, { payment = null, history = [], viewer = nu
 
   // Failed checks: open while the invoice awaits a decision; overridden once a person approved it.
   const failed = (invoice.checks || []).filter((c) => c.status === 'fail').map((c) => c.id);
+  // Checks that could not be confirmed and block approval until they can (a missing delivery slip).
+  const unconfirmed = (invoice.checks || []).filter((c) => c.status === 'unverified' && c.blocking === true).map((c) => c.id);
   const ids = failed.length ? failed : invoice.failedChecks || [];
   const decided = Boolean(approval) && !AWAITING_DECISION.includes(status);
   const openChecks = decided ? [] : [...ids];
@@ -193,6 +200,7 @@ export function stateReason(invoice, { payment = null, history = [], viewer = nu
   if (AWAITING_DECISION.includes(status)) {
     if (status === 'on_hold') blockers.push('It is on hold until a person releases it.');
     if (openChecks.length) blockers.push(`${openChecks.length} failed check${openChecks.length === 1 ? '' : 's'} need a person's decision: ${openChecks.join(', ')}.`);
+    for (const id of unconfirmed) blockers.push(UNCONFIRMED[id] || `${id} could not be confirmed, so it cannot be approved yet.`);
   } else if (status === 'approved' && pay.state === 'none') blockers.push('No payment is scheduled.');
   else if (pay.state === 'queued' && manual(pay)) blockers.push('No payer has recorded the cheque payment yet.');
   else if (pay.state === 'queued') blockers.push('The scheduled payment has not been submitted yet.');
@@ -204,8 +212,16 @@ export function stateReason(invoice, { payment = null, history = [], viewer = nu
   const steps = [];
   const add = (action, role, words) => steps.push({ action, role, text: words, yours: viewer ? hasRole(viewer, role) : null });
   if (status === 'needs_review' || status === 'under_review') {
+    if (unconfirmed.includes('quantity_match'))
+      add('rerun_after_receipt', 'reviewer', 'Once the delivery slip (goods receipt) is in the accounting system, process the invoice again.');
     if (status === 'needs_review') add('correct', 'reviewer', 'Correct any fields read wrongly, link the purchase order, or ask the supplier for a corrected invoice.');
-    add('decide', 'approver', 'Review the failed checks on the invoice screen, then approve, approve the received quantity only, or reject it.');
+    add(
+      'decide',
+      'approver',
+      unconfirmed.length
+        ? 'Approval waits until delivery is confirmed; then review the checks on the invoice screen and approve or reject it.'
+        : 'Review the failed checks on the invoice screen, then approve, approve the received quantity only, or reject it.',
+    );
   } else if (status === 'on_hold') {
     add('review_hold', 'reviewer', 'Read the hold note on the invoice screen and process it again or ask the supplier for a corrected invoice.');
     add('decide', 'approver', 'Once the reason for the hold is resolved, approve, approve the received quantity only, or reject it.');
@@ -235,6 +251,7 @@ export function stateReason(invoice, { payment = null, history = [], viewer = nu
     statusLabel: STATUS_LABEL[status] || status,
     events,
     openChecks,
+    unconfirmedChecks: AWAITING_DECISION.includes(status) ? unconfirmed : [],
     overriddenChecks,
     payment: pay,
     overdueCause,

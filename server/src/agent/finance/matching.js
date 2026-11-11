@@ -12,7 +12,9 @@
 //   items     20  share of invoice value on lines that match a PO line
 //                 (by item code, or by description words when there is no code)
 //   quantity  20  share of invoice value on matched lines whose quantity is
-//                 within what remains on the PO and what was received
+//                 within what remains on the PO and what was received; a
+//                 goods line with no delivery slip recorded counts half
+//                 (policy.requireDeliverySlip, on unless set off)
 //   price     20  share of invoice value on matched lines whose unit price is
 //                 within the price tolerance of the PO price
 //   amounts   10  half for the invoice's own sums adding up, half for the
@@ -23,6 +25,13 @@
 // The score decides whether an invoice is ELIGIBLE FOR APPROVAL REVIEW. It never
 // approves anything. Must-pass checks (duplicate, arithmetic, quantity beyond
 // what was received, ...) are separate and are not averaged away by the score.
+//
+// DELIVERY SLIPS. A goods line is confirmed by a goods receipt (delivery slip)
+// for its PO. With policy.requireDeliverySlip on (the default), goods invoiced
+// against a PO with no receipt make quantity_match 'unverified' and blocking:
+// the invoice goes to Needs Review and cannot be approved until a receipt is
+// recorded. Off: the old behaviour (pass, with a "not checked" note). PO lines
+// with kind 'service' expect no receipt.
 
 import { cents, isNum, normaliseAbn, namesEqual } from './rules.js';
 import { fmtMoney } from './validation.js';
@@ -140,6 +149,7 @@ function supplierScore(extracted, vendor, po) {
  * @param vendor          supplier record or null
  * @param po              the purchase order, or null when none was identified
  * @param received        { SKU: qty received } or null when no goods receipt exists for the PO
+ *                        (PO lines with kind 'service' expect none)
  * @param invoicedBefore  { SKU: qty } already billed against this PO by earlier invoices
  * @param taxStatus       status of the tax_charged check: 'pass' | 'unverified' | 'fail'
  * @param arithmeticOk    whether the invoice's own sums add up
@@ -153,10 +163,15 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
   const lines = e.lines || [];
   const pairs = po ? pairLines(lines, po.lines) : lines.map((line) => ({ line, poLine: null, how: null }));
 
+  const requireSlip = policy.requireDeliverySlip !== false;
+  const isService = (poLine) => poLine?.kind === 'service';
   const lineMatches = pairs.map(({ line, poLine, how, similarity }) => {
     const key = poLine ? skuKey(poLine.sku) : null;
     const before = poLine ? Number(invoicedBefore[key] || 0) : null;
-    const qtyReceived = poLine && received ? Number(received[key] || 0) : null;
+    // A service line expects no delivery slip, so a receipt's missing line is not "received 0".
+    const qtyReceived = poLine && received && !isService(poLine) ? Number(received[key] || 0) : null;
+    // Goods with no delivery slip recorded for the PO: delivery is not confirmed.
+    const unconfirmed = Boolean(poLine) && !isService(poLine) && received === null;
     const remainingOrdered = poLine ? poLine.qty - before : null;
     const remainingReceived = qtyReceived === null ? null : qtyReceived - before;
     const issues = [];
@@ -201,6 +216,8 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
       onPo: Boolean(poLine),
       qtyOk,
       priceOk,
+      kind: poLine ? (isService(poLine) ? 'service' : 'goods') : null,
+      receiptUnconfirmed: unconfirmed,
       issues,
       _value: lineValue(line),
     };
@@ -209,6 +226,10 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
   // ----- score -----
   const totalValue = lineMatches.reduce((s, l) => s + l._value, 0) || 1;
   const share = (pred) => lineMatches.filter(pred).reduce((s, l) => s + l._value, 0) / totalValue;
+  // Goods within the PO but with no delivery slip: counted half while the setting requires slips.
+  const slipMissing = requireSlip && Boolean(po) && lineMatches.some((l) => l.onPo && l.receiptUnconfirmed);
+  const qtyCredit = (l) => (!l.onPo || !l.qtyOk ? 0 : requireSlip && l.receiptUnconfirmed ? 0.5 : 1);
+  const credited = lineMatches.reduce((s, l) => s + qtyCredit(l) * l._value, 0) / totalValue;
   const sup = supplierScore(e, vendor, po);
   const atPoPrices = lineMatches.filter((l) => l.onPo && isNum(l.qtyInvoiced)).reduce((s, l) => s + l.qtyInvoiced * l.pricePo, 0);
   const subtotalAgrees =
@@ -220,8 +241,10 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
       detail: po ? `${lineMatches.filter((l) => l.onPo).length} of ${lineMatches.length} invoice line(s) are on ${po.poNumber}.` : 'No purchase order to compare with.',
     },
     quantity: {
-      value: po ? share((l) => l.onPo && l.qtyOk) : 0,
-      detail: po ? `${lineMatches.filter((l) => l.qtyOk).length} of ${lineMatches.length} line(s) are within what was ordered and received.` : 'No purchase order to compare with.',
+      value: po ? credited : 0,
+      detail: po
+        ? `${lineMatches.filter((l) => l.qtyOk).length} of ${lineMatches.length} line(s) are within what was ordered and received.${slipMissing ? ' No delivery slip is recorded, so those goods count half.' : ''}`
+        : 'No purchase order to compare with.',
     },
     price: {
       value: po ? share((l) => l.onPo && l.priceOk) : 0,
@@ -249,7 +272,7 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
 
   // ----- checks -----
   const checks = [];
-  const add = (id, label, status, detail, severity) => checks.push({ id, label, status, detail, severity });
+  const add = (id, label, status, detail, severity, extra = {}) => checks.push({ id, label, status, detail, severity, ...extra });
   const priceIssues = lineMatches.flatMap((l) => l.issues.filter((i) => /each, the PO says|is not on /.test(i)));
   const qtyIssues = lineMatches.flatMap((l) => l.issues.filter((i) => /invoiced \d|no quantity|only .* remain/.test(i)));
   if (po) {
@@ -268,17 +291,30 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
       priceIssues.length ? priceIssues.join(' ') : `Every item is on ${po.poNumber} at the agreed price (within ${tolPct}%).`,
       'hold',
     );
-    add(
-      'quantity_match',
-      'Quantities match what was ordered and received',
-      qtyIssues.length ? 'fail' : 'pass',
-      qtyIssues.length
-        ? qtyIssues.join(' ')
-        : received === null
+    const goodsOnPo = lineMatches.some((l) => l.onPo && l.kind === 'goods');
+    if (qtyIssues.length) add('quantity_match', 'Quantities match what was ordered and received', 'fail', qtyIssues.join(' '), 'hold');
+    else if (slipMissing)
+      // Not a failure (nothing is over-invoiced) but not confirmed either: blocking, so it goes to a person.
+      add(
+        'quantity_match',
+        'Quantities match what was ordered and received',
+        'unverified',
+        `No delivery slip (goods receipt) is recorded for ${po.poNumber}, so delivery could not be confirmed.`,
+        'review',
+        { blocking: true },
+      );
+    else
+      add(
+        'quantity_match',
+        'Quantities match what was ordered and received',
+        'pass',
+        received === null && goodsOnPo
           ? `Within the quantities on ${po.poNumber}. No goods receipt is recorded yet, so receipt was not checked.`
-          : 'Nothing is invoiced beyond what was ordered and received.',
-      'hold',
-    );
+          : received === null
+            ? `Within the quantities on ${po.poNumber}. Services only: no delivery slip is expected.`
+            : 'Nothing is invoiced beyond what was ordered and received.',
+        'hold',
+      );
   } else {
     add(
       'po_found',
@@ -328,7 +364,7 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
     if (!l.onPo) continue;
     const rem = [
       `ordered ${l.qtyOrdered}`,
-      l.qtyReceived !== null ? `received ${l.qtyReceived}` : 'no receipt',
+      l.qtyReceived !== null ? `received ${l.qtyReceived}` : l.kind === 'service' ? 'service, no receipt expected' : 'no receipt',
       l.qtyInvoicedBefore ? `already invoiced ${l.qtyInvoicedBefore}` : null,
     ]
       .filter(Boolean)
@@ -373,7 +409,8 @@ export function matchToPo({ extracted: e, vendor, po, received = null, invoicedB
 
   return {
     lineMatches: lineMatches.map(({ _value, ...rest }) => rest),
-    score: { total, threshold, eligible: total >= threshold, components },
+    // Never eligible while delivery is unconfirmed, whatever the threshold.
+    score: { total, threshold, eligible: total >= threshold && !slipMissing, components },
     checks,
     comparison: rows,
     po: po ? { poNumber: po.poNumber, vendorName: po.vendorName, vendorAbn: po.vendorAbn } : null,
@@ -397,7 +434,17 @@ export function suggestPurchaseOrders({ extracted: e, vendor, vendorBy = vendor 
   const who = e.vendorName ? `"${e.vendorName}"` : 'the supplier on the invoice';
   const out = [];
   for (const po of pool) {
-    const r = matchToPo({ extracted: e, vendor, po, received: null, invoicedBefore: {}, taxStatus: 'unverified', arithmeticOk: true, policy });
+    // A provisional score before goods received are looked at: the delivery-slip rule does not apply here.
+    const r = matchToPo({
+      extracted: e,
+      vendor,
+      po,
+      received: null,
+      invoicedBefore: {},
+      taxStatus: 'unverified',
+      arithmeticOk: true,
+      policy: { ...policy, requireDeliverySlip: false },
+    });
     // Items must match: a PO is never suggested on the amount alone.
     const items = r.score.components.find((c) => c.id === 'items');
     if (items.value === 0) continue;

@@ -68,9 +68,28 @@ export const purchaseOrders = [
     raisedOn: '2026-09-22',
     lines: [{ sku: 'PAL-STD-1200', description: 'Standard timber pallet 1200 x 1000', qty: 20, unitPrice: 38.5 }],
   },
+  // Goods with NO goods receipt (delivery slip) on purpose: invoice HOS-10560
+  // shows that goods cannot be approved until delivery is confirmed.
+  {
+    poNumber: 'PO-2046',
+    vendorAbn: HARBOUR.abn,
+    vendorName: HARBOUR.name,
+    raisedOn: '2026-09-24',
+    lines: [{ sku: 'WBD-1200-900', description: 'Whiteboard 1200x900', qty: 10, unitPrice: 165.0, kind: 'goods' }],
+  },
+  // A service: no delivery slip is expected (kind 'service'), so none is seeded.
+  // Invoice BG-2026-0977 shows that the delivery-slip rule does not apply.
+  {
+    poNumber: 'PO-2047',
+    vendorAbn: BLUEGUM.abn,
+    vendorName: BLUEGUM.name,
+    raisedOn: '2026-09-26',
+    lines: [{ sku: 'SUP-NET-01', description: 'Network configuration, per hour', qty: 8, unitPrice: 140.0, kind: 'service' }],
+  },
 ];
 
 // Everything was delivered in full except PO-2042, where 10 of 12 pallets arrived.
+// PO-2046 has no receipt on purpose (see above); PO-2047 is a service and needs none.
 export const goodsReceipts = [
   {
     poNumber: 'PO-2041',
@@ -109,8 +128,9 @@ export const goodsReceipts = [
 ];
 
 // Sample invoices, one per situation the agent has to handle.
-// `expect` is the status the agent should leave the invoice in, and the checks
-// that should fail; the tests check it. The agent never approves: a clean
+// `expect` is the status the agent should leave the invoice in, the checks
+// that should fail, and (`blocking`, when any) the checks that could not be
+// confirmed and block approval without failing; the tests check it. The agent never approves: a clean
 // invoice ends as "under_review" (eligible for approval, waiting for a person).
 export const sampleInvoices = [
   {
@@ -210,6 +230,30 @@ export const sampleInvoices = [
     dueDate: '1 Nov 2026',
     poNumber: null,
     lines: [{ sku: 'SUP-HR-02', description: 'On-site support, per hour', qty: 6, unitPrice: 140.0 }],
+  },
+  {
+    id: 'no-delivery-slip',
+    title: 'No delivery slip yet',
+    hint: 'Matches PO-2046 exactly, but no delivery slip (goods receipt) is recorded for it: it is missing on purpose, to show that goods cannot be approved until delivery is confirmed. Needs Review, not eligible.',
+    expect: { outcome: 'needs_review', failed: [], blocking: ['quantity_match'] },
+    vendor: HARBOUR,
+    invoiceNumber: 'HOS-10560',
+    invoiceDate: '3 Oct 2026',
+    dueDate: '2 Nov 2026',
+    poNumber: 'PO-2046',
+    lines: [{ sku: 'WBD-1200-900', description: 'Whiteboard 1200x900', qty: 10, unitPrice: 165.0 }],
+  },
+  {
+    id: 'service-no-slip',
+    title: 'Service, no slip needed',
+    hint: 'Network configuration hours against PO-2047, a service purchase order: no delivery slip is expected, so it is eligible for approval without one.',
+    expect: { outcome: 'under_review', failed: [] },
+    vendor: BLUEGUM,
+    invoiceNumber: 'BG-2026-0977',
+    invoiceDate: '5 Oct 2026',
+    dueDate: '4 Nov 2026',
+    poNumber: 'PO-2047',
+    lines: [{ sku: 'SUP-NET-01', description: 'Network configuration, per hour', qty: 8, unitPrice: 140.0 }],
   },
 ];
 

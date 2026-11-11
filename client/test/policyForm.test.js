@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toDisplay, fromDisplay, displayRange, formatValue, valueProblem, changedValues, checkedAtText } from '../src/policyForm.js';
+import { toDisplay, fromDisplay, displayRange, formatValue, valueProblem, changedValues, checkedAtText, isSwitch } from '../src/policyForm.js';
 
 const match = { key: 'matchThreshold', label: 'Match score', min: 50, max: 100, step: 1, format: 'percent', value: 99, default: 99 };
 const confidence = { key: 'minConfidence', label: 'Reading confidence', min: 0.5, max: 1, step: 0.01, format: 'fraction', value: 0.99, default: 0.99 };
@@ -54,4 +54,16 @@ test('an invoice run says which policy it was checked against', () => {
   assert.equal(checkedAtText({ matchThreshold: 99, priceTolerancePct: 2, confidenceFloor: 99, version: 3 }), 'Checked at 99% match threshold (policy v3)');
   assert.equal(checkedAtText({ matchThreshold: 95 }), 'Checked at 95% match threshold');
   assert.equal(checkedAtText(null), null, 'runs from before snapshots were kept');
+});
+
+test('the delivery-slip switch: shown as On or Off, only true or false accepted, sent only when flipped', () => {
+  const slip = { key: 'requireDeliverySlip', type: 'switch', label: 'Require delivery slip for goods', value: true, default: true };
+  assert.equal(isSwitch(slip), true);
+  assert.equal(isSwitch(match), false);
+  assert.equal(formatValue(slip, true), 'On');
+  assert.equal(formatValue(slip, false), 'Off');
+  assert.equal(valueProblem(slip, false), null);
+  assert.equal(valueProblem(slip, 'off'), 'Require delivery slip for goods must be on or off.');
+  assert.deepEqual(changedValues([match, slip], { matchThreshold: 99, requireDeliverySlip: true }), {});
+  assert.deepEqual(changedValues([match, slip], { matchThreshold: 99, requireDeliverySlip: false }), { requireDeliverySlip: false });
 });

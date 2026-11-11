@@ -1,4 +1,4 @@
-// The agent's adjustable policy: the Settings screen's three sliders.
+// The agent's adjustable policy: the Settings screen's three sliders and one switch.
 //
 // ONE PolicySettings document in MongoDB (_id 'policy'). The environment's
 // values (MATCH_THRESHOLD, PRICE_TOLERANCE_PCT, MIN_CONFIDENCE) are only the
@@ -17,6 +17,8 @@
 //
 // None of these values approves anything, and none can switch off a mandatory
 // check: ai_reader_unavailable, duplicates, arithmetic and the rest still block.
+// The one switch, requireDeliverySlip, only decides whether goods with no
+// delivery slip block approval; off, they are still marked as not checked.
 
 import { config } from '../config.js';
 import { PolicySettings } from '../models/index.js';
@@ -27,7 +29,8 @@ import { sampleLedger } from '../integrations/sampleLedger.js';
 export const POLICY_ID = 'policy';
 export const REFRESH_MS = 5000;
 
-// All three are percentages. confidenceFloor 99 is config.policy.minConfidence 0.99.
+// The first three are percentages (confidenceFloor 99 is config.policy.minConfidence 0.99);
+// requireDeliverySlip is a switch (type 'switch'), on by default.
 export const POLICY_FIELDS = Object.freeze([
   {
     key: 'matchThreshold',
@@ -53,6 +56,12 @@ export const POLICY_FIELDS = Object.freeze([
     max: 100,
     step: 1,
   },
+  {
+    key: 'requireDeliverySlip',
+    type: 'switch',
+    label: 'Require delivery slip for goods',
+    help: 'On: goods invoiced against a purchase order with no delivery slip (goods receipt) go to Needs Review and cannot be approved. Off: they are only marked as not checked. Service lines never need one.',
+  },
 ]);
 const KEYS = POLICY_FIELDS.map((f) => f.key);
 const byKey = Object.fromEntries(POLICY_FIELDS.map((f) => [f.key, f]));
@@ -66,6 +75,7 @@ const ENV_DEFAULTS = Object.freeze({
   matchThreshold: clampTo(byKey.matchThreshold, config.policy.matchThreshold),
   priceTolerancePct: clampTo(byKey.priceTolerancePct, config.policy.priceTolerancePct),
   confidenceFloor: clampTo(byKey.confidenceFloor, config.policy.minConfidence * 100),
+  requireDeliverySlip: config.policy.requireDeliverySlip !== false,
 });
 export const policyDefaults = () => ({ ...ENV_DEFAULTS });
 
@@ -73,6 +83,7 @@ export const policyDefaults = () => ({ ...ENV_DEFAULTS });
 export function valueProblem(key, value) {
   const f = byKey[key];
   if (!f) return `"${key}" is not a policy setting.`;
+  if (f.type === 'switch') return typeof value === 'boolean' ? null : `${f.label} must be on or off (true or false).`;
   if (typeof value !== 'number' || !Number.isFinite(value)) return `${f.label} must be a number.`;
   if (value < f.min || value > f.max) return `${f.label} must be between ${f.min}% and ${f.max}%.`;
   const steps = (value - f.min) / f.step;
@@ -92,7 +103,7 @@ export function validatePolicyInput(body) {
   for (const [key, value] of Object.entries(rest)) {
     const p = valueProblem(key, value);
     if (p) problems.push(p);
-    else values[key] = roundTo(value, byKey[key].step);
+    else values[key] = byKey[key].type === 'switch' ? value : roundTo(value, byKey[key].step);
   }
   if (!Object.keys(rest).length) problems.push('Send at least one setting to change.');
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) problems.push('Send expectedVersion: the version of the settings you are changing.');
@@ -112,6 +123,7 @@ function apply(doc) {
   config.policy.matchThreshold = v.matchThreshold;
   config.policy.priceTolerancePct = v.priceTolerancePct;
   config.policy.minConfidence = Math.round(v.confidenceFloor) / 100; // whole percent: 90 -> 0.9
+  config.policy.requireDeliverySlip = v.requireDeliverySlip;
   current = { ...v, version: doc?.version ?? 0, updatedBy: doc?.updatedBy?.id ? { id: doc.updatedBy.id, name: doc.updatedBy.name } : null, updatedAt: doc?.updatedAt ?? null };
   loadedAt = Date.now();
   return current;
@@ -146,6 +158,7 @@ export const policySnapshot = () => ({
   matchThreshold: current.matchThreshold,
   priceTolerancePct: current.priceTolerancePct,
   confidenceFloor: current.confidenceFloor,
+  requireDeliverySlip: current.requireDeliverySlip,
   version: current.version,
 });
 
@@ -168,7 +181,7 @@ export async function getPolicySettings(actor) {
   return { ...view(), history };
 }
 
-const shown = (key, value) => `${value}%`;
+const shown = (key, value) => (byKey[key].type === 'switch' ? (value ? 'on' : 'off') : `${value}%`);
 
 /**
  * PUT /api/settings/policy: an administrator saves new values from the version

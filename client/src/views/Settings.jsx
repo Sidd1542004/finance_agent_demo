@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { when } from '../format.js';
 import { useBusy } from '../shared.jsx';
-import { toDisplay, fromDisplay, displayRange, formatValue, valueProblem, changedValues } from '../policyForm.js';
+import { toDisplay, fromDisplay, displayRange, formatValue, valueProblem, changedValues, isSwitch } from '../policyForm.js';
 
-// Administrators: the agent's policy, as three sliders. The server sends the
+// Administrators: the agent's policy, as three sliders and a switch. The server sends the
 // limits, checks every value again, saves only from the version shown here
 // (someone else's save first is refused), and logs every change with the
 // reason. None of these values approves anything, and none switches off a
@@ -57,9 +57,33 @@ export default function SettingsView({ onError, onNotice, onHealthChange }) {
             {view.updatedBy ? `, last changed by ${view.updatedBy.name}${view.updatedAt ? ` ${when(view.updatedAt)}` : ''}` : ''}.
           </p>
           {settings.map((s) => {
-            const range = displayRange(s);
             const id = `policy-${s.key}`;
             const moved = draft[s.key] !== s.value;
+            if (isSwitch(s))
+              return (
+                <div className="policy-row" key={s.key}>
+                  <div className="policy-head">
+                    <label className="field-label" htmlFor={id}>
+                      <input
+                        id={id}
+                        type="checkbox"
+                        checked={Boolean(draft[s.key])}
+                        disabled={working}
+                        aria-describedby={`${id}-help`}
+                        onChange={(e) => setDraft((d) => ({ ...d, [s.key]: e.target.checked }))}
+                      />{' '}
+                      {s.label}
+                    </label>
+                    <output htmlFor={id} className={`policy-value${moved ? ' policy-moved' : ''}`}>
+                      {formatValue(s, draft[s.key])}
+                    </output>
+                  </div>
+                  <p className="hint" id={`${id}-help`}>
+                    {s.help} Default: {formatValue(s, s.default)}.
+                  </p>
+                </div>
+              );
+            const range = displayRange(s);
             return (
               <div className="policy-row" key={s.key}>
                 <div className="policy-head">
